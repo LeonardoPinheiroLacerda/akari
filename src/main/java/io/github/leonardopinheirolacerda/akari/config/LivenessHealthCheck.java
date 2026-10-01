@@ -1,4 +1,4 @@
-package io.github.leonardopinheirolacerda.akari.config.healthcheck;
+package io.github.leonardopinheirolacerda.akari.config;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import org.eclipse.microprofile.health.HealthCheck;
@@ -13,7 +13,7 @@ import org.eclipse.microprofile.health.Liveness;
  */
 @Liveness
 @ApplicationScoped
-public class HealthCheckLivenessConfig implements HealthCheck {
+public class LivenessHealthCheck implements HealthCheck {
 
     /**
      * Responde sempre {@code UP} com o nome {@code "Liveness Health Check"} — se este método

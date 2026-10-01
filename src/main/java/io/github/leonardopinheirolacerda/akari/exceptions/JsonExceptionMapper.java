@@ -1,4 +1,4 @@
-package io.github.leonardopinheirolacerda.akari.exception.mapper;
+package io.github.leonardopinheirolacerda.akari.exceptions;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.exc.MismatchedInputException;

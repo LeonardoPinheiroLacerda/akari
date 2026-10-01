@@ -1,4 +1,4 @@
-package io.github.leonardopinheirolacerda.akari.exception;
+package io.github.leonardopinheirolacerda.akari.exceptions;
 
 import io.github.leonardopinheirolacerda.akari.api.dto.ApiErrorCode;
 
@@ -6,13 +6,13 @@ import io.github.leonardopinheirolacerda.akari.api.dto.ApiErrorCode;
  * Base das exceções da aplicação: cada subclasse fixa o status HTTP e o {@link ApiErrorCode} que
  * o cliente recebe.
  *
- * <p>Quando uma subclasse escapa de um resource, o {@code AkariExceptionMapper} responde com o
+ * <p>Quando uma subclasse escapa de um resource, o {@link AkariExceptionMapper} responde com o
  * {@code ApiError} do contrato usando {@link #status()}, {@link #code()} e a mensagem da
  * exceção — por isso a mensagem deve ser legível para o consumidor da API.
  */
 public abstract class AkariException extends RuntimeException {
 
-    private final int status;
+    private final Integer status;
     private final ApiErrorCode code;
 
     /**
@@ -24,7 +24,7 @@ public abstract class AkariException extends RuntimeException {
      *                consumidor da API
      * @param cause causa original, preservada para o log; {@code null} quando não há
      */
-    protected AkariException(int status, ApiErrorCode code, String message, Throwable cause) {
+    protected AkariException(Integer status, ApiErrorCode code, String message, Throwable cause) {
         super(message, cause);
         this.status = status;
         this.code = code;
@@ -33,7 +33,7 @@ public abstract class AkariException extends RuntimeException {
     /**
      * @return status HTTP da resposta de erro gerada por esta exceção
      */
-    public int status() {
+    public Integer status() {
         return status;
     }
 

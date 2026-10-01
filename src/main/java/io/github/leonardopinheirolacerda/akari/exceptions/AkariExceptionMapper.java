@@ -1,6 +1,5 @@
-package io.github.leonardopinheirolacerda.akari.exception.mapper;
+package io.github.leonardopinheirolacerda.akari.exceptions;
 
-import io.github.leonardopinheirolacerda.akari.exception.AkariException;
 import jakarta.ws.rs.core.Response;
 import org.jboss.resteasy.reactive.server.ServerExceptionMapper;
 

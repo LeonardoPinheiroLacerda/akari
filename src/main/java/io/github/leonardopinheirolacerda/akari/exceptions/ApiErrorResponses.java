@@ -1,4 +1,4 @@
-package io.github.leonardopinheirolacerda.akari.exception.mapper;
+package io.github.leonardopinheirolacerda.akari.exceptions;
 
 import io.github.leonardopinheirolacerda.akari.api.dto.ApiError;
 import io.github.leonardopinheirolacerda.akari.api.dto.ApiErrorCode;
@@ -33,7 +33,7 @@ final class ApiErrorResponses {
      * @param e exceção que originou o erro, usada só no log
      * @return resposta com o status informado e o {@code ApiError} no corpo
      */
-    static Response of(int status, ApiErrorCode code, String message, Throwable e) {
+    static Response of(Integer status, ApiErrorCode code, String message, Throwable e) {
         return of(status, code, message, List.of(), e);
     }
 
@@ -48,7 +48,12 @@ final class ApiErrorResponses {
      * @param e exceção que originou o erro, usada só no log
      * @return resposta com o status informado e o {@code ApiError} no corpo
      */
-    static Response of(int status, ApiErrorCode code, String message, List<ErrorDetail> details, Throwable e) {
+    static Response of(
+            Integer status,
+            ApiErrorCode code,
+            String message,
+            List<ErrorDetail> details,
+            Throwable e) {
         if (status >= 500) {
             LOG.error(e.getMessage(), e);
         } else {

@@ -1,4 +1,4 @@
-package io.github.leonardopinheirolacerda.akari.exception.mapper;
+package io.github.leonardopinheirolacerda.akari.exceptions;
 
 import io.github.leonardopinheirolacerda.akari.api.dto.ApiErrorCode;
 import io.github.leonardopinheirolacerda.akari.api.dto.ErrorDetail;
@@ -36,7 +36,13 @@ public class ConstraintViolationExceptionMapper {
                         .error(v.getMessage()))
                 .toList();
 
-        return ApiErrorResponses.of(400, ApiErrorCode.VALIDATION_ERROR, "Payload ou parâmetros inválidos", details, e);
+        return ApiErrorResponses.of(
+                400,
+                ApiErrorCode.VALIDATION_ERROR,
+                "Payload ou parâmetros inválidos",
+                details,
+                e
+        );
     }
 
     // O caminho vem como "método.argumento.campo...". Campo do body -> só os campos
@@ -46,11 +52,13 @@ public class ConstraintViolationExceptionMapper {
         String parameter = "";
 
         for (Path.Node node : path) {
-            if (node.getKind() == ElementKind.PARAMETER) {
+            final ElementKind kind = node.getKind();
+
+            if (kind == ElementKind.PARAMETER) {
                 parameter = node.getName();
                 continue;
             }
-            if (node.getKind() != ElementKind.PROPERTY && node.getKind() != ElementKind.CONTAINER_ELEMENT) {
+            if (kind != ElementKind.PROPERTY && kind != ElementKind.CONTAINER_ELEMENT) {
                 continue;
             }
             // O índice de "items[2].name" vem no nó seguinte ao da coleção (o de "name").
@@ -58,7 +66,7 @@ public class ConstraintViolationExceptionMapper {
                 final Object position = node.getIndex() != null ? node.getIndex() : node.getKey();
                 field.append('[').append(position == null ? "" : position).append(']');
             }
-            if (node.getKind() == ElementKind.PROPERTY) {
+            if (kind == ElementKind.PROPERTY) {
                 if (!field.isEmpty()) {
                     field.append('.');
                 }

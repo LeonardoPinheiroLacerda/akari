@@ -1,4 +1,4 @@
-package io.github.leonardopinheirolacerda.akari.exception.mapper;
+package io.github.leonardopinheirolacerda.akari.exceptions;
 
 import io.github.leonardopinheirolacerda.akari.api.dto.ApiErrorCode;
 import jakarta.ws.rs.core.Response;
@@ -23,6 +23,11 @@ public class UnexpectedExceptionMapper {
      */
     @ServerExceptionMapper
     public Response map(Throwable e) {
-        return ApiErrorResponses.of(500, ApiErrorCode.INTERNAL_ERROR, "Erro inesperado no servidor", e);
+        return ApiErrorResponses.of(
+                500,
+                ApiErrorCode.INTERNAL_ERROR,
+                "Erro inesperado no servidor",
+                e
+        );
     }
 }
