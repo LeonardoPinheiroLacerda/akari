@@ -44,7 +44,7 @@ If there are only unstaged changes, do **not** stage them automatically. Ask whi
 ### Subject
 
 - **Tipo** (obrigatório) — um dos permitidos abaixo.
-- **Escopo** (opcional, entre parênteses) — área afetada (`catalog`, `playback`, `exception`, `contract`, `skills`, `ci`). Omita quando a mudança for global.
+- **Escopo** (opcional, entre parênteses) — domínio ou parte afetada (`catalog`, `playback`, `exceptions`, `contract`, `skills`, `ci`). Omita quando a mudança for global.
 - **Descrição** — verbo no imperativo, minúscula, em português, sem ponto final. Limite ≤ 72 caracteres incluindo tipo/escopo.
 
 Verbos preferidos: `adiciona`, `remove`, `corrige`, `renomeia`, `move`, `extrai`, `atualiza`, `refatora`, `documenta`, `simplifica`, `padroniza`, `desabilita`.
@@ -84,13 +84,18 @@ Se a mudança combina tipos, escolha o que descreve o **efeito principal** e exp
 
 ## Como escolher o escopo
 
-O akari é um único módulo Maven; o escopo é a área do código, não o módulo.
+O akari é um único módulo, com pacotes por tipo de componente (`resources`, `services`,
+`models`, `mappers`, `clients`, `exceptions`, `config`). Uma funcionalidade costuma tocar vários
+desses pacotes ao mesmo tempo, então o escopo é o **domínio**, não o pacote.
 
-- Prefira o nome do pacote de primeiro nível em `io.github.leonardopinheirolacerda.akari` quando a mudança se restringe a ele: `catalog`, `playback`, `exception`, `config`.
+- Prefira o domínio afetado: `catalog`, `playback`, `cache`, `ingestion`, `settings`, `tmdb`, ...
+  — mesmo que a mudança passe pelo resource, service, model e mapper dele.
+- Use o nome do pacote só para mudança transversal, que não pertence a um domínio:
+  `exceptions`, `config`.
 - Use `contract` para mudanças no contrato OpenAPI (`src/main/resources/META-INF/openapi.yaml`).
 - Mudanças no `pom.xml` usam o tipo `build`, sem escopo (ou com o nome da dependência/plugin, se ajudar).
 - Use `skills` para mudanças em `.claude/skills/*`.
-- Omita o escopo quando a mudança atravessa várias áreas.
+- Omita o escopo quando a mudança atravessa vários domínios.
 
 ## Exemplos
 
@@ -99,8 +104,8 @@ O akari é um único módulo Maven; o escopo é a área do código, não o módu
 ```
 feat(catalog): adiciona listagem de pastas por provider
 
-- implementa listFolders do MediaFoldersApi com filtro por storageProviderId
-- adiciona findByProvider no MediaFolderRepository com paginação 0-based
+- implementa listFolders no MediaFoldersResource com filtro por storageProviderId
+- adiciona a consulta findByProvider no model MediaFolder, com paginação 0-based
 ```
 
 **Mudança no contrato:**
@@ -115,7 +120,7 @@ feat(contract): devolve o provider no corpo do PUT de config
 **Fix pontual:**
 
 ```
-fix(exception): corrige o campo das violações de validação
+fix(exceptions): corrige o campo das violações de validação
 
 - devolve o caminho do campo no body (config.password) em vez de argumento.campo
 - usa o nome do parâmetro quando a violação é de query ou path

@@ -1,6 +1,6 @@
 ---
 name: write-javadoc
-description: Escreve Javadoc em português para classes, interfaces, records, enums e métodos do projeto akari, seguindo o padrão hexagonal. Trigger em "documentar", "javadoc", "adicionar documentação", "documenta esse módulo", "escreve javadoc". Cobre argumentos, retornos e exceptions com o motivo pelo qual são lançados. Ao final, faz uma auditoria de cobertura.
+description: Escreve Javadoc em português para classes, interfaces, records, enums e métodos do projeto akari (resources, services, models, mappers, clients, exceptions, config). Trigger em "documentar", "javadoc", "adicionar documentação", "documenta esse pacote", "escreve javadoc". Cobre argumentos, retornos e exceptions com o motivo pelo qual são lançados. Ao final, faz uma auditoria de cobertura.
 ---
 
 # write-javadoc
@@ -26,65 +26,46 @@ Gera Javadoc em português para o código do akari. Foco: um dev que entra no pr
 
 | Tipo | Nível de classe | Membros |
 |---|---|---|
-| **Interface (port de entrada/saída)** | O que a port representa, quem chama, quem implementa | Cada método com `@param`/`@return`/`@throws` |
-| **Classe concreta (service/adapter/factory)** | Papel na arquitetura + fluxo resumido | Cada método público; construtor se tiver semântica não-óbvia |
-| **Record (DTO ou modelo de domínio)** | Contexto de uso + finalidade | `@param` por campo no Javadoc de classe |
+| **Service** | Domínio que cobre + regras principais | Cada método público: o que faz, `@Transactional` se escreve, exceções que lança |
+| **Model (entidade Panache)** | Que tabela mapeia + o conceito de negócio | Comentário curto por campo; cada consulta estática com `@param`/`@return` |
+| **Mapper (MapStruct)** | Que tipos converte (model ↔ DTO gerado, resposta de client → model) | Métodos com mapeamento não óbvio (`@Mapping`, conversão) |
+| **Record (resposta de client, parâmetros agrupados)** | Contexto de uso + finalidade | `@param` por campo no Javadoc de classe |
 | **Enum** | O que os valores representam no negócio | Métodos como qualquer classe |
 | **Utilitário estático** | Por que é estático (pura, sem estado) + quando usar | Cada `public static` completo |
 | **Anotação** | O que marcar, o que a marca implica, quem processa | (retenção/target não precisa) |
-| **Entidade JPA** | Que tabela, que a camada de negócio não vê essa classe | Comentários curtos nos campos (ex.: como o `config` é gravado) |
-| **REST Resource** | Que interface gerada implementa, tradução HTTP↔use case | Cada override: verbo + path, status de sucesso, exceções que viram 4xx/5xx |
+| **REST Resource** | Que interface gerada implementa, tradução HTTP ↔ service | Cada override: verbo + path, status de sucesso, exceções que viram 4xx/5xx |
 | **Exception / ExceptionMapper** | Quando é lançada e que status/código vira (`AkariException`) — ou que exceção o mapper traduz | O status e o `ApiErrorCode` devolvidos |
 | **REST Client (MicroProfile)** | Que serviço externo mapeia + como resolver URL | Cada método: endpoint chamado + entradas/saídas |
 
 ## Template por tipo
 
-### Interface / Port
+### Service
 
 ```java
 /**
- * <O que representa em uma frase>.
+ * Regras de <domínio>: <o que o service cobre em uma frase>.
  *
- * <p><Contexto: quem consome, quem implementa, alternativas se houver>
- */
-public interface XxxPort {
-
-    /**
-     * <O que faz em uma frase, focando o comportamento observável>.
-     *
-     * @param foo <significado + qualquer restrição>
-     * @return <o que vem + quando>
-     * @throws SomeException <condição exata que dispara>
-     */
-    ReturnType execute(ParamType foo);
-}
-```
-
-### Service / Adapter (impl)
-
-```java
-/**
- * Impl do {@link XxxUseCase}.
- *
- * <p>Fluxo: <passo 1> → <passo 2> → <passo 3>. <Mencione @Transactional se aplicável e por
- * quê.>
+ * <p><Regras não óbvias que valem para vários métodos, outros services ou clients que usa.>
  */
 @ApplicationScoped
-public class XxxService implements XxxUseCase {
+public class XxxService {
 
     /**
-     * <Resumo curto do fluxo, alinhado com a interface>.
+     * <O que a operação faz, focando o comportamento observável>.
      *
-     * @param foo <...>
-     * @return <...>
-     * @throws SpecificException <condição real disparada por este service>
+     * <p><Fluxo, se não for óbvio: passo 1 → passo 2. Mencione @Transactional e por quê.>
+     *
+     * @param id <significado + qualquer restrição>
+     * @return <o que vem + quando>
+     * @throws ResourceNotFoundException se <condição exata>
+     * @throws IntegrationException se <sistema externo> falhar ao <ação>
      */
-    @Override
-    public ReturnType execute(ParamType foo) { ... }
+    @Transactional
+    public Xxx update(Integer id, Xxx changes) { ... }
 }
 ```
 
-### Record (DTO ou domain model)
+### Record (resposta de client ou parâmetros agrupados)
 
 ```java
 /**
@@ -95,7 +76,7 @@ public class XxxService implements XxxUseCase {
  * @param field1 <o que é, restrições, quem preenche/quem lê>
  * @param field2 <o que é, restrições, quem preenche/quem lê>
  */
-public record XxxDto(FieldType1 field1, FieldType2 field2) {}
+public record TmdbMovieSearchResponse(FieldType1 field1, FieldType2 field2) {}
 ```
 
 ### Utilitário estático
@@ -132,9 +113,9 @@ repete anotações JAX-RS — só implementa os métodos.
 /**
  * Implementa {@link XxxApi} — endpoints de <domínio> em {@code /v1/base/path}.
  *
- * <p>Só traduz HTTP ↔ use case. Bean Validation dos DTOs gerados vira 400; exceções da
- * aplicação ({@code AkariException}) viram o status/código de cada uma pelos mappers de
- * {@code akari.exception.mapper}.
+ * <p>Só traduz HTTP ↔ service, convertendo com o {@link XxxMapper}. Bean Validation dos DTOs
+ * gerados vira 400; exceções da aplicação ({@code AkariException}) viram o status/código de
+ * cada uma pelos mappers do pacote {@code exceptions}.
  */
 public class XxxResource implements XxxApi {
 
@@ -157,7 +138,7 @@ public class XxxResource implements XxxApi {
  * REST Client (MicroProfile) que mapeia os endpoints do <serviço externo>.
  *
  * <p>URL base resolvida por {@code quarkus.rest-client.<key>.url}. Não faz retry nem
- * tradução de exceções — quem consome deve embrulhar (ex.: <NomeGateway>).
+ * tradução de exceções — o service que chama embrulha as falhas em {@code IntegrationException}.
  */
 @RegisterRestClient(configKey = "xxx")
 public interface XxxClient {
@@ -170,25 +151,33 @@ public interface XxxClient {
      */
     @POST
     @Path("/endpoint")
-    XxxResponseDto call(XxxRequestDto request);
+    XxxSearchResponse search(XxxSearchRequest request);
 }
 ```
 
-### Entidade JPA
+### Model (entidade Panache, active record)
 
 ```java
 /**
- * Entidade JPA/Panache mapeando <tabela>.
+ * <Conceito de negócio> persistido na tabela {@code xxx}.
  *
- * <p>Detalhe de infraestrutura. A camada de application NÃO conhece esta classe — só o
- * mapper toca aqui.
+ * <p><Invariantes ou relações não óbvias.> Usado direto pelos services; o resource o converte
+ * para o DTO do contrato via {@link XxxMapper}.
  */
 @Entity
 @Table(name = "xxx")
-public class XxxEntity extends PanacheEntityBase {
+public class Xxx extends PanacheEntityBase {
 
     /** <Semântica curta do campo, incluindo como é gravado se não for óbvio.> */
     public Type field;
+
+    /**
+     * <O que a consulta devolve, em termos de negócio>.
+     *
+     * @param path <significado + restrição>
+     * @return <o que vem>; vazio se <condição>
+     */
+    public static Optional<Xxx> findByPath(String path) { ... }
 }
 ```
 
@@ -219,34 +208,34 @@ for f in $(find src/main/java -name "*.java"); do
 done
 ```
 
-## Fluxo recomendado ao documentar uma área inteira
+## Fluxo recomendado ao documentar um domínio inteiro
 
-O akari é um único módulo Maven; uma "área" é um pacote de primeiro nível em
-`src/main/java/io/github/leonardopinheirolacerda/akari/` (ex.: `catalog`, `playback`,
-`exception`).
+O akari organiza o código por tipo de componente (`resources`, `services`, `models`, `mappers`,
+`clients`, `exceptions`, `config`), então um domínio (ex.: catálogo) está espalhado por vários
+pacotes: `MediaFolder` em `models`, `MediaFolderService` em `services`, `MediaFolderMapper` em
+`mappers`, `MediaFoldersResource` em `resources`.
 
-1. **Inventário**: `find src/main/java/io/github/leonardopinheirolacerda/akari/<area> -name "*.java" | sort`. Divide por camada (domain, application, infrastructure).
-2. **Tasks por camada**: TaskCreate uma por grupo, marcadas `in_progress` conforme ataca.
-3. **Ordem sugerida**:
-   - Domain (interfaces + models) — dá o vocabulário
-   - Application ports IN — descreve o contrato de negócio
-   - Application ports OUT — descreve o que o negócio pede da infra
-   - Application services + support — impls e helpers
-   - Infrastructure adapters — cola application ↔ mundo externo
-   - Infrastructure clients + DTOs — protocolo real
-   - Infrastructure persistence (entity, dataprovider, mapper)
-   - Infrastructure REST (resource, DTOs)
+1. **Inventário**: `find src/main/java -name "*.java" | grep -i <termo-do-dominio> | sort`
+   (ou o pacote inteiro, se a tarefa for por pacote).
+2. **Tasks por grupo**: TaskCreate uma por grupo, marcadas `in_progress` conforme ataca.
+3. **Ordem sugerida** — do vocabulário para as bordas:
+   - `models` — dá o vocabulário do domínio
+   - `services` — as regras de negócio
+   - `clients` — o protocolo dos sistemas externos
+   - `mappers` — as conversões
+   - `resources` — a borda HTTP
+   - `exceptions` / `config` — só se o domínio trouxe algo novo
 4. **Auditoria** ao final:
    ```bash
-   AREA=src/main/java/io/github/leonardopinheirolacerda/akari/<area>
+   DIR=src/main/java/io/github/leonardopinheirolacerda/akari
 
    # todo arquivo tem pelo menos um /**
-   find "$AREA" -name "*.java" | while read f; do
+   find "$DIR" -name "*.java" | while read f; do
      grep -q "^\s*/\*\*" "$f" || echo "MISSING: $f"
    done
 
    # arquivos com métodos públicos sem @param/@return/@throws
-   for f in $(find "$AREA" -name "*.java"); do
+   for f in $(find "$DIR" -name "*.java"); do
      n=$(grep -cE "^    public[a-zA-Z<> ]+\(" "$f")
      if [ "$n" -gt 0 ] && ! grep -qE "@param|@return|@throws" "$f"; then
        echo "MISSING tags: $f"
