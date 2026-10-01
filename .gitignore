@@ -45,6 +45,3 @@ nb-configuration.xml
 .certs/
 
 data/
-# venv do pipeline de contrato (tools/openapi-merge)
-.venv/
-__pycache__/
