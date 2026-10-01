@@ -1,0 +1,14 @@
+# Ambiente de PRODUÇÃO
+# Uso: docker compose up --build -d
+services:
+  akari:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: akari:prod
+
+    ports:
+      # HTTP
+      - "8080:8080"
+
+    restart: unless-stopped

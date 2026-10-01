@@ -1,0 +1,3597 @@
+openapi: 3.0.3
+
+info:
+  title: Akari API
+  version: 1.0.0
+  description: |
+    API do akari: catálogo de vídeos ingeridos de storage providers, metadata de anime (AniList +
+    TMDB), cache local e reprodução via HLS. Cada tag descreve uma área da API.
+
+    Convenções comuns a todos os endpoints:
+
+    - **Paginação** 0-based, com `size` padrão `12` e envelope `data` + `page`/`size`/
+      `totalElements`/`totalPages` (schema `Page`).
+    - **Erros** sempre com o corpo `ApiError`; o cliente chaveia o tratamento pelo `code`
+      (`ApiErrorCode`), nunca pelo texto de `message`.
+    - **Ids** inteiros (`int32`), exceto a sessão de playback (UUID). Um id de path que não é
+      numérico responde `404`.
+    - **Integrações**: chamadas à AniList e ao TMDB são cache-first; `forceRefresh=true` força a
+      busca upstream. Preferência obrigatória sem valor responde `503`.
+
+servers:
+  - url: /
+    description: Host onde o backend akari estiver rodando
+
+tags:
+  - name: StorageProviders
+    description: |
+      Storage providers cadastrados (MEGA etc.).
+
+      Cadastra e gerencia os provedores de armazenamento de onde vêm os vídeos. Tipos suportados:
+
+      - `MEGA` — remoto, acessado via rclone. Os arquivos são baixados para o cache local antes
+        do playback.
+      - `LOCAL` — diretório no disco do servidor, lido direto do caminho real, sem rclone e sem
+        cache.
+
+      Cada provider tem uma configuração tipada. Campos sensíveis (senhas) são obscurecidos via
+      rclone (`/core/obscure`) antes de persistir; `LOCAL` não tem campos sensíveis.
+
+      O payload de leitura **não** expõe o campo `config` — evita vazar credenciais mesmo
+      obscurecidas para clientes da API.
+  - name: Ingestion
+    description: |
+      Reconciliação subtree ↔ catalog por storage provider.
+
+      Reconcilia o subtree de um storage provider com o catalog e permite consultar/desingerir
+      subtrees. Não persiste estado próprio — só orquestra chamadas ao provider (via port) e ao
+      catalog (via port).
+
+      Ingestão é uma reconciliação do subtree com o catalog: pastas/arquivos já registrados são
+      preservados, novos são criados e os que não existem mais no provider são removidos do
+      catalog. O `rootPath` limita o subtree a processar; ausente ou vazio opera sobre a raiz
+      inteira do provider.
+  - name: MediaFolders
+    description: |
+      Pastas ingeridas do storage provider.
+
+      Expõe pastas (`MediaFolder`) e arquivos de vídeo (`VideoFile`) ingeridos a partir dos
+      storage providers. O catalog é agnóstico a metadata — enriquecimento (episódio, temporada,
+      thumbnail, etc.) fica nos módulos de metadata donos do binding `folderId → payload`.
+  - name: VideoFiles
+    description: Arquivos de vídeo dentro de uma pasta
+  - name: Cache
+    description: |
+      Fila e listagem do cache local de vídeo.
+
+      Gerencia o cache local de arquivos de vídeo: enfileira downloads de arquivos remotos
+      (resolvidos via storage provider) para o disco local, numa fila serial de 1 slot com
+      eviction LRU por espaço.
+
+      O acompanhamento de progresso em tempo real é feito por um stream SSE em
+      `/v1/cache/events` — **não modelado neste contrato** (o gerador `jaxrs-spec` não
+      descreve Server-Sent Events); é servido por um resource code-first.
+  - name: MediaProbes
+    description: |
+      Probe de metadados de mídia via ffprobe.
+
+      Extrai os metadados técnicos (container e streams) de um arquivo de vídeo disponível em
+      disco, executando `ffprobe` sob demanda: arquivos de provider `LOCAL` são lidos direto do
+      caminho real; os de provider remoto, do cache local depois de baixados. Stateless — nada é
+      persistido; cada chamada roda o probe.
+  - name: Playback
+    description: |
+      Sessões de reprodução de mídia (transcode HLS sob demanda).
+
+      Orquestra a reprodução de um arquivo de vídeo disponível em disco (provider `LOCAL`, lido
+      direto; ou provider remoto, já baixado no cache): inicia uma sessão de transcode sob demanda
+      para HLS, permite reposicionar (seek), serve a playlist `m3u8` gerada e recebe heartbeats do
+      cliente para saber se a sessão ainda está em uso.
+
+      O recurso central é a **sessão de playback**, identificada por um `sessionId` (UUID) gerado
+      ao iniciar o transcode. Os demais endpoints operam sobre essa sessão.
+  - name: AnilistSearch
+    description: |
+      Busca paginada de anime na AniList.
+
+      Expõe busca paginada de anime diretamente na AniList (query GraphQL `Page(page,
+      perPage).media(search, type: ANIME)`). Fluxo cache-first com SQLite interno; chamadas
+      upstream só quando o cache é frio ou `forceRefresh=true`.
+
+      Shape devolvido é o subset de `Media` sem `relations` — mantém o payload do search enxuto.
+      Consumidores que precisam da ficha completa (com relations) chamam o módulo
+      `animemetadata` passando o `anilistId` retornado aqui.
+
+      Paginação **0-based**, como no resto do akari — o módulo converte para a paginação
+      1-based da AniList.
+  - name: TmdbSearch
+    description: |
+      Busca paginada de filmes e séries no TMDB.
+
+      Expõe busca paginada no TMDB v3 — um endpoint por tipo de conteúdo (filme e série). Fluxo
+      cache-first com SQLite interno; chamadas upstream só quando o cache é frio ou
+      `forceRefresh=true`.
+
+      Cada item carrega os campos do resultado TMDB correspondente (`/3/search/movie` e
+      `/3/search/tv`), normalizados pelo módulo:
+
+      - nomes em camelCase (`original_title` → `originalTitle`) e `id` → `tmdbId`;
+      - `poster_path`/`backdrop_path` relativos viram URLs absolutas do CDN
+        (`posterUrl` em `w185`, `backdropUrl` em `original`);
+      - a paginação segue o padrão do akari — **0-based**, com `size` escolhido pelo cliente
+        (padrão `12`) e envelope `data`/`page`/`size`/`totalElements`/`totalPages`. O TMDB
+        pagina em blocos fixos de 20 e 1-based; o módulo busca as páginas upstream necessárias
+        e recorta a página pedida.
+
+      Consumidores que precisam da ficha completa (com temporadas, imagens, traduções) usam o
+      `animemetadata`.
+  - name: Anime
+    description: |
+      Metadata de anime (binding anime↔pasta, sync, curadoria).
+
+      Gerencia a metadata de anime (binding com pastas do catalog, sync AniList) e a camada de
+      enriquecimento TMDB (binding, overrides, file pairing). Dois eixos principais:
+
+      - **Anime** (base): binding anime↔pasta, fetch/sync AniList, curadoria manual (franchise
+        root), grafo de relações entre animes.
+      - **TMDB** (enriquecimento): binding TMDB↔anime, overrides manuais (título, sinopse,
+        poster/backdrop/logo), file pairing (temporada/episódio/thumbnail por vídeo).
+
+      O binding TMDB é opcional — anime funciona sem ele; só os campos `banner`/`logo` do
+      `AnimeView` ficam `null` sem TMDB + overrides.
+  - name: AnimeRelations
+    description: Relações (sequel/prequel/side story) entre animes
+  - name: AnimeTmdb
+    description: Binding TMDB e overrides do anime
+  - name: AnimeTmdbFilePairing
+    description: Pairing TMDB por arquivo de vídeo (temporada, episódio, thumbnail)
+  - name: Settings
+    description: |
+      Preferências do admin.
+
+      Expõe as preferências do admin (par `key`/`value`) para o portal listar, pesquisar por nome
+      e atualizar. Preferências marcadas como `secret` (ex.: `tmdb.api-key`) nunca têm o `value`
+      ecoado nas respostas — só o flag `configured` indica se há valor cadastrado.
+  - name: Notifications
+    description: |
+      Notificações de observabilidade.
+
+      Lista notificações de observabilidade, conta as não-lidas (badge) e marca como lidas
+      (individual/todas).
+
+      O push em tempo real é um stream SSE em `/v1/notifications/events` — **não modelado neste
+      contrato** (o gerador `jaxrs-spec` não descreve Server-Sent Events); servido por um resource
+      code-first.
+
+paths:
+
+  # ---------- storageprovider ----------
+  /v1/storage/providers:
+    get:
+      tags: [StorageProviders]
+      operationId: listStorageProviders
+      summary: Lista paginada de providers cadastrados
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/SizeParam'
+      responses:
+        '200':
+          $ref: '#/components/responses/StorageProviderPageOk'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      tags: [StorageProviders]
+      operationId: createStorageProvider
+      summary: Cadastra um novo provider
+      description: |
+        `config` é um mapa livre de chave-valor cujo schema **depende de `type`** (ex.:
+        `MEGA` exige `email` e `password`). A validação do schema tipado acontece dentro do
+        service; campos anotados `@Obscure` no record de config passam pelo rclone antes de
+        persistir.
+      requestBody:
+        $ref: '#/components/requestBodies/CreateStorageProviderRequestBody'
+      responses:
+        '201':
+          $ref: '#/components/responses/StorageProviderCreated'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '502':
+          $ref: '#/components/responses/BadGateway'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/storage/providers/{providerId}:
+    parameters:
+      - $ref: '#/components/parameters/StorageProviderIdPathParam'
+    get:
+      tags: [StorageProviders]
+      operationId: getStorageProviderById
+      summary: Busca um provider por id (sem expor `config`)
+      responses:
+        '200':
+          $ref: '#/components/responses/StorageProviderOk'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      tags: [StorageProviders]
+      operationId: deleteStorageProvider
+      summary: Remove o provider
+      responses:
+        '204':
+          $ref: '#/components/responses/StorageProviderDeleted'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/storage/providers/{providerId}/config:
+    parameters:
+      - $ref: '#/components/parameters/StorageProviderIdPathParam'
+    put:
+      tags: [StorageProviders]
+      operationId: updateStorageProviderConfig
+      summary: Substitui a configuração do provider
+      description: |
+        `type` é imutável — só a `config` pode ser trocada. O schema esperado do map
+        depende do `type` já persistido; campos `@Obscure` reobscurecidos antes de gravar.
+      requestBody:
+        $ref: '#/components/requestBodies/UpdateStorageProviderConfigRequestBody'
+      responses:
+        '200':
+          $ref: '#/components/responses/StorageProviderOk'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '502':
+          $ref: '#/components/responses/BadGateway'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/storage/providers/{providerId}/health:
+    parameters:
+      - $ref: '#/components/parameters/StorageProviderIdPathParam'
+    get:
+      tags: [StorageProviders]
+      operationId: checkStorageProviderHealth
+      summary: Testa conectividade real com o provider
+      description: |
+        Sempre `200` quando o teste roda — o resultado vem em `healthy`. `healthy: false`
+        cobre qualquer falha do lado do provider (config inválida, credenciais erradas, remoto
+        fora do ar; para `LOCAL`, `rootPath` que não é um diretório). `502` fica reservado para
+        falha do próprio rclone (rcd fora do ar), não do provider.
+      responses:
+        '200':
+          $ref: '#/components/responses/StorageProviderHealthOk'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '502':
+          $ref: '#/components/responses/BadGateway'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # ---------- ingestion ----------
+  /v1/ingestion/providers/{providerId}:
+    parameters:
+      - $ref: '#/components/parameters/StorageProviderIdPathParam'
+    post:
+      tags: [Ingestion]
+      operationId: ingestProviderSubtree
+      summary: Ingere um subtree do provider no catalog
+      description: |
+        Dispara a reconciliação do subtree indicado por `rootPath` (ou a raiz, se omitido)
+        com o catalog **em background** e retorna `202` imediatamente, sem aguardar o resultado.
+
+        Só são síncronos a validação do payload (`400`) e o precheck de existência do
+        provider (`404`). Todo o resto roda depois da resposta — inclusive a verificação de
+        que o `rootPath` existe no provider. O resultado é reportado pelo módulo
+        `notification`: uma notificação `INFO` ao concluir, ou `ERROR` se a ingestão falhar.
+
+        Etapas, em ordem:
+
+        1. Lista a árvore do subtree no provider.
+        2. Remove do catalog as pastas/arquivos do subtree que não existem mais no provider.
+        3. Cria as pastas novas (pai antes do filho) com o `mediaType` recebido — pastas já
+           registradas mantêm o `mediaType` que tinham — e os arquivos de vídeo novos.
+        4. Cada pasta com vídeos diretos é vinculada automaticamente, antes de a próxima ser
+           processada: busca na AniList → binding AniList → binding TMDB → pairing de episódios
+           (este só quando o TMDB mapeado é série). Uma falha numa dessas etapas vira notificação
+           `WARNING`/`ERROR` sem interromper a ingestão. O binding automático roda
+           independentemente do `mediaType`.
+
+        Um disparo para o mesmo `(providerId, rootPath)` enquanto outro está em andamento é
+        ignorado — a resposta é a mesma `202`, sem iniciar uma segunda ingestão.
+      requestBody:
+        $ref: '#/components/requestBodies/IngestSubtreeRequestBody'
+      responses:
+        '202':
+          $ref: '#/components/responses/IngestionStarted'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      tags: [Ingestion]
+      operationId: removeIngestedSubtree
+      summary: Remove um subtree ingerido do catalog
+      description: |
+        Remove do catalog as pastas/arquivos correspondentes ao subtree indicado por
+        `rootPath` (ou tudo do provider, se omitido), junto com os bindings de metadata
+        (`animemetadata`) dessas pastas. **Não** toca no provider upstream. Operação
+        idempotente — devolve `204` mesmo quando nada casa, inclusive se o `providerId` não
+        existir (não há precheck).
+      parameters:
+        - $ref: '#/components/parameters/RootPathParam'
+      responses:
+        '204':
+          $ref: '#/components/responses/IngestionRemoved'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/ingestion/providers/{providerId}/available-folders:
+    parameters:
+      - $ref: '#/components/parameters/StorageProviderIdPathParam'
+    get:
+      tags: [Ingestion]
+      operationId: listAvailableFolders
+      summary: Árvore de pastas do provider com status de ingestão
+      description: |
+        Devolve a árvore de diretórios do provider marcada com o status de ingestão de
+        cada nó (`ingested: true|false`). Consumido pelo frontend antes da ingestão para
+        o usuário escolher o que ingerir.
+
+        Responde `400` se o `rootPath` não existe no provider, `404` se o provider não existe e `502` se o rclone/provider falhar (rcd fora do ar, credenciais inválidas, timeout).
+      parameters:
+        - $ref: '#/components/parameters/RootPathParam'
+      responses:
+        '200':
+          $ref: '#/components/responses/AvailableFolderNodeOk'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '502':
+          $ref: '#/components/responses/BadGateway'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # ---------- catalog ----------
+  /v1/catalog/folders:
+    get:
+      tags: [MediaFolders]
+      operationId: listFolders
+      summary: Lista paginada de pastas com filtros AND
+      description: |
+        Filtros são AND — cada query param não-nulo restringe o resultado. `sort` aceita
+        specs `field[:asc|desc]` na whitelist `name`, `createdAt`, `hasFiles`.
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/SizeParam'
+        - $ref: '#/components/parameters/NameFilterParam'
+        - $ref: '#/components/parameters/MediaTypeFilterParam'
+        - $ref: '#/components/parameters/StorageProviderIdFilterParam'
+        - $ref: '#/components/parameters/ParentIdFilterParam'
+        - $ref: '#/components/parameters/HasFilesFilterParam'
+        - $ref: '#/components/parameters/SortParam'
+      responses:
+        '200':
+          $ref: '#/components/responses/MediaFolderPageOk'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      tags: [MediaFolders]
+      operationId: createFolder
+      summary: Cria uma nova pasta
+      description: |
+        A pasta pai é derivada do `path`: é a pasta do mesmo provider cujo path é o `path` sem o
+        último segmento. Se ela não estiver registrada, a nova pasta vira raiz (`parentId`
+        `null`) — não é erro.
+      requestBody:
+        $ref: '#/components/requestBodies/MediaFolderRequestBody'
+      responses:
+        '201':
+          $ref: '#/components/responses/MediaFolderCreated'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/catalog/folders/{folderId}:
+    parameters:
+      - $ref: '#/components/parameters/FolderIdPathParam'
+    get:
+      tags: [MediaFolders]
+      operationId: getFolder
+      summary: Busca uma pasta por id
+      responses:
+        '200':
+          $ref: '#/components/responses/MediaFolderOk'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    put:
+      tags: [MediaFolders]
+      operationId: updateFolder
+      summary: Substitui os campos mutáveis da pasta
+      description: |
+        Payload substituto (não patch). A pasta pai é redescoberta a partir do novo `path`
+        (raiz se não houver pai registrado); `createdAt` é preservado.
+      requestBody:
+        $ref: '#/components/requestBodies/MediaFolderRequestBody'
+      responses:
+        '200':
+          $ref: '#/components/responses/MediaFolderOk'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      tags: [MediaFolders]
+      operationId: deleteFolder
+      summary: Remove a pasta
+      description: Descendentes e arquivos abrigados descem pela cascata do DDL.
+      responses:
+        '204':
+          $ref: '#/components/responses/MediaFolderDeleted'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/catalog/video-files:
+    get:
+      tags: [VideoFiles]
+      operationId: listVideoFiles
+      summary: Lista paginada dos arquivos de uma pasta específica
+      description: |
+        Não há listagem de várias pastas ao mesmo tempo — o cliente sempre olha os arquivos de
+        uma pasta por vez. Se a pasta não existir ou não tiver arquivos, devolve página vazia
+        (não 404).
+      parameters:
+        - $ref: '#/components/parameters/FolderIdRequiredParam'
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/SizeParam'
+      responses:
+        '200':
+          $ref: '#/components/responses/VideoFilePageOk'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      tags: [VideoFiles]
+      operationId: createVideoFile
+      summary: Cria um novo arquivo
+      description: |
+        O `path` é derivado server-side a partir da pasta pai + `name`.
+
+        Responde `404` se o `folderId` informado não existe.
+      requestBody:
+        $ref: '#/components/requestBodies/VideoFileRequestBody'
+      responses:
+        '201':
+          $ref: '#/components/responses/VideoFileCreated'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/catalog/video-files/{fileId}:
+    parameters:
+      - $ref: '#/components/parameters/FileIdPathParam'
+    get:
+      tags: [VideoFiles]
+      operationId: getVideoFile
+      summary: Busca um arquivo por id
+      responses:
+        '200':
+          $ref: '#/components/responses/VideoFileOk'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    put:
+      tags: [VideoFiles]
+      operationId: updateVideoFile
+      summary: Substitui os campos mutáveis do arquivo
+      description: |
+        Se `folderId` mudar, o `path` é rederivado.
+
+        Responde `404` se o `fileId` ou o `folderId` informado não existe.
+      requestBody:
+        $ref: '#/components/requestBodies/VideoFileRequestBody'
+      responses:
+        '200':
+          $ref: '#/components/responses/VideoFileOk'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      tags: [VideoFiles]
+      operationId: deleteVideoFile
+      summary: Remove o arquivo
+      description: Sem cascata — arquivo é folha.
+      responses:
+        '204':
+          $ref: '#/components/responses/VideoFileDeleted'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # ---------- cache ----------
+  /v1/cache/items:
+    post:
+      tags: [Cache]
+      operationId: queueCacheDownload
+      summary: Enfileira o download de um arquivo de vídeo
+      description: |
+        Enfileira o arquivo criando uma linha `QUEUED`. O download acontece depois, dirigido pelo
+        scheduler interno.
+
+        Responde `400` (`BUSINESS_RULE_VIOLATION`) quando:
+        - o arquivo já tem linha `QUEUED`, `DOWNLOADING` ou `COMPLETED` — uma linha `FAILED`
+          pode ser reenfileirada;
+        - o arquivo pertence a um provider `LOCAL`, que é lido direto do disco e não usa cache.
+
+        Responde `404` se o `fileId` não existe no catalog.
+      requestBody:
+        $ref: '#/components/requestBodies/CacheQueueRequestBody'
+      responses:
+        '201':
+          $ref: '#/components/responses/CacheItemCreated'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    get:
+      tags: [Cache]
+      operationId: listCaches
+      summary: Lista todas as linhas do cache
+      description: Página de todas as linhas, ordenadas por ordem de enfileiramento.
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/SizeParam'
+      responses:
+        '200':
+          $ref: '#/components/responses/CacheItemPageOk'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/cache/items/pending:
+    get:
+      tags: [Cache]
+      operationId: listPendingCaches
+      summary: Lista as linhas pendentes do cache
+      description: Página das linhas com status diferente de `COMPLETED`.
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/SizeParam'
+      responses:
+        '200':
+          $ref: '#/components/responses/CacheItemPageOk'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # ---------- mediaprobe ----------
+  /v1/mediaprobe/files/{fileId}:
+    parameters:
+      - $ref: '#/components/parameters/FileIdPathParam'
+    get:
+      tags: [MediaProbes]
+      operationId: getMediaProbe
+      summary: Extrai o probe de um vídeo disponível em disco
+      description: |
+        Resolve o arquivo em disco (direto, para provider `LOCAL`; pelo cache, para provider
+        remoto) e roda `ffprobe -show_format -show_streams`. Responde `404` se o arquivo de
+        provider remoto ainda não terminou de baixar no cache, e `502` se o ffprobe falhar sobre
+        um arquivo existente.
+      responses:
+        '200':
+          $ref: '#/components/responses/MediaProbeOk'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '502':
+          $ref: '#/components/responses/BadGateway'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # ---------- playback ----------
+  /v1/playback/sessions:
+    post:
+      tags: [Playback]
+      operationId: startPlaybackSession
+      summary: Inicia uma sessão de transcode
+      description: |
+        Inicia o transcode da mídia (referenciada por `fileId`) com o perfil, faixa
+        de áudio e, opcionalmente, faixa de legenda escolhidos. Gera e devolve o `sessionId`
+        (UUID) que identifica a sessão, junto do endereço da playlist `m3u8`.
+
+        Responde `404` se o vídeo é de provider remoto e ainda não terminou de baixar no cache.
+      requestBody:
+        $ref: '#/components/requestBodies/StartPlaybackSessionRequestBody'
+      responses:
+        '201':
+          $ref: '#/components/responses/SessionCreated'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/playback/sessions/{sessionId}/seek:
+    parameters:
+      - $ref: '#/components/parameters/SessionIdPathParam'
+    post:
+      tags: [Playback]
+      operationId: seekPlaybackSession
+      summary: Reposiciona o transcode de uma sessão
+      description: |
+        Reposiciona o transcode de uma sessão já iniciada para o instante informado. A playlist
+        `m3u8` passa a refletir a nova posição. Responde `404` se a sessão não existe ou já
+        expirou.
+      requestBody:
+        $ref: '#/components/requestBodies/SeekRequestBody'
+      responses:
+        '200':
+          $ref: '#/components/responses/SessionOk'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/playback/sessions/{sessionId}/playlist.m3u8:
+    parameters:
+      - $ref: '#/components/parameters/SessionIdPathParam'
+    get:
+      tags: [Playback]
+      operationId: getPlaybackPlaylist
+      summary: Serve a playlist HLS da sessão
+      description: |
+        Devolve a playlist `m3u8` gerada pelo transcode da sessão, no content-type HLS. Quando o
+        transcode produz um master playlist (ABR com várias resoluções, ou legenda soft), é ele que
+        é devolvido — e ele referencia os variant playlists `stream_N.m3u8`. Caso contrário,
+        devolve a media playlist da rendition única. Responde `404` se a sessão não existe,
+        expirou ou ainda não produziu playlist.
+
+        O header `X-Playback-Heartbeat-Ttl-Seconds` informa, em segundos, o TTL do heartbeat que o
+        cliente deve respeitar — é o mesmo prazo devolvido no corpo do endpoint de heartbeat. O
+        valor é uma preferência do admin.
+
+        Todos os arquivos referenciados pela playlist (variant playlists, segmentos, init segment e
+        segmentos de legenda) são servidos pelo endpoint
+        `GET /v1/playback/sessions/{sessionId}/{file}`.
+      responses:
+        '200':
+          $ref: '#/components/responses/PlaylistOk'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/playback/sessions/{sessionId}/{file}:
+    parameters:
+      - $ref: '#/components/parameters/SessionIdPathParam'
+      - $ref: '#/components/parameters/MediaFilePathParam'
+    get:
+      tags: [Playback]
+      operationId: getPlaybackMediaFile
+      summary: Serve um arquivo HLS referenciado pela playlist da sessão
+      description: |
+        Devolve um arquivo referenciado pela playlist da sessão (ver `MediaFileName` para os nomes
+        aceitos). O content-type é escolhido pela extensão: `.ts` → `video/mp2t`; `.m4s` e
+        `init.mp4` → `video/mp4`; `.m3u8` → `application/vnd.apple.mpegurl`; `.vtt` → `text/vtt`.
+
+        Responde `404` se a sessão não existe, expirou, se o nome não corresponde a um arquivo
+        aceito, ou se o transcode ainda não o produziu — no caso de segmento ainda não gerado, o
+        player deve retentar ao alcançar a borda ao vivo.
+      responses:
+        '200':
+          $ref: '#/components/responses/MediaFileOk'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/playback/sessions/{sessionId}/heartbeat:
+    parameters:
+      - $ref: '#/components/parameters/SessionIdPathParam'
+    post:
+      tags: [Playback]
+      operationId: heartbeatPlaybackSession
+      summary: Mantém a sessão viva
+      description: |
+        Ping periódico do cliente para sinalizar que a sessão ainda está em uso — renova o TTL da
+        sessão e devolve a validade restante. O TTL é uma preferência do admin. O cliente deve
+        chamar novamente antes de a validade expirar. Responde `404` se a sessão não existe ou já
+        expirou.
+      responses:
+        '200':
+          $ref: '#/components/responses/HeartbeatOk'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # ---------- anilist ----------
+  /v1/anilist/search:
+    get:
+      tags: [AnilistSearch]
+      operationId: searchAnilistMedia
+      summary: Busca paginada de anime por texto livre
+      description: |
+        Delega à AniList (query GraphQL de search). Paginação **0-based**. Página vazia é
+        resposta válida — não devolve 404 quando `q` não bate com nenhum anime.
+      parameters:
+        - $ref: '#/components/parameters/SearchQueryParam'
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/SizeParam'
+        - $ref: '#/components/parameters/ForceRefreshParam'
+      responses:
+        '200':
+          $ref: '#/components/responses/AnilistMediaSummaryPageOk'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '502':
+          $ref: '#/components/responses/BadGateway'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # ---------- tmdb ----------
+  /v1/tmdb/search/movies:
+    get:
+      tags: [TmdbSearch]
+      operationId: searchTmdbMovie
+      summary: Busca paginada de filmes por texto livre
+      description: |
+        Busca no endpoint `/3/search/movie` do TMDB. Paginação **0-based**. Página vazia é
+        resposta válida — não devolve 404.
+      parameters:
+        - $ref: '#/components/parameters/SearchQueryParam'
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/SizeParam'
+        - $ref: '#/components/parameters/LanguageParam'
+        - $ref: '#/components/parameters/ForceRefreshParam'
+      responses:
+        '200':
+          $ref: '#/components/responses/TmdbMovieSearchResultPageOk'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '502':
+          $ref: '#/components/responses/BadGateway'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/tmdb/search/tv-shows:
+    get:
+      tags: [TmdbSearch]
+      operationId: searchTmdbTv
+      summary: Busca paginada de séries por texto livre
+      description: |
+        Busca no endpoint `/3/search/tv` do TMDB. Paginação **0-based**. Página vazia é
+        resposta válida — não devolve 404.
+      parameters:
+        - $ref: '#/components/parameters/SearchQueryParam'
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/SizeParam'
+        - $ref: '#/components/parameters/LanguageParam'
+        - $ref: '#/components/parameters/ForceRefreshParam'
+      responses:
+        '200':
+          $ref: '#/components/responses/TmdbTvSearchResultPageOk'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '502':
+          $ref: '#/components/responses/BadGateway'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # ---------- animemetadata ----------
+  /v1/metadata/animes/{anilistId}:
+    parameters:
+      - $ref: '#/components/parameters/AnilistIdPathParam'
+    get:
+      tags: [Anime]
+      operationId: getAnime
+      summary: Lê a metadata do anime (base local, sem buscar de novo na AniList)
+      responses:
+        '200':
+          $ref: '#/components/responses/AnimeViewOk'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      tags: [Anime]
+      operationId: deleteAnime
+      summary: Remove a metadata; a pasta volta a ficar livre
+      responses:
+        '204':
+          $ref: '#/components/responses/AnimeDeleted'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/metadata/animes/{anilistId}/sync:
+    parameters:
+      - $ref: '#/components/parameters/AnilistIdPathParam'
+    post:
+      tags: [Anime]
+      operationId: syncAnime
+      summary: Busca de novo na AniList, mantendo a pasta atual
+      responses:
+        '200':
+          $ref: '#/components/responses/AnimeViewOk'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '502':
+          $ref: '#/components/responses/BadGateway'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/metadata/animes/{anilistId}/binding:
+    parameters:
+      - $ref: '#/components/parameters/AnilistIdPathParam'
+    post:
+      tags: [Anime]
+      operationId: bindAnimeToFolder
+      summary: Cria metadata do anime atrelada a uma pasta do catalog
+      requestBody:
+        $ref: '#/components/requestBodies/AnimeBindingRequestBody'
+      responses:
+        '201':
+          $ref: '#/components/responses/AnimeCreated'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '502':
+          $ref: '#/components/responses/BadGateway'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/metadata/animes/{anilistId}/franchise-root:
+    parameters:
+      - $ref: '#/components/parameters/AnilistIdPathParam'
+    put:
+      tags: [Anime]
+      operationId: setAnimeFranchiseRoot
+      summary: Curadoria manual da flag de raiz da franquia
+      requestBody:
+        $ref: '#/components/requestBodies/AnimeFranchiseRootRequestBody'
+      responses:
+        '200':
+          $ref: '#/components/responses/AnimeViewOk'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/metadata/folders/{folderId}/anime:
+    parameters:
+      - $ref: '#/components/parameters/FolderIdPathParam'
+    get:
+      tags: [Anime]
+      operationId: getAnimeByFolder
+      summary: Lê a metadata do anime vinculado a uma pasta do catalog
+      responses:
+        '200':
+          $ref: '#/components/responses/AnimeViewOk'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/metadata/anime-bindings:
+    get:
+      tags: [Anime]
+      operationId: getAnimeBindings
+      summary: Resumos de binding de várias pastas (só as vinculadas)
+      description: >-
+        Enriquece uma página do catálogo com os bindings de várias pastas numa chamada só — evita um
+        GET por card.
+      parameters:
+        - $ref: '#/components/parameters/FolderIdsQueryParam'
+      responses:
+        '200':
+          $ref: '#/components/responses/AnimeBindingsOk'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/metadata/anime-relations:
+    get:
+      tags: [AnimeRelations]
+      operationId: listRelationRoots
+      summary: Animes-raiz da coleção (paginado)
+      description: |
+        Animes com `isFranchiseRoot = true`, mais os com `isFranchiseRoot = null` dos quais não
+        sai nenhuma relação `PREQUEL` nem `PARENT`. Ordenados por `anilistId`.
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/SizeParam'
+      responses:
+        '200':
+          $ref: '#/components/responses/AnimeViewPageOk'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/metadata/animes/{anilistId}/relations/graph:
+    parameters:
+      - $ref: '#/components/parameters/AnilistIdPathParam'
+    get:
+      tags: [AnimeRelations]
+      operationId: getAnimeRelationGraph
+      summary: Grafo materializado (BFS bidirecional) até `depth` saltos
+      parameters:
+        - $ref: '#/components/parameters/DepthParam'
+      responses:
+        '200':
+          $ref: '#/components/responses/AnimeRelationGraphOk'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/metadata/animes/{anilistId}/tmdb:
+    parameters:
+      - $ref: '#/components/parameters/AnilistIdPathParam'
+    get:
+      tags: [AnimeTmdb]
+      operationId: getTmdbState
+      summary: Estado atual do binding TMDB (binding + overrides)
+      responses:
+        '200':
+          $ref: '#/components/responses/TmdbAnimeStateOk'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/metadata/animes/{anilistId}/tmdb/binding:
+    parameters:
+      - $ref: '#/components/parameters/AnilistIdPathParam'
+    post:
+      tags: [AnimeTmdb]
+      operationId: bindTmdb
+      summary: Cria binding TMDB (série ou filme)
+      requestBody:
+        $ref: '#/components/requestBodies/TmdbBindingRequestBody'
+      responses:
+        '201':
+          $ref: '#/components/responses/TmdbAnimeStateCreated'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '502':
+          $ref: '#/components/responses/BadGateway'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      tags: [AnimeTmdb]
+      operationId: clearTmdbBinding
+      summary: Remove binding TMDB (overrides caem por cascata)
+      responses:
+        '204':
+          $ref: '#/components/responses/TmdbBindingDeleted'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/metadata/animes/{anilistId}/tmdb/overrides:
+    parameters:
+      - $ref: '#/components/parameters/AnilistIdPathParam'
+    put:
+      tags: [AnimeTmdb]
+      operationId: updateTmdbOverrides
+      summary: Substitui o bloco inteiro de overrides
+      description: Body com todos campos `null` apaga a linha de overrides.
+      requestBody:
+        $ref: '#/components/requestBodies/TmdbOverridesRequestBody'
+      responses:
+        '200':
+          $ref: '#/components/responses/TmdbAnimeStateOk'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/metadata/animes/{anilistId}/tmdb/overrides/schema:
+    parameters:
+      - $ref: '#/components/parameters/AnilistIdPathParam'
+    get:
+      tags: [AnimeTmdb]
+      operationId: getTmdbOverridesSchema
+      summary: Opções concretas por campo que aceita override (traduções e imagens do TMDB)
+      parameters:
+        - $ref: '#/components/parameters/ForceRefreshParam'
+      responses:
+        '200':
+          $ref: '#/components/responses/TmdbOverridesSchemaOk'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '502':
+          $ref: '#/components/responses/BadGateway'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/metadata/animes/{anilistId}/tmdb/file-pairing/schema:
+    parameters:
+      - $ref: '#/components/parameters/AnilistIdPathParam'
+    get:
+      tags: [AnimeTmdbFilePairing]
+      operationId: getTmdbFilePairingSchema
+      summary: Estrutura da série TMDB (temporadas → episódios) para o modal de pairing
+      description: |
+        Responde `404` se o anime não tem binding TMDB e `400` (`BUSINESS_RULE_VIOLATION`) se
+        o binding é de filme — só séries têm temporadas/episódios para parear.
+      responses:
+        '200':
+          $ref: '#/components/responses/TmdbFilePairingSchemaOk'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '502':
+          $ref: '#/components/responses/BadGateway'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/metadata/files/tmdb-pairings:
+    get:
+      tags: [AnimeTmdbFilePairing]
+      operationId: getTmdbFilePairings
+      summary: Pairings de vários arquivos (só os que já têm pairing)
+      description: >-
+        Enriquece a página de arquivos com os pairings de vários arquivos numa chamada só — evita um
+        GET por arquivo.
+      parameters:
+        - $ref: '#/components/parameters/FileIdsQueryParam'
+      responses:
+        '200':
+          $ref: '#/components/responses/TmdbFilePairingsOk'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/metadata/files/{fileId}/tmdb-pairing:
+    parameters:
+      - $ref: '#/components/parameters/FileIdPathParam'
+    get:
+      tags: [AnimeTmdbFilePairing]
+      operationId: getTmdbFilePairing
+      summary: Lê o pairing atual (campos `null` quando ausente)
+      description: |
+        Arquivo sem pairing gravado responde `200` com `seasonNumber`, `episodeNumber` e
+        `thumbnailPath` `null`. `404` só quando o `fileId` não existe no catalog.
+      responses:
+        '200':
+          $ref: '#/components/responses/TmdbFilePairingOk'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    put:
+      tags: [AnimeTmdbFilePairing]
+      operationId: updateTmdbFilePairing
+      summary: Cria ou substitui o pairing (campos `null` zeram aquela dimensão)
+      description: Responde `404` quando o `fileId` não existe no catalog.
+      requestBody:
+        $ref: '#/components/requestBodies/TmdbFilePairingRequestBody'
+      responses:
+        '200':
+          $ref: '#/components/responses/TmdbFilePairingOk'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      tags: [AnimeTmdbFilePairing]
+      operationId: deleteTmdbFilePairing
+      summary: Remove a linha do pairing
+      description: Responde `404` quando o arquivo não tem pairing gravado.
+      responses:
+        '204':
+          $ref: '#/components/responses/TmdbFilePairingDeleted'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # ---------- settings ----------
+  /v1/settings:
+    get:
+      tags: [Settings]
+      operationId: listSettings
+      summary: Lista as preferências, opcionalmente filtrando por nome (substring da chave)
+      parameters:
+        - $ref: '#/components/parameters/NameFilterParam'
+      responses:
+        '200':
+          $ref: '#/components/responses/SettingListOk'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/settings/{key}:
+    parameters:
+      - $ref: '#/components/parameters/SettingKeyPathParam'
+    put:
+      tags: [Settings]
+      operationId: updateSetting
+      summary: Atualiza o valor de uma preferência existente
+      description: >-
+        Só preferências já cadastradas podem ser atualizadas — chave inexistente responde `404`.
+      requestBody:
+        $ref: '#/components/requestBodies/UpdateSettingRequestBody'
+      responses:
+        '200':
+          $ref: '#/components/responses/SettingOk'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # ---------- notification ----------
+  /v1/notifications:
+    get:
+      tags: [Notifications]
+      operationId: listNotifications
+      summary: Lista as notificações mais recentes
+      description: |
+        Devolve as **100** notificações mais recentes, lidas ou não, da mais nova para a mais
+        antiga. Não há paginação — notificações mais antigas que as 100 primeiras não são
+        acessíveis pela API.
+      responses:
+        '200':
+          $ref: '#/components/responses/NotificationListOk'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/notifications/unread-count:
+    get:
+      tags: [Notifications]
+      operationId: getUnreadCount
+      summary: Conta as notificações não-lidas
+      responses:
+        '200':
+          $ref: '#/components/responses/UnreadCountOk'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/notifications/{notificationId}/read:
+    parameters:
+      - $ref: '#/components/parameters/NotificationIdPathParam'
+    post:
+      tags: [Notifications]
+      operationId: markNotificationRead
+      summary: Marca uma notificação como lida
+      description: |
+        Idempotente: marcar de novo uma notificação já lida responde `204`. Um
+        `notificationId` inexistente também responde `204` — nada é alterado. `404` só quando
+        o `notificationId` não é numérico.
+      responses:
+        '204':
+          $ref: '#/components/responses/NotificationRead'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/notifications/read-all:
+    post:
+      tags: [Notifications]
+      operationId: markAllNotificationsRead
+      summary: Marca todas as notificações como lidas
+      responses:
+        '204':
+          $ref: '#/components/responses/AllNotificationsRead'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+components:
+
+  parameters:
+    # ---------- comuns ----------
+    PageParam:
+      name: page
+      in: query
+      required: false
+      description: Número da página (0-based)
+      schema:
+        $ref: '#/components/schemas/PageNumber'
+    SizeParam:
+      name: size
+      in: query
+      required: false
+      description: Tamanho da página
+      schema:
+        $ref: '#/components/schemas/PageSize'
+    SearchQueryParam:
+      name: q
+      in: query
+      required: true
+      description: Texto de busca, repassado ao upstream (AniList ou TMDB)
+      schema:
+        $ref: '#/components/schemas/SearchQuery'
+    ForceRefreshParam:
+      name: forceRefresh
+      in: query
+      required: false
+      description: Se `true`, ignora o cache local e busca de novo no upstream (AniList ou TMDB)
+      schema:
+        $ref: '#/components/schemas/ForceRefresh'
+    NameFilterParam:
+      name: name
+      in: query
+      required: false
+      description: >-
+        Substring case-insensitive do nome (da pasta ou da chave da preferência); `null`/ausente não
+        filtra
+      schema:
+        $ref: '#/components/schemas/NameFilter'
+    FileIdPathParam:
+      name: fileId
+      in: path
+      required: true
+      description: Id do arquivo de vídeo no catalog
+      schema:
+        $ref: '#/components/schemas/FileId'
+    FolderIdPathParam:
+      name: folderId
+      in: path
+      required: true
+      description: Id da pasta no catalog
+      schema:
+        $ref: '#/components/schemas/FolderId'
+    StorageProviderIdPathParam:
+      name: providerId
+      in: path
+      required: true
+      description: Id do storage provider
+      schema:
+        $ref: '#/components/schemas/StorageProviderId'
+
+    # ---------- ingestion ----------
+    RootPathParam:
+      name: rootPath
+      in: query
+      required: false
+      description: Prefixo do subtree; ausente ou vazio parte da raiz do provider
+      schema:
+        $ref: '#/components/schemas/RootPath'
+
+    # ---------- catalog ----------
+    MediaTypeFilterParam:
+      name: mediaType
+      in: query
+      required: false
+      description: Tipo do conteúdo; `null`/ausente não filtra
+      schema:
+        $ref: '#/components/schemas/MediaType'
+    StorageProviderIdFilterParam:
+      name: storageProviderId
+      in: query
+      required: false
+      description: Provider dono; `null`/ausente não filtra
+      schema:
+        $ref: '#/components/schemas/StorageProviderId'
+    ParentIdFilterParam:
+      name: parentId
+      in: query
+      required: false
+      description: Pasta pai; `null`/ausente não filtra
+      schema:
+        $ref: '#/components/schemas/FolderId'
+    HasFilesFilterParam:
+      name: hasFiles
+      in: query
+      required: false
+      description: Filtra por existência de arquivos; `null`/ausente não filtra
+      schema:
+        $ref: '#/components/schemas/HasFilesFilter'
+    SortParam:
+      name: sort
+      in: query
+      required: false
+      description: |
+        Specs de ordenação `field[:asc|desc]`. Whitelist: `name`, `createdAt`,
+        `hasFiles`. Múltiplos valores viram lista ordenada.
+      explode: true
+      schema:
+        $ref: '#/components/schemas/SortSpecs'
+    FolderIdRequiredParam:
+      name: folderId
+      in: query
+      required: true
+      description: Id da pasta cujos arquivos serão listados
+      schema:
+        $ref: '#/components/schemas/FolderId'
+
+    # ---------- playback ----------
+    SessionIdPathParam:
+      name: sessionId
+      in: path
+      required: true
+      description: Id da sessão de playback (UUID gerado ao iniciar o transcode)
+      schema:
+        $ref: '#/components/schemas/SessionId'
+    MediaFilePathParam:
+      name: file
+      in: path
+      required: true
+      description: |
+        Nome de um arquivo referenciado pela playlist da sessão (ver `MediaFileName`). Qualquer
+        outro nome responde `404`.
+      schema:
+        $ref: '#/components/schemas/MediaFileName'
+
+    # ---------- tmdb ----------
+    LanguageParam:
+      name: language
+      in: query
+      required: false
+      description: 'Idioma dos textos devolvidos, como tag BCP 47 (ex.: `en-US`, `pt-BR`)'
+      schema:
+        $ref: '#/components/schemas/Language'
+
+    # ---------- animemetadata ----------
+    AnilistIdPathParam:
+      name: anilistId
+      in: path
+      required: true
+      description: ID do anime na AniList
+      schema:
+        $ref: '#/components/schemas/AnilistId'
+    FolderIdsQueryParam:
+      name: folderIds
+      in: query
+      required: true
+      description: Ids das pastas a consultar (repetido — `folderIds=1&folderIds=2`)
+      schema:
+        type: array
+        items:
+          $ref: '#/components/schemas/FolderId'
+    FileIdsQueryParam:
+      name: fileIds
+      in: query
+      required: true
+      description: Ids dos arquivos a consultar (repetido — `fileIds=1&fileIds=2`)
+      schema:
+        type: array
+        items:
+          $ref: '#/components/schemas/FileId'
+    DepthParam:
+      name: depth
+      in: query
+      required: false
+      description: Profundidade máxima da BFS
+      schema:
+        $ref: '#/components/schemas/GraphDepth'
+
+    # ---------- settings ----------
+    SettingKeyPathParam:
+      name: key
+      in: path
+      required: true
+      description: 'Chave da preferência (ex.: `cache.max-size-bytes`)'
+      schema:
+        $ref: '#/components/schemas/SettingKey'
+
+    # ---------- notification ----------
+    NotificationIdPathParam:
+      name: notificationId
+      in: path
+      required: true
+      description: Id da notificação
+      schema:
+        type: integer
+        format: int32
+
+  requestBodies:
+    # ---------- storageprovider ----------
+    CreateStorageProviderRequestBody:
+      description: Payload de criação — type + config em claro
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/CreateStorageProviderRequest'
+    UpdateStorageProviderConfigRequestBody:
+      description: Payload de atualização de config em claro
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/UpdateStorageProviderConfigRequest'
+
+    # ---------- ingestion ----------
+    IngestSubtreeRequestBody:
+      description: Payload de ingestão — subtree + mediaType a aplicar
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/IngestSubtreeRequest'
+
+    # ---------- catalog ----------
+    MediaFolderRequestBody:
+      description: Payload de criação/atualização de pasta
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/MediaFolderRequest'
+    VideoFileRequestBody:
+      description: Payload de criação/atualização de arquivo
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/VideoFileRequest'
+
+    # ---------- cache ----------
+    CacheQueueRequestBody:
+      description: Arquivo a ser cacheado
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/CacheQueueRequest'
+
+    # ---------- playback ----------
+    StartPlaybackSessionRequestBody:
+      description: Arquivo, perfil e faixas da sessão a iniciar
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/StartPlaybackSessionRequest'
+    SeekRequestBody:
+      description: Nova posição do transcode
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/SeekRequest'
+
+    # ---------- animemetadata ----------
+    AnimeBindingRequestBody:
+      description: Payload de binding anime↔pasta
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AnimeBindingRequest'
+    AnimeFranchiseRootRequestBody:
+      description: Payload de curadoria da flag
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AnimeFranchiseRootRequest'
+    TmdbBindingRequestBody:
+      description: Payload de binding anime↔TMDB
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/TmdbBindingRequest'
+    TmdbOverridesRequestBody:
+      description: Payload de overrides
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/TmdbOverrides'
+    TmdbFilePairingRequestBody:
+      description: Payload de pairing
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/TmdbFilePairingRequest'
+
+    # ---------- settings ----------
+    UpdateSettingRequestBody:
+      description: Novo valor da preferência
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/UpdateSettingRequest'
+
+  responses:
+    # ---------- comuns ----------
+    BadRequest:
+      description: >-
+        Payload ou parâmetros inválidos (`VALIDATION_ERROR`), ou regra de negócio violada
+        (`BUSINESS_RULE_VIOLATION`)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    NotFound:
+      description: Recurso inexistente (`RESOURCE_NOT_FOUND`)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    BadGateway:
+      description: >-
+        Falha num sistema externo — AniList, TMDB, rclone ou ffprobe (`INTEGRATION_ERROR`)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    ServiceUnavailable:
+      description: >-
+        Preferência obrigatória sem valor (`INTEGRATION_NOT_CONFIGURED`) — configure em `PUT
+        /v1/settings/{key}`
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    InternalServerError:
+      description: Erro inesperado no servidor (`INTERNAL_ERROR`)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+
+    # ---------- storageprovider ----------
+    StorageProviderPageOk:
+      description: Página (possivelmente vazia) de providers
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/StorageProviderPage'
+    StorageProviderOk:
+      description: Provider encontrado/atualizado (sem `config`)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/StorageProviderResponse'
+    StorageProviderCreated:
+      description: Provider cadastrado (sem `config`)
+      headers:
+        Location:
+          description: URI do provider recém-criado (`/v1/storage/providers/{providerId}`)
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/StorageProviderResponse'
+    StorageProviderDeleted:
+      description: Provider removido
+    StorageProviderHealthOk:
+      description: Resultado do teste de conectividade
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/StorageProviderHealth'
+
+    # ---------- ingestion ----------
+    AvailableFolderNodeOk:
+      description: Árvore com o nó raiz e filhos até a folha
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AvailableFolderNode'
+    IngestionStarted:
+      description: >-
+        Ingestão aceita e iniciada em background (ou já em andamento para o mesmo subtree)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/IngestionStartedResponse'
+    IngestionRemoved:
+      description: Subtree removido (inclusive quando nada casa — idempotente)
+
+    # ---------- catalog ----------
+    MediaFolderPageOk:
+      description: Página (possivelmente vazia) de pastas
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/MediaFolderPage'
+    MediaFolderOk:
+      description: Pasta encontrada/atualizada
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/MediaFolderResponse'
+    MediaFolderCreated:
+      description: Pasta criada
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/MediaFolderResponse'
+    MediaFolderDeleted:
+      description: Pasta removida
+    VideoFilePageOk:
+      description: Página (possivelmente vazia) de arquivos
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/VideoFilePage'
+    VideoFileOk:
+      description: Arquivo encontrado/atualizado
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/VideoFileResponse'
+    VideoFileCreated:
+      description: Arquivo criado
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/VideoFileResponse'
+    VideoFileDeleted:
+      description: Arquivo removido
+
+    # ---------- cache ----------
+    CacheItemCreated:
+      description: Linha enfileirada
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/CacheItem'
+    CacheItemPageOk:
+      description: Página (possivelmente vazia) de linhas do cache
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/CacheItemPage'
+
+    # ---------- mediaprobe ----------
+    MediaProbeOk:
+      description: Probe extraído do arquivo
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/MediaInfoResponse'
+
+    # ---------- playback ----------
+    SessionCreated:
+      description: Sessão de transcode criada
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/PlaybackSession'
+    SessionOk:
+      description: Sessão atualizada
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/PlaybackSession'
+    MediaFileOk:
+      description: |
+        Arquivo HLS — segmento MPEG-TS/fMP4, init segment fMP4, variant playlist (`.m3u8`) ou
+        segmento de legenda WebVTT (`.vtt`).
+      content:
+        video/mp2t:
+          schema:
+            $ref: '#/components/schemas/MediaFileContent'
+        video/mp4:
+          schema:
+            $ref: '#/components/schemas/MediaFileContent'
+        application/vnd.apple.mpegurl:
+          schema:
+            $ref: '#/components/schemas/MediaFileContent'
+        text/vtt:
+          schema:
+            $ref: '#/components/schemas/MediaFileContent'
+    PlaylistOk:
+      description: Playlist HLS da sessão
+      headers:
+        X-Playback-Heartbeat-Ttl-Seconds:
+          description: |
+            TTL do heartbeat em segundos — em quanto tempo o cliente deve pingar de novo para não
+            deixar a sessão expirar. Mesma semântica do `expiresInSeconds` do heartbeat.
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+      content:
+        application/vnd.apple.mpegurl:
+          schema:
+            $ref: '#/components/schemas/M3u8Playlist'
+    HeartbeatOk:
+      description: Sessão renovada; validade restante
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/SessionHeartbeat'
+
+    # ---------- anilist ----------
+    AnilistMediaSummaryPageOk:
+      description: Página (possivelmente vazia) com os resultados da busca
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AnilistMediaSummaryPage'
+
+    # ---------- tmdb ----------
+    TmdbMovieSearchResultPageOk:
+      description: Página (possivelmente vazia) de resultados de filmes
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/TmdbMovieSearchResultPage'
+    TmdbTvSearchResultPageOk:
+      description: Página (possivelmente vazia) de resultados de séries
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/TmdbTvSearchResultPage'
+
+    # ---------- animemetadata ----------
+    AnimeViewOk:
+      description: Vista pública do anime
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AnimeView'
+    AnimeViewPageOk:
+      description: Página (possivelmente vazia) de animes
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AnimeViewPage'
+    AnimeBindingsOk:
+      description: Resumos de binding das pastas consultadas (só as vinculadas)
+      content:
+        application/json:
+          schema:
+            type: array
+            items:
+              $ref: '#/components/schemas/AnimeBindingSummary'
+    AnimeCreated:
+      description: Metadata do anime criada
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AnimeView'
+    AnimeDeleted:
+      description: Metadata do anime removida
+    AnimeRelationGraphOk:
+      description: Grafo (nodes + edges) alcançado a partir da raiz
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AnimeRelationGraphResponse'
+    TmdbAnimeStateOk:
+      description: Estado TMDB atual
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/TmdbAnimeStateResponse'
+    TmdbAnimeStateCreated:
+      description: Binding TMDB criado
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/TmdbAnimeStateResponse'
+    TmdbBindingDeleted:
+      description: Binding TMDB removido
+    TmdbOverridesSchemaOk:
+      description: Opções concretas por campo (traduções e imagens do TMDB)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/TmdbOverridesSchema'
+    TmdbFilePairingSchemaOk:
+      description: Temporadas e episódios da série TMDB
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/TmdbFilePairingSchema'
+    TmdbFilePairingOk:
+      description: Pairing atual (ou estado vazio se nunca houve pairing)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/TmdbFilePairingResponse'
+    TmdbFilePairingsOk:
+      description: Pairings dos arquivos consultados (só os que já têm pairing)
+      content:
+        application/json:
+          schema:
+            type: array
+            items:
+              $ref: '#/components/schemas/TmdbFilePairingResponse'
+    TmdbFilePairingDeleted:
+      description: Pairing removido
+
+    # ---------- settings ----------
+    SettingListOk:
+      description: Lista (possivelmente vazia) de preferências
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/SettingList'
+    SettingOk:
+      description: Preferência atualizada
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/SettingResponse'
+
+    # ---------- notification ----------
+    NotificationListOk:
+      description: Lista (possivelmente vazia) das notificações mais recentes
+      content:
+        application/json:
+          schema:
+            type: array
+            items:
+              $ref: '#/components/schemas/Notification'
+    UnreadCountOk:
+      description: Contagem de não-lidas
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/UnreadCount'
+    NotificationRead:
+      description: Notificação marcada como lida
+    AllNotificationsRead:
+      description: Todas as notificações marcadas como lidas
+
+  schemas:
+    # ---------- comuns ----------
+    FileId:
+      type: integer
+      format: int32
+      description: Id do arquivo de vídeo no catalog
+
+    FolderId:
+      type: integer
+      format: int32
+      description: Id da pasta no catalog
+
+    StorageProviderId:
+      type: integer
+      format: int32
+      description: Id do storage provider
+
+    AnilistId:
+      type: integer
+      format: int32
+      description: ID do anime na AniList — chave primária do anime no akari
+
+    TmdbId:
+      type: integer
+      format: int32
+      description: Id de um recurso no TMDB (série ou filme)
+
+    PageNumber:
+      type: integer
+      format: int32
+      default: 0
+      description: Número da página (0-based)
+
+    PageSize:
+      type: integer
+      format: int32
+      default: 12
+      description: Tamanho máximo de itens por página
+
+    PageTotalElements:
+      type: integer
+      format: int64
+      description: Total absoluto de elementos que existem para a query
+
+    PageTotalPages:
+      type: integer
+      format: int32
+      description: Total de páginas calculado a partir de totalElements e size
+
+    Page:
+      type: object
+      description: |
+        Metadados de paginação, comuns a todo envelope paginado. Cada envelope
+        (`MediaFolderPage`, `CacheItemPage`, ...) compõe este schema com o array `data` do seu tipo.
+      required: [page, size, totalElements, totalPages]
+      properties:
+        page:
+          $ref: '#/components/schemas/PageNumber'
+        size:
+          $ref: '#/components/schemas/PageSize'
+        totalElements:
+          $ref: '#/components/schemas/PageTotalElements'
+        totalPages:
+          $ref: '#/components/schemas/PageTotalPages'
+
+    NameFilter:
+      type: string
+      description: Substring case-insensitive aplicada ao nome
+
+    SearchQuery:
+      type: string
+      minLength: 1
+      description: Texto de busca (obrigatório, não vazio)
+
+    ForceRefresh:
+      type: boolean
+      default: false
+      description: Ignora o cache quando `true`
+
+    MediaType:
+      type: string
+      description: |
+        Tipo do conteúdo abrigado por uma pasta. Gravado na pasta quando ela é criada (pela
+        ingestão ou pelo `POST /v1/catalog/folders`); a ingestão não altera pastas já registradas.
+      enum:
+        - ANIME
+        - TV
+        - MOVIE
+
+    ErrorDetail:
+      type: object
+      description: Violação de um campo — só aparece em erros `VALIDATION_ERROR`
+      required: [field, error]
+      properties:
+        field:
+          type: string
+          description: >-
+            Campo violado: caminho em dot-notation quando está no body (ex.: `config.password`) ou o
+            nome do parâmetro (ex.: `size`)
+        error:
+          type: string
+          description: Mensagem legível da violação
+
+    ApiErrorCode:
+      type: string
+      description: |
+        Chave estável do erro — o cliente chaveia o tratamento por ela, nunca pelo `message`.
+
+        - `VALIDATION_ERROR` (400): payload ou parâmetros inválidos (Bean Validation ou JSON
+          malformado); `details` lista as violações.
+        - `BUSINESS_RULE_VIOLATION` (400): o input é válido na forma, mas fere uma regra de
+          negócio.
+        - `RESOURCE_NOT_FOUND` (404): o recurso não existe (ou a rota não existe / um
+          parâmetro de path não pôde ser convertido).
+        - `REQUEST_ERROR` (405, 406, 415, ...): requisição incompatível com o endpoint —
+          método, `Content-Type` ou `Accept` não suportados.
+        - `INTEGRATION_ERROR` (502): um sistema externo (AniList, TMDB, rclone, ffprobe)
+          falhou ou está indisponível.
+        - `INTEGRATION_NOT_CONFIGURED` (503): uma preferência obrigatória está sem valor —
+          o admin precisa configurá-la em
+          `PUT /v1/settings/{key}`.
+        - `INTERNAL_ERROR` (500): erro inesperado no servidor.
+      enum:
+        - VALIDATION_ERROR
+        - BUSINESS_RULE_VIOLATION
+        - RESOURCE_NOT_FOUND
+        - REQUEST_ERROR
+        - INTEGRATION_ERROR
+        - INTEGRATION_NOT_CONFIGURED
+        - INTERNAL_ERROR
+
+    ApiError:
+      type: object
+      description: |
+        Shape uniforme de erro da API, produzido pelos `ExceptionMapper`s globais. Todo status
+        de erro (4xx/5xx) devolve este corpo.
+      required: [status, code, message, details]
+      properties:
+        status:
+          type: integer
+          format: int32
+          description: HTTP status devolvido (o mesmo da resposta)
+        code:
+          $ref: '#/components/schemas/ApiErrorCode'
+        message:
+          type: string
+          description: Mensagem legível para logging/exibição
+        details:
+          type: array
+          description: Violações por campo; vazia quando `code` não é `VALIDATION_ERROR`
+          items:
+            $ref: '#/components/schemas/ErrorDetail'
+
+    # ---------- storageprovider ----------
+    StorageProviderType:
+      type: string
+      description: |
+        Tipo do provider. Cada valor implica um schema de `config` distinto (ex.: `MEGA`
+        exige `email`+`password`; `LOCAL` exige `rootPath`). Novos providers vão surgir aqui
+        à medida que forem suportados.
+      enum:
+        - MEGA
+        - LOCAL
+
+    StorageProviderConfig:
+      type: object
+      description: |
+        Configuração do provider — mapa livre de string→string. O conjunto de chaves
+        obrigatórias depende de `type`. Para `MEGA`: `email` (obrigatório), `password`
+        (obrigatório, será obscurecido antes de persistir). Para `LOCAL`: `rootPath`
+        (obrigatório, diretório raiz absoluto dos arquivos no disco do servidor).
+      additionalProperties:
+        type: string
+
+    CreateStorageProviderRequest:
+      type: object
+      description: Payload de `POST /v1/storage/providers`
+      required: [type, config]
+      properties:
+        type:
+          $ref: '#/components/schemas/StorageProviderType'
+        config:
+          $ref: '#/components/schemas/StorageProviderConfig'
+
+    UpdateStorageProviderConfigRequest:
+      type: object
+      description: Payload de `PUT /v1/storage/providers/{providerId}/config`
+      required: [config]
+      properties:
+        config:
+          $ref: '#/components/schemas/StorageProviderConfig'
+
+    StorageProviderResponse:
+      type: object
+      description: |
+        Vista pública do provider. `config` é intencionalmente omitido para evitar
+        vazar credenciais (mesmo obscurecidas) para clientes da API.
+      required: [id, type, createdAt]
+      properties:
+        id:
+          $ref: '#/components/schemas/StorageProviderId'
+        type:
+          $ref: '#/components/schemas/StorageProviderType'
+        createdAt:
+          type: string
+          format: date-time
+
+    StorageProviderHealth:
+      type: object
+      description: Resultado do teste de conectividade com o provider
+      required: [healthy]
+      properties:
+        healthy:
+          type: boolean
+          description: '`true` se o provider respondeu; `false` se está inacessível'
+
+    StorageProviderPage:
+      description: Envelope paginado de providers
+      allOf:
+        - $ref: '#/components/schemas/Page'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/StorageProviderResponse'
+
+    # ---------- ingestion ----------
+    RootPath:
+      type: string
+      description: Caminho relativo à raiz do provider
+
+    IngestSubtreeRequest:
+      type: object
+      description: Payload de `POST /v1/ingestion/providers/{providerId}`
+      required: [mediaType]
+      properties:
+        rootPath:
+          allOf: [{ $ref: '#/components/schemas/RootPath' }]
+          nullable: true
+          description: '`null` ou vazio ingere a raiz inteira do provider'
+        mediaType:
+          $ref: '#/components/schemas/MediaType'
+
+    IngestionStartedResponse:
+      type: object
+      description: Confirmação de que a ingestão em background foi aceita
+      required: [status]
+      properties:
+        status:
+          type: string
+          description: Status do disparo — hoje sempre `started`
+          enum:
+            - started
+
+    AvailableFolderNode:
+      type: object
+      description: |
+        Nó da árvore de pastas disponíveis. Recursivo — cada nó tem `children` com os
+        filhos diretos. Os nós carregam o status `ingested` para o frontend destacar
+        visualmente o que já está no catalog.
+      required: [name, path, ingested, children]
+      properties:
+        name:
+          type: string
+          description: Último segmento do path
+        path:
+          type: string
+          description: Caminho relativo à raiz do provider
+        ingested:
+          type: boolean
+          description: '`true` se essa pasta já está catalogada'
+        children:
+          type: array
+          description: Filhos diretos
+          items:
+            $ref: '#/components/schemas/AvailableFolderNode'
+
+    # ---------- catalog ----------
+    HasFilesFilter:
+      type: boolean
+      description: Restringe por existência de arquivos
+
+    SortSpecs:
+      type: array
+      description: Lista de specs de ordenação `field[:asc|desc]`
+      items:
+        $ref: '#/components/schemas/SortSpec'
+
+    SortSpec:
+      type: string
+      description: Spec de ordenação individual — formato `field` ou `field:asc|desc`
+
+    MediaFolderRequest:
+      type: object
+      description: |
+        Payload de criação e atualização de pasta. No PUT o id vem do path (`folderId`);
+        `createdAt` é gerado pelo banco. A pasta pai é derivada do `path` (o pai é a pasta do
+        mesmo provider cujo path é o `path` sem o último segmento; raiz se não houver) — não é
+        informada no payload.
+      required: [storageProviderId, mediaType, name, path]
+      properties:
+        storageProviderId:
+          allOf: [{ $ref: '#/components/schemas/StorageProviderId' }]
+          description: Id do provider onde a pasta vive
+        mediaType:
+          $ref: '#/components/schemas/MediaType'
+        name:
+          type: string
+          minLength: 1
+          description: Último segmento do path (nome exibido da pasta)
+        path:
+          type: string
+          minLength: 1
+          description: Caminho relativo à raiz do provider
+
+    MediaFolderResponse:
+      type: object
+      description: Vista pública de uma pasta ingerida
+      required: [id, storageProviderId, mediaType, name, path, createdAt]
+      properties:
+        id:
+          $ref: '#/components/schemas/FolderId'
+        storageProviderId:
+          $ref: '#/components/schemas/StorageProviderId'
+        parentId:
+          allOf: [{ $ref: '#/components/schemas/FolderId' }]
+          nullable: true
+          description: '`null` quando a pasta é raiz'
+        mediaType:
+          $ref: '#/components/schemas/MediaType'
+        name:
+          type: string
+        path:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        hasFiles:
+          type: boolean
+          nullable: true
+          description: >-
+            `true` se a pasta tem ao menos um arquivo de vídeo direto. Enriquecido só na listagem
+            (`GET /folders`); `null` nas leituras que não computam esse campo.
+
+    MediaFolderPage:
+      description: Envelope paginado de pastas
+      allOf:
+        - $ref: '#/components/schemas/Page'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/MediaFolderResponse'
+
+    VideoFileRequest:
+      type: object
+      description: |
+        Payload de criação e atualização de arquivo. O `path` é derivado server-side a
+        partir da pasta pai + `name`.
+      required: [folderId, name]
+      properties:
+        folderId:
+          $ref: '#/components/schemas/FolderId'
+        name:
+          type: string
+          minLength: 1
+          description: Nome do arquivo (último segmento do path)
+        sizeBytes:
+          allOf: [{ $ref: '#/components/schemas/FileSizeBytes' }]
+          nullable: true
+          description: Tamanho em bytes; `null` quando o provider não expõe
+        format:
+          allOf: [{ $ref: '#/components/schemas/FileFormat' }]
+          nullable: true
+          description: '`null` se não detectado'
+
+    VideoFileResponse:
+      type: object
+      description: Vista pública de um arquivo ingerido
+      required: [id, folderId, name, path, createdAt]
+      properties:
+        id:
+          $ref: '#/components/schemas/FileId'
+        folderId:
+          $ref: '#/components/schemas/FolderId'
+        name:
+          type: string
+        path:
+          type: string
+        sizeBytes:
+          allOf: [{ $ref: '#/components/schemas/FileSizeBytes' }]
+          nullable: true
+        format:
+          allOf: [{ $ref: '#/components/schemas/FileFormat' }]
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    VideoFilePage:
+      description: Envelope paginado de arquivos
+      allOf:
+        - $ref: '#/components/schemas/Page'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/VideoFileResponse'
+
+    FileSizeBytes:
+      type: integer
+      format: int64
+      description: Tamanho de arquivo em bytes
+
+    FileFormat:
+      type: string
+      description: 'Extensão/formato do arquivo (ex.: `mkv`, `mp4`)'
+
+    # ---------- cache ----------
+    CacheStatus:
+      type: string
+      description: Estado da linha no ciclo de download
+      enum:
+        - QUEUED
+        - DOWNLOADING
+        - COMPLETED
+        - FAILED
+
+    CacheQueueRequest:
+      type: object
+      description: Pedido de enfileiramento de download
+      required: [fileId]
+      properties:
+        fileId:
+          $ref: '#/components/schemas/FileId'
+
+    CacheItem:
+      type: object
+      description: Linha do cache com o arquivo resolvido
+      required: [id, status, queuedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: |
+            Id da linha, gerado ao enfileirar — também é o nome do arquivo em disco. Reenfileirar
+            um item `FAILED` reaproveita o mesmo id.
+        status:
+          $ref: '#/components/schemas/CacheStatus'
+        jobId:
+          type: integer
+          format: int64
+          nullable: true
+          description: Id do job rclone; `null` fora de `DOWNLOADING`
+        queuedAt:
+          type: string
+          format: date-time
+          description: Momento em que a linha entrou na fila
+        videoFile:
+          allOf: [{ $ref: '#/components/schemas/VideoFileResponse' }]
+          nullable: true
+          description: Arquivo do catalog a que a linha se refere
+
+    CacheItemPage:
+      description: Envelope paginado das linhas do cache
+      allOf:
+        - $ref: '#/components/schemas/Page'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/CacheItem'
+
+    # ---------- mediaprobe ----------
+    MediaContainer:
+      type: object
+      description: Metadados do container (bloco `format` do ffprobe)
+      properties:
+        formatName:
+          type: string
+          nullable: true
+          description: >-
+            Nome curto do formato no ffprobe (ex.: `matroska,webm`, `mov,mp4,m4a,3gp,3g2,mj2`)
+        formatLongName:
+          type: string
+          nullable: true
+          description: 'Nome legível do formato (ex.: `Matroska / WebM`)'
+        durationSeconds:
+          type: number
+          format: double
+          nullable: true
+          description: Duração total da mídia, em segundos
+        sizeBytes:
+          type: integer
+          format: int64
+          nullable: true
+          description: Tamanho do arquivo, em bytes
+        bitRate:
+          type: integer
+          format: int64
+          nullable: true
+          description: Bitrate total do container, em bits por segundo
+
+    VideoTrack:
+      type: object
+      description: Faixa de vídeo
+      properties:
+        index:
+          $ref: '#/components/schemas/StreamIndex'
+        codec:
+          type: string
+          nullable: true
+          description: 'Codec no nome do ffprobe (ex.: `h264`, `hevc`, `av1`)'
+        width:
+          type: integer
+          format: int32
+          nullable: true
+          description: Largura, em pixels
+        height:
+          type: integer
+          format: int32
+          nullable: true
+          description: Altura, em pixels
+        displayAspectRatio:
+          type: string
+          nullable: true
+          description: 'Proporção de exibição (ex.: `16:9`)'
+        frameRate:
+          type: number
+          format: double
+          nullable: true
+          description: >-
+            Quadros por segundo, calculado do `avg_frame_rate` do ffprobe (ex.: `23.976`)
+        bitRate:
+          type: integer
+          format: int64
+          nullable: true
+          description: >-
+            Bitrate da faixa, em bits por segundo; `null` quando o container não informa por faixa
+        pixFmt:
+          type: string
+          nullable: true
+          description: 'Formato de pixel (ex.: `yuv420p`, `yuv420p10le`)'
+        profile:
+          type: string
+          nullable: true
+          description: 'Profile do codec (ex.: `High`, `Main 10`)'
+        language:
+          $ref: '#/components/schemas/TrackLanguage'
+        title:
+          $ref: '#/components/schemas/TrackTitle'
+        defaultTrack:
+          $ref: '#/components/schemas/TrackDefault'
+
+    AudioTrack:
+      type: object
+      description: |
+        Faixa de áudio. A posição dela no array `audio` (0-based) é o valor a mandar em
+        `audioTrackIndex` ao iniciar uma sessão de playback — **não** o campo `index`.
+      properties:
+        index:
+          $ref: '#/components/schemas/StreamIndex'
+        codec:
+          type: string
+          nullable: true
+          description: 'Codec no nome do ffprobe (ex.: `aac`, `flac`, `opus`)'
+        channels:
+          type: integer
+          format: int32
+          nullable: true
+          description: Número de canais
+        channelLayout:
+          type: string
+          nullable: true
+          description: 'Layout dos canais (ex.: `stereo`, `5.1`)'
+        sampleRate:
+          type: integer
+          format: int32
+          nullable: true
+          description: Taxa de amostragem, em Hz
+        bitRate:
+          type: integer
+          format: int64
+          nullable: true
+          description: >-
+            Bitrate da faixa, em bits por segundo; `null` quando o container não informa por faixa
+        language:
+          $ref: '#/components/schemas/TrackLanguage'
+        title:
+          $ref: '#/components/schemas/TrackTitle'
+        defaultTrack:
+          $ref: '#/components/schemas/TrackDefault'
+
+    SubtitleTrack:
+      type: object
+      description: |
+        Faixa de legenda. A posição dela no array `subtitles` (0-based) é o valor a mandar em
+        `subtitleTrackIndex` ao iniciar uma sessão de playback — **não** o campo `index`.
+      properties:
+        index:
+          $ref: '#/components/schemas/StreamIndex'
+        codec:
+          type: string
+          nullable: true
+          description: |
+            Codec no nome do ffprobe (ex.: `subrip`, `ass`). No playback, `subrip`/`srt` vira
+            legenda soft (WebVTT) e os demais são queimados no vídeo.
+        language:
+          $ref: '#/components/schemas/TrackLanguage'
+        title:
+          $ref: '#/components/schemas/TrackTitle'
+        defaultTrack:
+          $ref: '#/components/schemas/TrackDefault'
+        forced:
+          type: boolean
+          nullable: true
+          description: >-
+            `true` se a faixa é "forçada" (só traduz falas em outro idioma ou letreiros)
+        hearingImpaired:
+          type: boolean
+          nullable: true
+          description: >-
+            `true` se a faixa é para deficientes auditivos (SDH/CC — descreve sons além das falas)
+
+    StreamIndex:
+      type: integer
+      format: int32
+      description: |
+        Índice global do stream no arquivo (campo `index` do ffprobe), contando todos os tipos.
+        Serve para identificar a faixa; para escolher faixas no playback use a posição no array.
+
+    TrackLanguage:
+      type: string
+      nullable: true
+      description: >-
+        Tag `language` do arquivo, normalmente ISO 639-2 (ex.: `jpn`, `eng`); `null` se ausente
+
+    TrackTitle:
+      type: string
+      nullable: true
+      description: 'Tag `title` do arquivo (ex.: `Japanese 5.1`); `null` se ausente'
+
+    TrackDefault:
+      type: boolean
+      nullable: true
+      description: '`true` se a faixa está marcada como padrão no arquivo'
+
+    MediaInfoResponse:
+      type: object
+      description: Metadados técnicos da mídia, com as faixas separadas por tipo na ordem do arquivo
+      required: [container, video, audio, subtitles]
+      properties:
+        container:
+          $ref: '#/components/schemas/MediaContainer'
+        video:
+          type: array
+          items:
+            $ref: '#/components/schemas/VideoTrack'
+        audio:
+          type: array
+          items:
+            $ref: '#/components/schemas/AudioTrack'
+        subtitles:
+          type: array
+          items:
+            $ref: '#/components/schemas/SubtitleTrack'
+
+    # ---------- playback ----------
+    SessionId:
+      type: string
+      format: uuid
+      description: Identificador da sessão de playback
+
+    StartPlaybackSessionRequest:
+      type: object
+      description: Parâmetros para iniciar uma sessão de transcode
+      required: [fileId, profile, audioTrackIndex]
+      properties:
+        fileId:
+          $ref: '#/components/schemas/FileId'
+        profile:
+          type: string
+          description: |
+            Profile de transcode escolhido pelo cliente. Os valores válidos são os profiles de
+            transcode suportados pelo backend; um valor desconhecido é rejeitado com `400`.
+        audioTrackIndex:
+          type: integer
+          format: int32
+          minimum: 0
+          description: |
+            Posição (0-based) da faixa no array `audio` do `GET /v1/mediaprobe/files/{fileId}` —
+            **não** o campo `index` da faixa, que é o índice global do stream no arquivo.
+        subtitleTrackIndex:
+          type: integer
+          format: int32
+          minimum: 0
+          nullable: true
+          description: |
+            Posição (0-based) da faixa no array `subtitles` do `GET /v1/mediaprobe/files/{fileId}`
+            — **não** o campo `index` da faixa. Legendas SRT viram faixa WebVTT soft
+            (selecionável no player); ASS e demais formatos são queimados no vídeo (hardsub).
+            Ausente/`null` reproduz sem legenda.
+
+    SeekRequest:
+      type: object
+      description: Nova posição do transcode
+      required: [positionSeconds]
+      properties:
+        positionSeconds:
+          type: number
+          format: double
+          minimum: 0
+          description: Instante alvo, em segundos a partir do início da mídia
+
+    PlaybackSession:
+      type: object
+      description: Sessão de playback recém-iniciada ou reposicionada
+      required: [sessionId, playlistUrl, startOffsetSeconds]
+      properties:
+        sessionId:
+          $ref: '#/components/schemas/SessionId'
+        playlistUrl:
+          type: string
+          description: |
+            URL (relativa ao host) da playlist `m3u8` da sessão — atalho para o endpoint
+            `GET /v1/playback/sessions/{sessionId}/playlist.m3u8`.
+        startOffsetSeconds:
+          type: number
+          format: double
+          minimum: 0
+          description: |
+            Posição de mídia, em segundos, que corresponde ao início da playlist (`currentTime 0`). O
+            cliente mapeia a posição local com base nela (`currentTime = alvo - startOffsetSeconds`) e
+            recarrega a source quando ela muda entre chamadas de seek (indicando que o transcode
+            reiniciou num novo offset). `0` no início da mídia.
+
+    M3u8Playlist:
+      type: string
+      description: Conteúdo da playlist HLS (`m3u8`) em texto
+
+    MediaFileName:
+      type: string
+      description: |
+        Nome de um arquivo HLS da sessão. Formatos aceitos:
+
+        - `segment_N.ts` / `segment_N.m4s` — segmento da rendition única (MPEG-TS ou fMP4);
+        - `segment_V_N.ts` / `segment_V_N.m4s` — segmento da variante `V` (ABR ou legenda soft);
+        - `init.mp4` — init segment fMP4 (via `#EXT-X-MAP`);
+        - `stream_V.m3u8` — variant playlist da variante `V`;
+        - `stream_V_vtt.m3u8` — playlist da rendition de legenda WebVTT;
+        - `stream_VN.vtt` — segmento de legenda WebVTT.
+
+        Nome fora desses formatos responde `404` (não `400`) — por isso não há `pattern` aqui.
+      example: segment_0.ts
+
+    MediaFileContent:
+      type: string
+      format: binary
+      description: |
+        Bytes de um arquivo HLS da sessão (segmento `.ts`/`.m4s`, init segment `.mp4`, playlist
+        `.m3u8` ou legenda `.vtt`)
+
+    SessionHeartbeat:
+      type: object
+      description: Validade da sessão após o heartbeat
+      required: [expiresInSeconds]
+      properties:
+        expiresInSeconds:
+          type: integer
+          format: int64
+          minimum: 0
+          description: |
+            Segundos restantes até a sessão expirar caso nenhum novo heartbeat chegue. O cliente
+            deve pingar novamente antes disso.
+
+    # ---------- anilist ----------
+    AnilistFormat:
+      type: string
+      description: |
+        Formato/tipo do anime na AniList (campo `Media.format`). `UNKNOWN` cobre valores que a
+        AniList venha a adicionar.
+      enum:
+        - TV
+        - TV_SHORT
+        - MOVIE
+        - SPECIAL
+        - OVA
+        - ONA
+        - MUSIC
+        - UNKNOWN
+
+    AnilistSeason:
+      type: string
+      description: Estação de estreia do anime (campo `Media.season`)
+      enum:
+        - WINTER
+        - SPRING
+        - SUMMER
+        - FALL
+        - UNKNOWN
+
+    AnilistTitle:
+      type: object
+      description: |
+        Bloco de títulos da AniList — 4 variantes coexistem. Campo `native` da AniList é
+        renomeado para `nativeTitle` no JSON porque colide com palavra reservada.
+      properties:
+        romaji:
+          type: string
+          nullable: true
+          description: Romanização; convenção AniList quando não há preferência
+        english:
+          type: string
+          nullable: true
+        nativeTitle:
+          type: string
+          nullable: true
+          description: Título em japonês (kanji/kana)
+        userPreferred:
+          type: string
+          nullable: true
+          description: Título preferido do usuário logado; sem token, coincide com `romaji`
+
+    AnilistCoverImage:
+      type: object
+      description: URLs de poster em 3 resoluções (cada campo pode ser `null`)
+      properties:
+        medium:
+          type: string
+          nullable: true
+          description: URL da imagem em tamanho pequeno (~100×145)
+        large:
+          type: string
+          nullable: true
+          description: URL da imagem em tamanho médio (~230×340)
+        extraLarge:
+          type: string
+          nullable: true
+          description: URL da imagem em tamanho grande (~460×645)
+
+    AnilistFuzzyDate:
+      type: object
+      description: Data parcial — qualquer componente pode ser `null` quando desconhecido
+      properties:
+        year:
+          type: integer
+          format: int32
+          nullable: true
+        month:
+          type: integer
+          format: int32
+          nullable: true
+        day:
+          type: integer
+          format: int32
+          nullable: true
+
+    AnilistMediaSummary:
+      type: object
+      description: |
+        Shape reduzido de `Media` para o endpoint de search — omite `relations` para evitar
+        payload grande (as relações de cada item). A chave pública é o `anilistId`, a mesma usada
+        pelo `animemetadata`.
+      required: [anilistId]
+      properties:
+        anilistId:
+          $ref: '#/components/schemas/AnilistId'
+        title:
+          allOf: [{ $ref: '#/components/schemas/AnilistTitle' }]
+          nullable: true
+        synonyms:
+          type: array
+          description: Lista de sinônimos
+          items:
+            type: string
+        coverImage:
+          allOf: [{ $ref: '#/components/schemas/AnilistCoverImage' }]
+          nullable: true
+        description:
+          type: string
+          nullable: true
+          description: Sinopse em HTML (mesma convenção do site AniList)
+        episodes:
+          type: integer
+          format: int32
+          nullable: true
+          description: Total de episódios; `null` para animes em exibição sem previsão
+        duration:
+          type: integer
+          format: int32
+          nullable: true
+          description: Duração média por episódio em minutos
+        startDate:
+          allOf: [{ $ref: '#/components/schemas/AnilistFuzzyDate' }]
+          nullable: true
+        seasonYear:
+          type: integer
+          format: int32
+          nullable: true
+          description: Ano da estação de estreia; mais confiável que `startDate.year`
+        format:
+          allOf: [{ $ref: '#/components/schemas/AnilistFormat' }]
+          nullable: true
+        season:
+          allOf: [{ $ref: '#/components/schemas/AnilistSeason' }]
+          nullable: true
+        averageScore:
+          type: integer
+          format: int32
+          nullable: true
+          description: Nota média em escala 0–100
+        isAdult:
+          type: boolean
+          nullable: true
+          description: Flag NSFW derivada do `isAdult` da AniList
+        genres:
+          type: array
+          description: Nomes de gêneros
+          items:
+            type: string
+
+    AnilistMediaSummaryPage:
+      description: Envelope paginado dos resultados de busca
+      allOf:
+        - $ref: '#/components/schemas/Page'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/AnilistMediaSummary'
+
+    # ---------- tmdb ----------
+    Language:
+      type: string
+      default: en-US
+      description: Tag de idioma BCP 47 (idioma ISO 639-1 + região ISO 3166-1)
+
+    GenreId:
+      type: integer
+      format: int32
+      description: Id de gênero no TMDB (não expandido)
+
+    Popularity:
+      type: number
+      format: double
+      description: Métrica de popularidade
+
+    VoteAverage:
+      type: number
+      format: double
+      description: Nota média (0–10)
+
+    VoteCount:
+      type: integer
+      format: int32
+      description: Total de votos
+
+    LanguageCode:
+      type: string
+      description: Código de idioma ISO 639-1
+
+    ImageUrl:
+      type: string
+      description: >-
+        URL absoluta da imagem no CDN do TMDB, já montada pelo módulo (base + tamanho). Pronta para
+        uso direto — o consumidor não completa nada.
+
+    TmdbMovieSearchResult:
+      type: object
+      description: Item de resultado de `GET /3/search/movie` — sempre um filme
+      required: [tmdbId]
+      properties:
+        tmdbId:
+          $ref: '#/components/schemas/TmdbId'
+        adult:
+          type: boolean
+          nullable: true
+          description: Flag de conteúdo adulto
+        popularity:
+          allOf: [{ $ref: '#/components/schemas/Popularity' }]
+          nullable: true
+        overview:
+          type: string
+          nullable: true
+          description: Sinopse
+        posterUrl:
+          allOf: [{ $ref: '#/components/schemas/ImageUrl' }]
+          nullable: true
+          description: URL absoluta do poster (tamanho `w185`)
+        backdropUrl:
+          allOf: [{ $ref: '#/components/schemas/ImageUrl' }]
+          nullable: true
+          description: URL absoluta do backdrop (tamanho `original`)
+        voteAverage:
+          allOf: [{ $ref: '#/components/schemas/VoteAverage' }]
+          nullable: true
+        voteCount:
+          allOf: [{ $ref: '#/components/schemas/VoteCount' }]
+          nullable: true
+        originalLanguage:
+          allOf: [{ $ref: '#/components/schemas/LanguageCode' }]
+          nullable: true
+        genreIds:
+          type: array
+          description: Ids de gêneros (não expandidos)
+          items:
+            $ref: '#/components/schemas/GenreId'
+        title:
+          type: string
+          nullable: true
+        originalTitle:
+          type: string
+          nullable: true
+          description: Título no idioma original
+        releaseDate:
+          type: string
+          nullable: true
+          description: Data de lançamento em ISO-8601
+        video:
+          type: boolean
+          nullable: true
+          description: Flag indicando vídeo direto
+
+    TmdbTvSearchResult:
+      type: object
+      description: Item de resultado de `GET /3/search/tv` — sempre uma série
+      required: [tmdbId]
+      properties:
+        tmdbId:
+          $ref: '#/components/schemas/TmdbId'
+        adult:
+          type: boolean
+          nullable: true
+          description: Flag de conteúdo adulto
+        popularity:
+          allOf: [{ $ref: '#/components/schemas/Popularity' }]
+          nullable: true
+        overview:
+          type: string
+          nullable: true
+          description: Sinopse
+        posterUrl:
+          allOf: [{ $ref: '#/components/schemas/ImageUrl' }]
+          nullable: true
+          description: URL absoluta do poster (tamanho `w185`)
+        backdropUrl:
+          allOf: [{ $ref: '#/components/schemas/ImageUrl' }]
+          nullable: true
+          description: URL absoluta do backdrop (tamanho `original`)
+        voteAverage:
+          allOf: [{ $ref: '#/components/schemas/VoteAverage' }]
+          nullable: true
+        voteCount:
+          allOf: [{ $ref: '#/components/schemas/VoteCount' }]
+          nullable: true
+        originalLanguage:
+          allOf: [{ $ref: '#/components/schemas/LanguageCode' }]
+          nullable: true
+        genreIds:
+          type: array
+          description: Ids de gêneros (não expandidos)
+          items:
+            $ref: '#/components/schemas/GenreId'
+        name:
+          type: string
+          nullable: true
+          description: Nome da série
+        originalName:
+          type: string
+          nullable: true
+          description: Nome no idioma original
+        firstAirDate:
+          type: string
+          nullable: true
+          description: Data de estreia em ISO-8601
+        originCountry:
+          type: array
+          description: Países de origem
+          items:
+            type: string
+
+    TmdbMovieSearchResultPage:
+      description: Envelope paginado de resultados de filmes
+      allOf:
+        - $ref: '#/components/schemas/Page'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/TmdbMovieSearchResult'
+
+    TmdbTvSearchResultPage:
+      description: Envelope paginado de resultados de séries
+      allOf:
+        - $ref: '#/components/schemas/Page'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/TmdbTvSearchResult'
+
+    # ---------- animemetadata ----------
+    GraphDepth:
+      type: integer
+      format: int32
+      default: 3
+      description: Profundidade máxima da BFS de relações
+
+    TmdbMediaType:
+      type: string
+      description: |
+        Discriminador do binding TMDB. Aceito em ambas as caixas no request; a resposta
+        sempre serializa em minúsculas (`tv` ou `movie`).
+      enum:
+        - tv
+        - movie
+
+    AnimeBindingRequest:
+      type: object
+      description: Payload de binding anime↔pasta
+      required: [folderId]
+      properties:
+        folderId:
+          $ref: '#/components/schemas/FolderId'
+
+    AnimeFranchiseRootRequest:
+      type: object
+      description: Payload da curadoria manual da raiz de franquia (tri-state)
+      properties:
+        isFranchiseRoot:
+          type: boolean
+          nullable: true
+          description: >-
+            `true` força este anime como raiz, mesmo com relação ancestral; `false` força NÃO ser
+            raiz (desabilita a raiz natural, mesmo sem ancestral); `null` volta ao automático — é
+            raiz quando não sai dele nenhuma relação `PREQUEL` nem `PARENT`.
+
+    AnimeViewTitles:
+      type: object
+      description: Títulos localizados
+      properties:
+        main:
+          type: string
+          nullable: true
+          description: Título principal
+        english:
+          type: string
+          nullable: true
+        japanese:
+          type: string
+          nullable: true
+        synonyms:
+          type: array
+          nullable: true
+          items:
+            type: string
+
+    AnimeViewThumbnails:
+      type: object
+      description: URLs de poster em 3 resoluções
+      properties:
+        small:
+          type: string
+          nullable: true
+        medium:
+          type: string
+          nullable: true
+        large:
+          type: string
+          nullable: true
+
+    AnimeBindingSummary:
+      type: object
+      description: |
+        Resumo leve do binding de uma pasta — o suficiente para o card do catálogo
+        (status vinculado + capa + título). Para a vista completa use o `AnimeView`.
+      required: [folderId, anilistId]
+      properties:
+        folderId:
+          $ref: '#/components/schemas/FolderId'
+        anilistId:
+          $ref: '#/components/schemas/AnilistId'
+        title:
+          type: string
+          nullable: true
+          description: Título principal
+        thumbnail:
+          type: string
+          nullable: true
+          description: URL do poster (resolução média)
+        year:
+          type: integer
+          format: int32
+          nullable: true
+        format:
+          type: string
+          nullable: true
+          description: Formato (`TV`, `MOVIE`, `OVA`, ...)
+        hasTmdb:
+          type: boolean
+          nullable: true
+          description: '`true` se o anime também tem binding TMDB'
+
+    AnimeView:
+      type: object
+      description: |
+        Vista pública de um anime. `banner`/`logo` só são preenchidos quando há binding
+        TMDB + override manual. `synopsis` vem em HTML quando a fonte é AniList (pode
+        conter `<br>`, `<i>`, `<b>`).
+      required: [anilistId]
+      properties:
+        anilistId:
+          $ref: '#/components/schemas/AnilistId'
+        titles:
+          allOf: [{ $ref: '#/components/schemas/AnimeViewTitles' }]
+          nullable: true
+        synopsis:
+          type: string
+          nullable: true
+          description: Sinopse em HTML
+        thumbnails:
+          allOf: [{ $ref: '#/components/schemas/AnimeViewThumbnails' }]
+          nullable: true
+        banner:
+          type: string
+          nullable: true
+          description: Backdrop; URL absoluta quando há override manual
+        logo:
+          type: string
+          nullable: true
+          description: Logo; URL absoluta quando há override manual
+        episodes:
+          type: integer
+          format: int32
+          nullable: true
+        duration:
+          type: string
+          nullable: true
+          description: Duração média por episódio (formato livre)
+        year:
+          type: integer
+          format: int32
+          nullable: true
+        format:
+          type: string
+          nullable: true
+          description: Formato do anime (`TV`, `MOVIE`, `OVA`, ...)
+        season:
+          type: string
+          nullable: true
+          description: Estação de estreia (`WINTER`, `SPRING`, ...)
+        score:
+          type: number
+          format: double
+          nullable: true
+          description: Nota média em escala 0–10
+        isAdult:
+          type: boolean
+          nullable: true
+          description: Flag NSFW
+        genres:
+          type: array
+          nullable: true
+          items:
+            type: string
+        isFranchiseRoot:
+          type: boolean
+          nullable: true
+          description: >-
+            Curadoria manual (tri-state): `true` força raiz; `false` força não-raiz; `null` =
+            automático (raiz quando não sai dele nenhuma relação `PREQUEL` nem `PARENT`).
+
+    AnimeViewPage:
+      description: Envelope paginado de animes
+      allOf:
+        - $ref: '#/components/schemas/Page'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/AnimeView'
+
+    AnimeRelationNode:
+      type: object
+      description: Vértice do grafo (payload minimalista para o front)
+      required: [anilistId]
+      properties:
+        anilistId:
+          $ref: '#/components/schemas/AnilistId'
+        title:
+          type: string
+          nullable: true
+          description: Título principal
+        posterUrl:
+          type: string
+          nullable: true
+          description: URL do poster (thumbnail)
+        folderId:
+          allOf: [{ $ref: '#/components/schemas/FolderId' }]
+          nullable: true
+        rootKind:
+          allOf: [{ $ref: '#/components/schemas/AnimeRootKind' }]
+          nullable: true
+          description: >-
+            Classificação de raiz já decidida no backend a partir da curadoria + estrutura do grafo.
+            Ausente/`null` = não é raiz. A curadoria crua (`isFranchiseRoot`) vive no detalhe do
+            anime, não no nó do grafo.
+
+    AnimeRootKind:
+      type: string
+      description: >-
+        Tipo de raiz de franquia resolvido no backend. `MANUAL` = curadoria explícita
+        (`isFranchiseRoot = true`); `NATURAL` = curadoria automática (`isFranchiseRoot = null`) e
+        nenhuma relação ancestral (`PREQUEL` ou `PARENT`) sai do anime.
+      enum:
+        - MANUAL
+        - NATURAL
+
+    AnimeRelationEdge:
+      type: object
+      description: Aresta do grafo
+      required: [from, to]
+      properties:
+        from:
+          allOf: [{ $ref: '#/components/schemas/AnilistId' }]
+          description: '`anilistId` de origem'
+        to:
+          allOf: [{ $ref: '#/components/schemas/AnilistId' }]
+          description: '`anilistId` de destino'
+        relationType:
+          type: string
+          nullable: true
+          description: 'Nome do enum (ex.: `SEQUEL`, `PREQUEL`)'
+
+    AnimeRelationGraphResponse:
+      type: object
+      description: Grafo materializado a partir de um anime raiz
+      required: [rootAnilistId]
+      properties:
+        rootAnilistId:
+          allOf: [{ $ref: '#/components/schemas/AnilistId' }]
+          description: '`anilistId` que ancorou a busca'
+        nodes:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/AnimeRelationNode'
+        edges:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/AnimeRelationEdge'
+
+    TmdbBindingRequest:
+      type: object
+      description: Payload de binding TMDB
+      required: [tmdbId, mediaType]
+      properties:
+        tmdbId:
+          $ref: '#/components/schemas/TmdbId'
+        mediaType:
+          $ref: '#/components/schemas/TmdbMediaType'
+
+    TmdbOverrides:
+      type: object
+      description: |
+        Overrides TMDB — todos os campos opcionais; `null` significa "não sobrepõe".
+        Também usado como body de PUT (body com todos `null` apaga a linha).
+      properties:
+        title:
+          type: string
+          nullable: true
+        synopsis:
+          type: string
+          nullable: true
+        posterPath:
+          type: string
+          nullable: true
+          description: Caminho relativo do poster (`filePath` cru do TMDB)
+        backdropPath:
+          type: string
+          nullable: true
+        logoPath:
+          type: string
+          nullable: true
+
+    TmdbAnimeStateResponse:
+      type: object
+      description: Estado TMDB do anime (binding + overrides)
+      properties:
+        tmdbId:
+          allOf: [{ $ref: '#/components/schemas/TmdbId' }]
+          nullable: true
+        mediaType:
+          allOf: [{ $ref: '#/components/schemas/TmdbMediaType' }]
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+          nullable: true
+        overrides:
+          allOf: [{ $ref: '#/components/schemas/TmdbOverrides' }]
+          nullable: true
+
+    TmdbLocalizedOption:
+      type: object
+      description: |
+        Opção textual do schema de overrides. `value` é o que o front grava como override;
+        `language` é apenas para exibição (badge de idioma).
+      properties:
+        value:
+          type: string
+          nullable: true
+        language:
+          type: string
+          nullable: true
+          description: ISO 639-1; `null` quando o TMDB não informa
+
+    TmdbImageOption:
+      type: object
+      description: |
+        Opção de imagem do schema de overrides. `value` é o `filePath` cru; `previewUrl`
+        é a URL completa pronta para renderizar.
+      properties:
+        value:
+          type: string
+          nullable: true
+          description: '`filePath` relativo (grava em overrides)'
+        previewUrl:
+          type: string
+          nullable: true
+          description: URL completa para preview
+        language:
+          type: string
+          nullable: true
+          description: ISO 639-1; `null` para variantes neutras
+        width:
+          type: integer
+          format: int32
+          nullable: true
+        height:
+          type: integer
+          format: int32
+          nullable: true
+
+    TmdbOverridesSchema:
+      type: object
+      description: Opções concretas por campo que aceita override (traduções e imagens)
+      properties:
+        title:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/TmdbLocalizedOption'
+        synopsis:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/TmdbLocalizedOption'
+        posterPath:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/TmdbImageOption'
+        backdropPath:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/TmdbImageOption'
+        logoPath:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/TmdbImageOption'
+
+    TmdbFilePairingSchemaEpisode:
+      type: object
+      description: Episódio numa temporada do schema de pairing
+      properties:
+        episodeNumber:
+          type: integer
+          format: int32
+          nullable: true
+        name:
+          type: string
+          nullable: true
+        airDate:
+          type: string
+          nullable: true
+          description: Data de estreia ISO-8601 (`null` para episódios futuros)
+        defaultStillPath:
+          type: string
+          nullable: true
+          description: Valor a mandar em `thumbnailPath` do PUT
+        defaultStillPreviewUrl:
+          type: string
+          nullable: true
+          description: URL já dimensionada para preview no modal
+
+    TmdbFilePairingSchemaSeason:
+      type: object
+      description: Temporada no schema de pairing
+      properties:
+        seasonNumber:
+          type: integer
+          format: int32
+          nullable: true
+          description: '`0` = specials'
+        name:
+          type: string
+          nullable: true
+        episodes:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/TmdbFilePairingSchemaEpisode'
+
+    TmdbFilePairingSchema:
+      type: object
+      description: |
+        Estrutura da série TMDB vinculada — temporadas com episódios. Consumido pelo
+        modal do PUT do pairing, para o cliente não precisar adivinhar temporada/episódio.
+      properties:
+        seasons:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/TmdbFilePairingSchemaSeason'
+
+    TmdbFilePairingRequest:
+      type: object
+      description: |
+        Payload de PUT — descreve o estado completo do pairing. Todos campos opcionais;
+        `null` zera aquela dimensão. Para remover a linha inteira use DELETE.
+      properties:
+        seasonNumber:
+          type: integer
+          format: int32
+          nullable: true
+        episodeNumber:
+          type: integer
+          format: int32
+          nullable: true
+        thumbnailPath:
+          type: string
+          nullable: true
+          description: '`filePath` relativo do CDN do TMDB'
+
+    TmdbFilePairingResponse:
+      type: object
+      description: Pairing atual (campos `null` refletem estado parcial)
+      properties:
+        fileId:
+          allOf: [{ $ref: '#/components/schemas/FileId' }]
+          nullable: true
+        seasonNumber:
+          type: integer
+          format: int32
+          nullable: true
+        episodeNumber:
+          type: integer
+          format: int32
+          nullable: true
+        thumbnailPath:
+          type: string
+          nullable: true
+
+    # ---------- settings ----------
+    SettingKey:
+      type: string
+      minLength: 1
+      description: Identificador da preferência
+
+    SettingValue:
+      type: string
+      description: Valor cru da preferência (interpretado pelo tipo no ponto de leitura)
+
+    SettingResponse:
+      type: object
+      description: Preferência do admin; o `value` de preferências `secret` nunca é devolvido
+      required: [key, secret, configured, updatedAt]
+      properties:
+        key:
+          $ref: '#/components/schemas/SettingKey'
+        value:
+          type: string
+          nullable: true
+          description: '`null` quando `secret` é `true` (nunca ecoado); senão o valor cru'
+        secret:
+          type: boolean
+          description: >-
+            `true` para preferências sensíveis (ex.: tokens) — o portal renderiza como senha
+        configured:
+          type: boolean
+          description: >-
+            `true` se há um valor não-vazio cadastrado (útil para secrets, cujo `value` é mascarado)
+        updatedAt:
+          type: string
+          format: date-time
+          description: Momento da última atualização
+
+    UpdateSettingRequest:
+      type: object
+      description: Payload de `PUT /v1/settings/{key}`
+      required: [value]
+      properties:
+        value:
+          allOf: [{ $ref: '#/components/schemas/SettingValue' }]
+          description: 'Novo valor; string vazia é permitida (ex.: limpar um secret)'
+
+    SettingList:
+      type: array
+      description: Lista de preferências, ordenada pela chave
+      items:
+        $ref: '#/components/schemas/SettingResponse'
+
+    # ---------- notification ----------
+    NotificationLevel:
+      type: string
+      description: Severidade da notificação
+      enum:
+        - INFO
+        - WARNING
+        - ERROR
+
+    Notification:
+      type: object
+      description: |
+        Notificação de observabilidade — hoje geradas pela ingestão (conclusão, falha geral e
+        falhas parciais do binding automático de cada título).
+      required: [id, level, message, read, createdAt]
+      properties:
+        id:
+          type: integer
+          format: int32
+          description: Id da notificação
+        level:
+          $ref: '#/components/schemas/NotificationLevel'
+        message:
+          type: string
+          description: Texto pronto para exibir ao admin
+        folderId:
+          allOf: [{ $ref: '#/components/schemas/FolderId' }]
+          nullable: true
+          description: |
+            Pasta do catalog do título a que a notificação se refere — o portal usa para linkar a
+            revisão. `null` quando a notificação não é sobre um título (ex.: conclusão da
+            ingestão).
+        animeTitle:
+          type: string
+          nullable: true
+          description: >-
+            Título a que a notificação se refere; `null` nas mesmas condições de `folderId`
+        coverImageUrl:
+          type: string
+          nullable: true
+          description: URL da capa em tamanho pequeno (ícone); `null` quando não há capa conhecida
+        read:
+          type: boolean
+          description: '`true` se o admin já marcou como lida'
+        createdAt:
+          type: string
+          format: date-time
+          description: Momento em que a notificação foi gerada
+
+    UnreadCount:
+      type: object
+      description: Contagem de notificações não-lidas
+      required: [count]
+      properties:
+        count:
+          type: integer
+          format: int32
