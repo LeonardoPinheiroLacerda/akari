@@ -39,15 +39,17 @@ src/main/java/io/github/leonardopinheirolacerda/akari/
 ├── mappers/       # *Mapper — MapStruct: model ↔ DTO gerado, resposta de client → model
 ├── clients/       # REST clients de sistemas externos, um subpacote por sistema
 │   └── tmdb/      #   ex.: TmdbClient + records da resposta do TMDB
-├── exceptions/    # AkariException e subclasses + ExceptionMappers → ApiError
+├── exceptions/    # AkariException e subclasses
+│   └── mapper/    #   ExceptionMappers → ApiError (+ ApiErrorResponses)
 └── config/        # configuração transversal: health checks, @ConfigMapping, producers
 
 target/generated-sources/openapi/.../akari/api/       # interfaces JAX-RS geradas (*Api)
 target/generated-sources/openapi/.../akari/api/dto/   # DTOs gerados (ApiError, *Response, ...)
 ```
 
-- Pacotes **sem subpacotes por domínio** (nada de `services/catalog/`). A exceção é `clients/`,
-  que agrupa por sistema externo (`clients/tmdb`, `clients/anilist`, `clients/rclone`).
+- Pacotes **sem subpacotes por domínio** (nada de `services/catalog/`). As exceções são
+  `clients/`, que agrupa por sistema externo (`clients/tmdb`, `clients/anilist`, `clients/rclone`),
+  e `exceptions/mapper/`, que separa os ExceptionMappers das exceções.
 - Fluxo de uma requisição: `*Resource` → `*Service` → `models` (Panache) e/ou `clients`.
   O resource converte entrada/saída com o `*Mapper`.
 - Service pode injetar outro service quando a regra atravessa domínios (ex.: o service de
@@ -66,7 +68,7 @@ target/generated-sources/openapi/.../akari/api/dto/   # DTOs gerados (ApiError, 
 | `*Mapper` | `mappers/` | MapStruct (`@Mapper(componentModel = "cdi")`) |
 | `*Client` | `clients/<sistema>/` | REST client (`@RegisterRestClient`) |
 | `*Exception` | `exceptions/` | subclasse de `AkariException`, fixa status + `ApiErrorCode` |
-| `*ExceptionMapper` | `exceptions/` | `@ServerExceptionMapper` → `ApiError`, uma classe por tipo de erro |
+| `*ExceptionMapper` | `exceptions/mapper/` | `@ServerExceptionMapper` → `ApiError`, uma classe por tipo de erro |
 | `*HealthCheck` | `config/` | `@Liveness`/`@Readiness` do SmallRye Health |
 
 **Models não levam sufixo `Entity`**: o model é o conceito do domínio. Os DTOs gerados já têm
@@ -180,8 +182,11 @@ public static Optional<MediaFolder> findByProviderAndPath(Integer providerId, St
 
 - Exceções da aplicação estendem `AkariException`, que carrega o status HTTP e o `ApiErrorCode`
   (enum gerado do contrato). Subclasse nova só quando surgir um status/código novo.
-- Os `*ExceptionMapper` (`@ServerExceptionMapper`) ficam no mesmo pacote, um por tipo de erro,
-  e montam a resposta pelo `ApiErrorResponses`. O corpo é sempre o `ApiError` do contrato.
+- Os `*ExceptionMapper` (`@ServerExceptionMapper`) ficam em `exceptions/mapper/`, um por tipo de
+  erro, e montam a resposta pelo `ApiErrorResponses` (utilitário do mesmo subpacote). O corpo é
+  sempre o `ApiError` do contrato.
+- `exceptions/` não depende de `exceptions/mapper/`: no Javadoc das exceções, cite os mappers
+  com `{@code}`, não `{@link}` (o link exigiria o import e criaria dependência circular).
 
 ## DTOs da API
 
@@ -350,7 +355,7 @@ callers: agrupe num `record` aninhado no próprio service (`MediaFolderService.F
 ## Checklist para arquivo novo
 
 - [ ] Pacote correto pelo tipo de componente (`resources`, `services`, `models`, `mappers`,
-      `clients/<sistema>`, `exceptions`, `config`).
+      `clients/<sistema>`, `exceptions`, `exceptions/mapper`, `config`).
 - [ ] Sufixo da classe bate com o papel (models sem sufixo).
 - [ ] Injeções em linhas separadas, com linha em branco entre elas.
 - [ ] Nomes dos campos injetados preservam o sufixo da classe.

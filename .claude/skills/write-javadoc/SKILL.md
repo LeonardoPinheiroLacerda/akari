@@ -115,7 +115,7 @@ repete anotações JAX-RS — só implementa os métodos.
  *
  * <p>Só traduz HTTP ↔ service, convertendo com o {@link XxxMapper}. Bean Validation dos DTOs
  * gerados vira 400; exceções da aplicação ({@code AkariException}) viram o status/código de
- * cada uma pelos mappers do pacote {@code exceptions}.
+ * cada uma pelos mappers de {@code exceptions.mapper}.
  */
 public class XxxResource implements XxxApi {
 
