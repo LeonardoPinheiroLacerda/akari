@@ -16,9 +16,9 @@ import org.jboss.resteasy.reactive.server.ServerExceptionMapper;
 public class WebApplicationExceptionMapper {
 
     /**
-     * Responde com o status da exceção e o código derivado dele: {@code 404} vira
-     * {@code RESOURCE_NOT_FOUND}, os demais {@code 4xx} viram {@code REQUEST_ERROR} e {@code 5xx}
-     * vira {@code INTERNAL_ERROR}.
+     * Responde com o status da exceção e o código derivado dele: {@code 400} vira
+     * {@code VALIDATION_ERROR}, {@code 404} vira {@code RESOURCE_NOT_FOUND}, os demais {@code 4xx}
+     * viram {@code REQUEST_ERROR} e {@code 5xx} vira {@code INTERNAL_ERROR}.
      *
      * @param e erro lançado pelo runtime JAX-RS (ou por código que lançou um
      *          {@link WebApplicationException} diretamente)
@@ -30,7 +30,9 @@ public class WebApplicationExceptionMapper {
 
         final ApiErrorCode code;
 
-        if (status == 404) {
+        if (status == 400) {
+            code = ApiErrorCode.VALIDATION_ERROR;
+        } else if (status == 404) {
             code = ApiErrorCode.RESOURCE_NOT_FOUND;
         } else if (status < 500) {
             code = ApiErrorCode.REQUEST_ERROR;
