@@ -1,11 +1,40 @@
 # Ambiente de DESENVOLVIMENTO (hot reload + debug)
 # Uso: docker compose -f docker-compose.dev.yml up --build
 services:
+  postgres:
+    image: postgres:17-alpine
+
+    environment:
+      POSTGRES_DB: akari
+      POSTGRES_USER: akari
+      POSTGRES_PASSWORD: akari
+
+    ports:
+      # Exposto para inspecionar o banco pela IDE / psql
+      - "5432:5432"
+
+    volumes:
+      - ./data/postgres-dev-data:/var/lib/postgresql/data
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+    restart: unless-stopped
+
   akari-dev:
     build:
       context: .
       dockerfile: Dockerfile.dev
     image: akari:dev
+
+    environment:
+      # Com a URL definida, o Dev Services não tenta subir outro banco dentro do container
+      QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/akari
+      QUARKUS_DATASOURCE_USERNAME: akari
+      QUARKUS_DATASOURCE_PASSWORD: akari
 
     ports:
       # HTTP (Quarkus + Dev UI em /q/dev)
@@ -20,4 +49,11 @@ services:
       # (HOME do usuário 185 na imagem UBI é /home/default)
       - ./data/.m2:/home/default/.m2
 
+    depends_on:
+      postgres:
+        condition: service_healthy
+
     restart: unless-stopped
+
+volumes:
+  postgres-dev-data:
