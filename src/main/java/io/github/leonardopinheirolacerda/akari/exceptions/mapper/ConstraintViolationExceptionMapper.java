@@ -1,4 +1,4 @@
-package io.github.leonardopinheirolacerda.akari.exceptions;
+package io.github.leonardopinheirolacerda.akari.exceptions.mapper;
 
 import io.github.leonardopinheirolacerda.akari.api.dto.ApiErrorCode;
 import io.github.leonardopinheirolacerda.akari.api.dto.ErrorDetail;

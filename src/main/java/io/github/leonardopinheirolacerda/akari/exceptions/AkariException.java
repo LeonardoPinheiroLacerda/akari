@@ -6,7 +6,7 @@ import io.github.leonardopinheirolacerda.akari.api.dto.ApiErrorCode;
  * Base das exceções da aplicação: cada subclasse fixa o status HTTP e o {@link ApiErrorCode} que
  * o cliente recebe.
  *
- * <p>Quando uma subclasse escapa de um resource, o {@link AkariExceptionMapper} responde com o
+ * <p>Quando uma subclasse escapa de um resource, o {@code AkariExceptionMapper} responde com o
  * {@code ApiError} do contrato usando {@link #status()}, {@link #code()} e a mensagem da
  * exceção — por isso a mensagem deve ser legível para o consumidor da API.
  */
