@@ -24,6 +24,18 @@ services:
 
     restart: unless-stopped
 
+  rclone:
+    image: rclone/rclone:1.75.1
+
+    # --rc-addr precisa ser 0.0.0.0 (não localhost) pra ficar acessível pelos
+    # outros containers da rede do compose, como o akari-dev.
+    command: rcd --rc-no-auth --rc-addr 0.0.0.0:5572 --log-file /var/log/rclone/rclone.log
+
+    volumes:
+      - ./data/rclone-logs:/var/log/rclone
+
+    restart: unless-stopped
+
   akari-dev:
     build:
       context: .
@@ -52,6 +64,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      rclone:
+        condition: service_started
 
     restart: unless-stopped
 
