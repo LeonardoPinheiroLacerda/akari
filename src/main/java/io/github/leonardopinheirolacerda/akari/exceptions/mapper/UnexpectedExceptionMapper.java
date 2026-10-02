@@ -1,8 +1,11 @@
 package io.github.leonardopinheirolacerda.akari.exceptions.mapper;
 
 import io.github.leonardopinheirolacerda.akari.api.dto.ApiErrorCode;
+import io.github.leonardopinheirolacerda.akari.api.dto.ErrorDetail;
 import jakarta.ws.rs.core.Response;
 import org.jboss.resteasy.reactive.server.ServerExceptionMapper;
+
+import java.util.List;
 
 /**
  * Rede de segurança: traduz qualquer exceção sem mapper mais específico em {@code 500} com
@@ -23,10 +26,15 @@ public class UnexpectedExceptionMapper {
      */
     @ServerExceptionMapper
     public Response map(Throwable e) {
+        final ErrorDetail message = new ErrorDetail();
+        message.field("exception message");
+        message.error(e.getMessage());
+
         return ApiErrorResponses.of(
                 500,
                 ApiErrorCode.INTERNAL_ERROR,
                 "Erro inesperado no servidor",
+                List.of(message),
                 e
         );
     }
