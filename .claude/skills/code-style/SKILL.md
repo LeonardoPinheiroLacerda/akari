@@ -51,7 +51,9 @@ target/generated-sources/openapi/.../akari/api/dto/   # DTOs gerados (ApiError, 
   `clients/`, que agrupa por sistema externo (`clients/tmdb`, `clients/anilist`, `clients/rclone`),
   e `exceptions/mapper/`, que separa os ExceptionMappers das exceções.
 - Fluxo de uma requisição: `*Resource` → `*Service` → `models` (Panache) e/ou `clients`.
-  O resource converte entrada/saída com o `*Mapper`.
+  O resource é uma camada burra, sem orquestração: só delega pro service e devolve o retorno.
+  Quem converte entrada/saída com o `*Mapper` é o **service** (injeta o mapper, recebe/devolve
+  DTO gerado nas bordas do método).
 - Service pode injetar outro service quando a regra atravessa domínios (ex.: o service de
   ingestão usa o de catálogo). Nunca acesse `models` de outro domínio pelo resource — passe
   pelo service.
@@ -139,8 +141,9 @@ public static Optional<MediaFolder> findByProviderAndPath(Integer providerId, St
 ## Services
 
 - `@ApplicationScoped`, um por domínio.
-- Recebem e devolvem **models** (ou tipos simples) — nunca DTOs gerados. A conversão para o
-  contrato é do resource, via `*Mapper`.
+- Recebem e devolvem **DTO gerado do contrato** nas bordas do método (parâmetro de entrada e
+  retorno) — o service injeta o `*Mapper` e converte model ↔ DTO internamente. O resource não
+  vê model nenhum.
 - `@Transactional` nos métodos que escrevem.
 - Sinalizam erro lançando a `AkariException` adequada (`ResourceNotFoundException`,
   `BusinessRuleException`, `IntegrationException`, `IntegrationNotConfiguredException`).
@@ -158,14 +161,16 @@ public static Optional<MediaFolder> findByProviderAndPath(Integer providerId, St
   JAX-RS.
 - Nomes dos métodos, parâmetros e tipos de retorno vêm do `operationId` e dos schemas do contrato.
 - Retorna o DTO gerado direto (não `Response`): o status de sucesso está no contrato.
-- Só traduz: DTO → model/parâmetros com o `*Mapper`, chama o service, model → DTO.
-  Nenhuma regra de negócio.
+- **Camada burra: só delega.** Injeta o `*Service` e chama o método correspondente, passando os
+  parâmetros/DTO recebidos e devolvendo o que o service retornar — sem tradução, sem chamar
+  `*Mapper`, sem nenhuma lógica. Toda orquestração (mapper + regra de negócio) é do service.
 - Erros: lance `AkariException` (ou deixe o service lançar). Nunca monte `Response` de erro no
   resource.
 
 ## Mappers
 
-- MapStruct, `@Mapper(componentModel = "cdi")`, injetados por `@Inject`.
+- MapStruct, `@Mapper(componentModel = "cdi")`, injetados por `@Inject` **no `*Service`** (nunca
+  no resource).
 - Convertem model ↔ DTO gerado e resposta de client → model. Um mapper por domínio
   (`MediaFolderMapper`), não um por par de tipos.
 - Sem lógica de negócio: só cópia de campos, renomes (`@Mapping`) e conversões triviais.
@@ -340,7 +345,8 @@ callers: agrupe num `record` aninhado no próprio service (`MediaFolderService.F
   `*DataProvider` em cima do Panache, ou modelo de domínio paralelo à entidade.
 - Subpacote por domínio dentro de `services/`, `resources/`, `models/` ou `mappers/`.
 - DTO da API escrito à mão (é gerado do contrato).
-- Service recebendo ou devolvendo DTO gerado (a conversão é do resource).
+- Resource recebendo/devolvendo model, chamando `*Mapper`, ou fazendo qualquer tradução —
+  resource é camada burra, isso é do service.
 - Regra de negócio no resource ou no mapper.
 - `Response` montada no resource para erro (lance `AkariException`).
 - Resource repetindo anotações JAX-RS que já estão na interface gerada.
