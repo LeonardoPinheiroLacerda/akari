@@ -8,12 +8,19 @@ import io.github.leonardopinheirolacerda.akari.exceptions.ResourceNotFoundExcept
 import io.github.leonardopinheirolacerda.akari.mapper.StorageProvidersMapper;
 import io.github.leonardopinheirolacerda.akari.model.pageable.PageResult;
 import io.github.leonardopinheirolacerda.akari.model.StorageProvider;
+import io.github.leonardopinheirolacerda.akari.providers.StorageProviderConfigs;
+import io.github.leonardopinheirolacerda.akari.providers.processors.ObscureFieldApplier;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
 
+import java.util.Map;
+
 @ApplicationScoped
 public class StorageProvidersService {
+
+    @Inject
+    ObscureFieldApplier obscureFieldApplier;
 
     @Inject
     StorageProvidersMapper mapper;
@@ -22,7 +29,11 @@ public class StorageProvidersService {
     public StorageProviderResponse createStorageProvider(CreateStorageProviderRequest createStorageProviderRequest) {
         final StorageProvider storageProvider = new StorageProvider();
 
-        storageProvider.config = createStorageProviderRequest.getConfig();
+        storageProvider.config = obscureFieldApplier.obscureRequiredFields(
+                createStorageProviderRequest.getConfig(),
+                StorageProviderConfigs.configTypeOf(createStorageProviderRequest.getType())
+        );
+
         storageProvider.type = createStorageProviderRequest.getType();
 
         storageProvider.persist();
@@ -36,7 +47,10 @@ public class StorageProvidersService {
             UpdateStorageProviderConfigRequest updateStorageProviderConfigRequest) {
         final StorageProvider storageProvider = findOrThrow(providerId);
 
-        storageProvider.config = updateStorageProviderConfigRequest.getConfig();
+        storageProvider.config = obscureFieldApplier.obscureRequiredFields(
+                updateStorageProviderConfigRequest.getConfig(),
+                StorageProviderConfigs.configTypeOf(storageProvider.type)
+        );
 
         return mapper.toResponse(storageProvider);
     }
