@@ -38,7 +38,8 @@ src/main/java/io/github/leonardopinheirolacerda/akari/
 ├── models/        # entidades JPA/Panache (active record) + enums persistidos
 ├── mappers/       # *Mapper — MapStruct: model ↔ DTO gerado, resposta de client → model
 ├── clients/       # REST clients de sistemas externos, um subpacote por sistema
-│   └── tmdb/      #   ex.: TmdbClient + records da resposta do TMDB
+│   └── tmdb/      #   TmdbClient
+│       └── dtos/   #   records da resposta do TMDB
 ├── exceptions/    # AkariException e subclasses
 │   └── mapper/    #   ExceptionMappers → ApiError (+ ApiErrorResponses)
 └── config/        # configuração transversal: health checks, @ConfigMapping, producers
@@ -48,8 +49,10 @@ target/generated-sources/openapi/.../akari/api/dto/   # DTOs gerados (ApiError, 
 ```
 
 - Pacotes **sem subpacotes por domínio** (nada de `services/catalog/`). As exceções são
-  `clients/`, que agrupa por sistema externo (`clients/tmdb`, `clients/anilist`, `clients/rclone`),
-  e `exceptions/mapper/`, que separa os ExceptionMappers das exceções.
+  `clients/`, que agrupa por sistema externo (`clients/tmdb`, `clients/anilist`, `clients/rclone`)
+  e, dentro de cada um, separa os records de request/response em `dtos/`
+  (`clients/tmdb/dtos/`, `clients/rclone/dtos/`); e `exceptions/mapper/`, que separa os
+  ExceptionMappers das exceções.
 - Fluxo de uma requisição: `*Resource` → `*Service` → `models` (Panache) e/ou `clients`.
   O resource é uma camada burra, sem orquestração: só delega pro service e devolve o retorno.
   Quem converte entrada/saída com o `*Mapper` é o **service** (injeta o mapper, recebe/devolve
@@ -178,8 +181,10 @@ public static Optional<MediaFolder> findByProviderAndPath(Integer providerId, St
 ## Clients
 
 - `@RegisterRestClient(configKey = "<sistema>")`, URL em `quarkus.rest-client.<sistema>.url`.
-- Os records da resposta upstream ficam no mesmo subpacote do client (`clients/tmdb/`), com o
-  nome do upstream (`TmdbMovieSearchResponse`) — não são DTOs da nossa API.
+- Os records de request/response do upstream ficam em `clients/<sistema>/dtos/`
+  (`clients/tmdb/dtos/`), com o nome do upstream (`TmdbMovieSearchResponse`) — não são DTOs
+  da nossa API. O `*Client` (a interface `@RegisterRestClient`) fica direto em
+  `clients/<sistema>/`, fora do `dtos/`.
 - Não tratam erro nem fazem retry: quem chama (o service) embrulha em `IntegrationException`.
   Fault tolerance (`@Retry`, `@Timeout`) vai no método do service, se precisar.
 
@@ -361,7 +366,8 @@ callers: agrupe num `record` aninhado no próprio service (`MediaFolderService.F
 ## Checklist para arquivo novo
 
 - [ ] Pacote correto pelo tipo de componente (`resources`, `services`, `models`, `mappers`,
-      `clients/<sistema>`, `exceptions`, `exceptions/mapper`, `config`).
+      `clients/<sistema>` ou `clients/<sistema>/dtos`, `exceptions`, `exceptions/mapper`,
+      `config`).
 - [ ] Sufixo da classe bate com o papel (models sem sufixo).
 - [ ] Injeções em linhas separadas, com linha em branco entre elas.
 - [ ] Nomes dos campos injetados preservam o sufixo da classe.
