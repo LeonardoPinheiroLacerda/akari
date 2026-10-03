@@ -1,4 +1,4 @@
-package io.github.leonardopinheirolacerda.akari.providers;
+package io.github.leonardopinheirolacerda.akari.providers.clients;
 
 import io.github.leonardopinheirolacerda.akari.clients.rclone.RcloneClient;
 import io.github.leonardopinheirolacerda.akari.clients.rclone.dtos.RcloneCopyFileRequest;

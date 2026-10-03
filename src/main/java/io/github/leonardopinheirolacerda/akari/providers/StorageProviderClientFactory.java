@@ -3,6 +3,8 @@ package io.github.leonardopinheirolacerda.akari.providers;
 import io.github.leonardopinheirolacerda.akari.clients.rclone.RcloneClient;
 import io.github.leonardopinheirolacerda.akari.mapper.StorageItemMapper;
 import io.github.leonardopinheirolacerda.akari.model.StorageProvider;
+import io.github.leonardopinheirolacerda.akari.providers.clients.impl.MegaStorageProviderClient;
+import io.github.leonardopinheirolacerda.akari.providers.clients.StorageProviderClient;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.rest.client.inject.RestClient;

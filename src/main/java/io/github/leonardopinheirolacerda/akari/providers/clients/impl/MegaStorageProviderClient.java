@@ -1,8 +1,9 @@
-package io.github.leonardopinheirolacerda.akari.providers;
+package io.github.leonardopinheirolacerda.akari.providers.clients.impl;
 
 import io.github.leonardopinheirolacerda.akari.clients.rclone.RcloneClient;
 import io.github.leonardopinheirolacerda.akari.mapper.StorageItemMapper;
 import io.github.leonardopinheirolacerda.akari.model.StorageProvider;
+import io.github.leonardopinheirolacerda.akari.providers.clients.RemoteStorageProviderClient;
 
 import java.util.Map;
 

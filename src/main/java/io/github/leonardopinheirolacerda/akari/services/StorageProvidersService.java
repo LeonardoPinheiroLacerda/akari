@@ -11,8 +11,8 @@ import io.github.leonardopinheirolacerda.akari.exceptions.ResourceNotFoundExcept
 import io.github.leonardopinheirolacerda.akari.mapper.StorageProvidersMapper;
 import io.github.leonardopinheirolacerda.akari.model.pageable.PageResult;
 import io.github.leonardopinheirolacerda.akari.model.StorageProvider;
-import io.github.leonardopinheirolacerda.akari.providers.RemoteStorageProviderClient;
-import io.github.leonardopinheirolacerda.akari.providers.StorageProviderClient;
+import io.github.leonardopinheirolacerda.akari.providers.clients.RemoteStorageProviderClient;
+import io.github.leonardopinheirolacerda.akari.providers.clients.StorageProviderClient;
 import io.github.leonardopinheirolacerda.akari.providers.StorageProviderClientFactory;
 import io.github.leonardopinheirolacerda.akari.providers.StorageProviderConfigs;
 import io.github.leonardopinheirolacerda.akari.providers.processors.ObscureFieldApplier;
