@@ -44,4 +44,6 @@ nb-configuration.xml
 # TLS Certificates
 .certs/
 
+.claude/scratch
+
 data/

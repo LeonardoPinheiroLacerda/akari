@@ -25,7 +25,7 @@ public class StorageProvidersResource implements StorageProvidersApi {
     // 502 só quando o próprio rclone (rcd) está fora do ar.
     @Override
     public StorageProviderHealth checkStorageProviderHealth(Integer providerId) {
-        throw new WebApplicationException(Response.Status.NOT_IMPLEMENTED);
+        return service.checkStorageProviderHealth(providerId);
     }
 
     @Override

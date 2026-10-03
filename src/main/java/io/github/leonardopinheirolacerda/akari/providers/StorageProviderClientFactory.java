@@ -1,0 +1,27 @@
+package io.github.leonardopinheirolacerda.akari.providers;
+
+import io.github.leonardopinheirolacerda.akari.clients.rclone.RcloneClient;
+import io.github.leonardopinheirolacerda.akari.mapper.StorageItemMapper;
+import io.github.leonardopinheirolacerda.akari.model.StorageProvider;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import org.eclipse.microprofile.rest.client.inject.RestClient;
+
+@ApplicationScoped
+public class StorageProviderClientFactory {
+
+    @Inject
+    @RestClient
+    RcloneClient rcloneClient;
+
+    @Inject
+    StorageItemMapper storageItemMapper;
+
+    public StorageProviderClient getClient(StorageProvider storageProvider) {
+        return switch (storageProvider.type) {
+            case MEGA -> new MegaStorageProviderClient(storageProvider, storageItemMapper, rcloneClient);
+            case LOCAL -> throw new UnsupportedOperationException("Provider LOCAL ainda não implementado");
+        };
+    }
+
+}
