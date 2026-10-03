@@ -3,8 +3,8 @@ package io.github.leonardopinheirolacerda.akari.exceptions.mapper;
 import io.github.leonardopinheirolacerda.akari.api.dto.ApiError;
 import io.github.leonardopinheirolacerda.akari.api.dto.ApiErrorCode;
 import io.github.leonardopinheirolacerda.akari.api.dto.ErrorDetail;
+import io.quarkus.logging.Log;
 import jakarta.ws.rs.core.Response;
-import org.jboss.logging.Logger;
 
 import java.util.List;
 
@@ -17,8 +17,6 @@ import java.util.List;
  * trace; os demais em {@code WARN}, só com a mensagem.
  */
 final class ApiErrorResponses {
-
-    private static final Logger LOG = Logger.getLogger(ApiErrorResponses.class);
 
     private ApiErrorResponses() {
     }
@@ -55,9 +53,9 @@ final class ApiErrorResponses {
             List<ErrorDetail> details,
             Throwable e) {
         if (status >= 500) {
-            LOG.error(e.getMessage(), e);
+            Log.error(e.getMessage(), e);
         } else {
-            LOG.warn(e.getMessage());
+            Log.warn(e.getMessage());
         }
 
         return Response.status(status)

@@ -5,11 +5,14 @@ import io.github.leonardopinheirolacerda.akari.clients.rclone.RcloneClient;
 import io.github.leonardopinheirolacerda.akari.clients.rclone.dtos.RcloneObscureRequest;
 import io.github.leonardopinheirolacerda.akari.clients.rclone.dtos.RcloneObscureResponse;
 import io.github.leonardopinheirolacerda.akari.providers.annotations.Obscure;
+import io.quarkus.logging.Log;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
 import jakarta.validation.Validator;
+import jakarta.ws.rs.ProcessingException;
+import jakarta.ws.rs.WebApplicationException;
 import org.eclipse.microprofile.rest.client.inject.RestClient;
 
 import java.lang.reflect.Field;
@@ -39,8 +42,15 @@ public class ObscureFieldApplier {
             final String clear = config.get(fieldName);
 
             if (clear != null && !clear.isBlank()) {
-                final RcloneObscureResponse obscure = rcloneClient.obscure(new RcloneObscureRequest(clear));
-                config.put(fieldName, obscure.obscured());
+                try {
+                    final RcloneObscureRequest request = new RcloneObscureRequest(clear);
+                    final RcloneObscureResponse obscure = rcloneClient.obscure(request);
+                    config.put(fieldName, obscure.obscured());
+                    Log.infof("Campo \"%s\" obscurecido com sucesso", fieldName);
+                } catch (ProcessingException | WebApplicationException e) {
+                    Log.errorf(e, "Falha ao obscurecer o campo \"%s\" via rclone", fieldName);
+                    throw e;
+                }
             }
         }
 
@@ -49,6 +59,7 @@ public class ObscureFieldApplier {
         final Set<ConstraintViolation<T>> violations = validator.validate(object);
 
         if (!violations.isEmpty()) {
+            Log.warnf("Config inválida pro tipo %s: %d violação(ões)", configType.getSimpleName(), violations.size());
             throw new ConstraintViolationException(violations);
         }
 

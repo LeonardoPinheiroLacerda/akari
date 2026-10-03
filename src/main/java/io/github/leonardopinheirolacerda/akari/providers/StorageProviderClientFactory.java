@@ -6,6 +6,7 @@ import io.github.leonardopinheirolacerda.akari.model.StorageProvider;
 import io.github.leonardopinheirolacerda.akari.providers.clients.impl.LocalStorageProviderClient;
 import io.github.leonardopinheirolacerda.akari.providers.clients.impl.MegaStorageProviderClient;
 import io.github.leonardopinheirolacerda.akari.providers.clients.StorageProviderClient;
+import io.quarkus.logging.Log;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.rest.client.inject.RestClient;
@@ -21,6 +22,8 @@ public class StorageProviderClientFactory {
     StorageItemMapper storageItemMapper;
 
     public StorageProviderClient getClient(StorageProvider storageProvider) {
+        Log.infof("Resolvendo client pro storage provider %d (%s)", storageProvider.id, storageProvider.type);
+
         return switch (storageProvider.type) {
             case MEGA -> new MegaStorageProviderClient(storageProvider, storageItemMapper, rcloneClient);
             case LOCAL -> new LocalStorageProviderClient(storageProvider.config);

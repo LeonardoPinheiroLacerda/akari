@@ -8,23 +8,20 @@ import io.github.leonardopinheirolacerda.akari.clients.rclone.dtos.RcloneListRes
 import io.github.leonardopinheirolacerda.akari.providers.mappers.StorageItemMapper;
 import io.github.leonardopinheirolacerda.akari.model.StorageProvider;
 import io.github.leonardopinheirolacerda.akari.providers.models.StorageItem;
+import io.quarkus.logging.Log;
+import lombok.RequiredArgsConstructor;
 
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+@RequiredArgsConstructor
 public abstract class RemoteStorageProviderClient implements StorageProviderClient {
 
     private final StorageProvider storageProvider;
     private final StorageItemMapper mapper;
     private final RcloneClient rcloneClient;
-
-    protected RemoteStorageProviderClient(StorageProvider storageProvider, StorageItemMapper mapper, RcloneClient rcloneClient) {
-        this.storageProvider = storageProvider;
-        this.mapper = mapper;
-        this.rcloneClient = rcloneClient;
-    }
 
     @Override
     public List<StorageItem> listChildren(String path) {
@@ -55,6 +52,8 @@ public abstract class RemoteStorageProviderClient implements StorageProviderClie
 
     @Override
     public Long downloadFile(String remoteFilePath, String localDestinationDir, String localFileName) {
+        Log.infof("Baixando %s do storage provider %d para %s/%s", remoteFilePath, this.storageProvider.id, localDestinationDir, localFileName);
+
         final RcloneCopyFileRequest request = new RcloneCopyFileRequest(
                 getProviderFs(this.storageProvider.config),
                 remoteFilePath,
@@ -77,18 +76,23 @@ public abstract class RemoteStorageProviderClient implements StorageProviderClie
             list("", false);
             return true;
         } catch (Exception e) {
+            Log.warnf(e, "Falha ao conectar no storage provider %d via rclone", this.storageProvider.id);
             return false;
         }
     }
 
     @Override
     public Optional<Path> resolveLocalPath(String relativePath) {
+        Log.infof("Storage provider remoto %d não resolve path local pra \"%s\"", this.storageProvider.id, relativePath);
+
         return Optional.empty();
     }
 
     protected abstract String getProviderFs(Map<String, String> config);
 
     private List<StorageItem> list(String path, boolean recursive) {
+        Log.infof("Listando \"%s\" no storage provider %d (recursivo=%s)", path, this.storageProvider.id, recursive);
+
         final RcloneListOptionsRequest options = new RcloneListOptionsRequest(recursive);
 
         final String providerFs = getProviderFs(this.storageProvider.config);

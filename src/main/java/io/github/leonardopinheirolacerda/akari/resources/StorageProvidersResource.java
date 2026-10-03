@@ -7,6 +7,7 @@ import io.github.leonardopinheirolacerda.akari.api.dto.StorageProviderPage;
 import io.github.leonardopinheirolacerda.akari.api.dto.StorageProviderResponse;
 import io.github.leonardopinheirolacerda.akari.api.dto.UpdateStorageProviderConfigRequest;
 import io.github.leonardopinheirolacerda.akari.services.StorageProvidersService;
+import io.quarkus.logging.Log;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.WebApplicationException;
@@ -61,6 +62,7 @@ public class StorageProvidersResource implements StorageProvidersApi {
 
         if("createStorageProvider".equals(simpleResourceInfo.getMethodName())) {
             StorageProviderResponse response = (StorageProviderResponse) responseContext.getEntity();
+            Log.infof("Adicionando header Location pro storage provider %d criado", response.getId());
             responseContext.getHeaders().add("Location", "/v1/storage/providers/" + response.getId());
         }
     }
