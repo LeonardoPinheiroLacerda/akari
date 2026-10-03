@@ -1,4 +1,4 @@
-package io.github.leonardopinheirolacerda.akari.mapper;
+package io.github.leonardopinheirolacerda.akari.providers.mappers;
 
 import io.github.leonardopinheirolacerda.akari.clients.rclone.dtos.RcloneItemResponse;
 import io.github.leonardopinheirolacerda.akari.providers.models.StorageItem;

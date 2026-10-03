@@ -5,7 +5,7 @@ import io.github.leonardopinheirolacerda.akari.clients.rclone.dtos.RcloneCopyFil
 import io.github.leonardopinheirolacerda.akari.clients.rclone.dtos.RcloneListOptionsRequest;
 import io.github.leonardopinheirolacerda.akari.clients.rclone.dtos.RcloneListRequest;
 import io.github.leonardopinheirolacerda.akari.clients.rclone.dtos.RcloneListResponse;
-import io.github.leonardopinheirolacerda.akari.mapper.StorageItemMapper;
+import io.github.leonardopinheirolacerda.akari.providers.mappers.StorageItemMapper;
 import io.github.leonardopinheirolacerda.akari.model.StorageProvider;
 import io.github.leonardopinheirolacerda.akari.providers.models.StorageItem;
 

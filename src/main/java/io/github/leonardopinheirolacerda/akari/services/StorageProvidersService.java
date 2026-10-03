@@ -100,7 +100,8 @@ public class StorageProvidersService {
             }
         }
 
-        return new StorageProviderHealth().healthy(client.checkConnection());
+        return new StorageProviderHealth()
+                .healthy(client.checkConnection());
     }
 
     private StorageProvider findOrThrow(Integer providerId) {
