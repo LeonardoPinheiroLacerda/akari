@@ -1,8 +1,0 @@
-# Ignora tudo por padrão...
-*
-
-# ...e libera apenas o necessário para o build das imagens
-!src/
-!.mvn/
-!mvnw
-!pom.xml
