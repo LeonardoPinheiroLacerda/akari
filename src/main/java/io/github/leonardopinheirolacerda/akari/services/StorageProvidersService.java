@@ -126,7 +126,7 @@ public class StorageProvidersService {
                 .healthy(healthy);
     }
 
-    private StorageProvider findOrThrow(Integer providerId) {
+    public StorageProvider findOrThrow(Integer providerId) {
         return StorageProvider.find(providerId)
                 .orElseThrow(() -> {
                     Log.warnf("Storage provider %d não encontrado", providerId);

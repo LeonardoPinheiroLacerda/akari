@@ -369,7 +369,7 @@ paths:
       summary: Lista paginada de pastas com filtros AND
       description: |
         Filtros são AND — cada query param não-nulo restringe o resultado. `sort` aceita
-        specs `field[:asc|desc]` na whitelist `name`, `createdAt`, `hasFiles`.
+        specs `field[:asc|desc]` na whitelist `name`, `createdAt`.
       parameters:
         - $ref: '#/components/parameters/PageParam'
         - $ref: '#/components/parameters/SizeParam'
@@ -1362,8 +1362,8 @@ components:
       in: query
       required: false
       description: |
-        Specs de ordenação `field[:asc|desc]`. Whitelist: `name`, `createdAt`,
-        `hasFiles`. Múltiplos valores viram lista ordenada.
+        Specs de ordenação `field[:asc|desc]`. Whitelist: `name`, `createdAt`. Múltiplos
+        valores viram lista ordenada.
       explode: true
       schema:
         $ref: '#/components/schemas/SortSpecs'
