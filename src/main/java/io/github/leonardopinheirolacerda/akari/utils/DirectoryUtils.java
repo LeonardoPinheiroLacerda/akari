@@ -19,4 +19,8 @@ public final class DirectoryUtils {
         return path.substring(0, lastSlash);
     }
 
+    public static String join(String parentPath, String name) {
+        return parentPath + "/" + name;
+    }
+
 }

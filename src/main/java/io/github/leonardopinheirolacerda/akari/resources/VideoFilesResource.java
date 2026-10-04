@@ -4,36 +4,41 @@ import io.github.leonardopinheirolacerda.akari.api.VideoFilesApi;
 import io.github.leonardopinheirolacerda.akari.api.dto.VideoFilePage;
 import io.github.leonardopinheirolacerda.akari.api.dto.VideoFileRequest;
 import io.github.leonardopinheirolacerda.akari.api.dto.VideoFileResponse;
-import jakarta.ws.rs.WebApplicationException;
-import jakarta.ws.rs.core.Response;
+import io.github.leonardopinheirolacerda.akari.services.VideoFileService;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 
+@ApplicationScoped
 public class VideoFilesResource implements VideoFilesApi {
+
+    @Inject
+    VideoFileService service;
 
     // 404: folderId inexistente.
     @Override
     public VideoFileResponse createVideoFile(VideoFileRequest videoFileRequest) {
-        throw new WebApplicationException(Response.Status.NOT_IMPLEMENTED);
+        return service.createVideoFile(videoFileRequest);
     }
 
     @Override
     public void deleteVideoFile(Integer fileId) {
-        throw new WebApplicationException(Response.Status.NOT_IMPLEMENTED);
+        service.deleteVideoFile(fileId);
     }
 
     @Override
     public VideoFileResponse getVideoFile(Integer fileId) {
-        throw new WebApplicationException(Response.Status.NOT_IMPLEMENTED);
+        return service.getVideoFile(fileId);
     }
 
     // Pasta inexistente ou sem arquivos: página vazia, não 404.
     @Override
     public VideoFilePage listVideoFiles(Integer folderId, Integer page, Integer size) {
-        throw new WebApplicationException(Response.Status.NOT_IMPLEMENTED);
+        return service.listVideoFiles(folderId, page, size);
     }
 
     // 404: fileId ou folderId inexistente.
     @Override
     public VideoFileResponse updateVideoFile(Integer fileId, VideoFileRequest videoFileRequest) {
-        throw new WebApplicationException(Response.Status.NOT_IMPLEMENTED);
+        return service.updateVideoFile(fileId, videoFileRequest);
     }
 }
