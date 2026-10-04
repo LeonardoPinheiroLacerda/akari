@@ -3,20 +3,25 @@ package io.github.leonardopinheirolacerda.akari.resources;
 import io.github.leonardopinheirolacerda.akari.api.SettingApi;
 import io.github.leonardopinheirolacerda.akari.api.dto.SettingResponse;
 import io.github.leonardopinheirolacerda.akari.api.dto.UpdateSettingRequest;
-import jakarta.ws.rs.WebApplicationException;
-import jakarta.ws.rs.core.Response;
+import io.github.leonardopinheirolacerda.akari.services.SettingService;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 
 import java.util.List;
 
+@ApplicationScoped
 public class SettingResource implements SettingApi {
+
+    @Inject
+    SettingService settingService;
 
     @Override
     public List<SettingResponse> listSettings(String name) {
-        throw new WebApplicationException(Response.Status.NOT_IMPLEMENTED);
+        return settingService.listSettings(name);
     }
 
     @Override
     public SettingResponse updateSetting(String key, UpdateSettingRequest updateSettingRequest) {
-        throw new WebApplicationException(Response.Status.NOT_IMPLEMENTED);
+        return settingService.updateSetting(key, updateSettingRequest);
     }
 }

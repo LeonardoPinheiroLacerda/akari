@@ -1170,6 +1170,9 @@ paths:
       tags: [Setting]
       operationId: listSettings
       summary: Lista as preferências, opcionalmente filtrando por nome (substring da chave)
+      description: >-
+        Sem o parâmetro `name`, devolve todas as preferências ordenadas pela chave. Com `name`,
+        filtra por substring case-insensitive da chave, também ordenado.
       parameters:
         - $ref: '#/components/parameters/NameFilterParam'
       responses:
@@ -3501,7 +3504,7 @@ components:
 
     SettingResponse:
       type: object
-      description: Preferência do admin; o `value` de preferências `secret` nunca é devolvido
+      description: Preferência do admin; o `value` de preferências `secret` vem mascarado, nunca o valor cru
       required: [key, secret, configured, updatedAt]
       properties:
         key:
@@ -3509,7 +3512,9 @@ components:
         value:
           type: string
           nullable: true
-          description: '`null` quando `secret` é `true` (nunca ecoado); senão o valor cru'
+          description: >-
+            `***` quando `secret` é `true` (o valor cru nunca é ecoado); senão o valor cru, que
+            pode ser `null` quando a preferência ainda não foi configurada
         secret:
           type: boolean
           description: >-
