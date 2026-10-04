@@ -26,7 +26,7 @@ public class MediaFolderService {
     MediaFolderMapper mapper;
 
     @Inject
-    StorageProvidersService providersService;
+    StorageProviderService providersService;
 
 
     @Transactional

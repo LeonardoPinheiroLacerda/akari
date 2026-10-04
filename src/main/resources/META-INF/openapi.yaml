@@ -23,7 +23,7 @@ servers:
     description: Host onde o backend akari estiver rodando
 
 tags:
-  - name: StorageProviders
+  - name: StorageProvider
     description: |
       Storage providers cadastrados (MEGA etc.).
 
@@ -51,14 +51,14 @@ tags:
       preservados, novos são criados e os que não existem mais no provider são removidos do
       catalog. O `rootPath` limita o subtree a processar; ausente ou vazio opera sobre a raiz
       inteira do provider.
-  - name: MediaFolders
+  - name: MediaFolder
     description: |
       Pastas ingeridas do storage provider.
 
       Expõe pastas (`MediaFolder`) e arquivos de vídeo (`VideoFile`) ingeridos a partir dos
       storage providers. O catalog é agnóstico a metadata — enriquecimento (episódio, temporada,
       thumbnail, etc.) fica nos módulos de metadata donos do binding `folderId → payload`.
-  - name: VideoFiles
+  - name: VideoFile
     description: Arquivos de vídeo dentro de uma pasta
   - name: Cache
     description: |
@@ -71,7 +71,7 @@ tags:
       O acompanhamento de progresso em tempo real é feito por um stream SSE em
       `/v1/cache/events` — **não modelado neste contrato** (o gerador `jaxrs-spec` não
       descreve Server-Sent Events); é servido por um resource code-first.
-  - name: MediaProbes
+  - name: MediaProbe
     description: |
       Probe de metadados de mídia via ffprobe.
 
@@ -145,14 +145,14 @@ tags:
     description: Binding TMDB e overrides do anime
   - name: AnimeTmdbFilePairing
     description: Pairing TMDB por arquivo de vídeo (temporada, episódio, thumbnail)
-  - name: Settings
+  - name: Setting
     description: |
       Preferências do admin.
 
       Expõe as preferências do admin (par `key`/`value`) para o portal listar, pesquisar por nome
       e atualizar. Preferências marcadas como `secret` (ex.: `tmdb.api-key`) nunca têm o `value`
       ecoado nas respostas — só o flag `configured` indica se há valor cadastrado.
-  - name: Notifications
+  - name: Notification
     description: |
       Notificações de observabilidade.
 
@@ -168,7 +168,7 @@ paths:
   # ---------- storageprovider ----------
   /v1/storage/providers:
     get:
-      tags: [StorageProviders]
+      tags: [StorageProvider]
       operationId: listStorageProviders
       summary: Lista paginada de providers cadastrados
       parameters:
@@ -182,7 +182,7 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
     post:
-      tags: [StorageProviders]
+      tags: [StorageProvider]
       operationId: createStorageProvider
       summary: Cadastra um novo provider
       description: |
@@ -206,7 +206,7 @@ paths:
     parameters:
       - $ref: '#/components/parameters/StorageProviderIdPathParam'
     get:
-      tags: [StorageProviders]
+      tags: [StorageProvider]
       operationId: getStorageProviderById
       summary: Busca um provider por id (sem expor `config`)
       responses:
@@ -217,7 +217,7 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
     delete:
-      tags: [StorageProviders]
+      tags: [StorageProvider]
       operationId: deleteStorageProvider
       summary: Remove o provider
       responses:
@@ -232,7 +232,7 @@ paths:
     parameters:
       - $ref: '#/components/parameters/StorageProviderIdPathParam'
     put:
-      tags: [StorageProviders]
+      tags: [StorageProvider]
       operationId: updateStorageProviderConfig
       summary: Substitui a configuração do provider
       description: |
@@ -256,7 +256,7 @@ paths:
     parameters:
       - $ref: '#/components/parameters/StorageProviderIdPathParam'
     get:
-      tags: [StorageProviders]
+      tags: [StorageProvider]
       operationId: checkStorageProviderHealth
       summary: Testa conectividade real com o provider
       description: |
@@ -364,7 +364,7 @@ paths:
   # ---------- catalog ----------
   /v1/catalog/folders:
     get:
-      tags: [MediaFolders]
+      tags: [MediaFolder]
       operationId: listFolders
       summary: Lista paginada de pastas com filtros AND
       description: |
@@ -387,7 +387,7 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
     post:
-      tags: [MediaFolders]
+      tags: [MediaFolder]
       operationId: createFolder
       summary: Cria uma nova pasta
       description: |
@@ -408,7 +408,7 @@ paths:
     parameters:
       - $ref: '#/components/parameters/FolderIdPathParam'
     get:
-      tags: [MediaFolders]
+      tags: [MediaFolder]
       operationId: getFolder
       summary: Busca uma pasta por id
       responses:
@@ -419,7 +419,7 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
     put:
-      tags: [MediaFolders]
+      tags: [MediaFolder]
       operationId: updateFolder
       summary: Substitui os campos mutáveis da pasta
       description: |
@@ -437,7 +437,7 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
     delete:
-      tags: [MediaFolders]
+      tags: [MediaFolder]
       operationId: deleteFolder
       summary: Remove a pasta
       description: Descendentes e arquivos abrigados descem pela cascata do DDL.
@@ -451,7 +451,7 @@ paths:
 
   /v1/catalog/video-files:
     get:
-      tags: [VideoFiles]
+      tags: [VideoFile]
       operationId: listVideoFiles
       summary: Lista paginada dos arquivos de uma pasta específica
       description: |
@@ -470,7 +470,7 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
     post:
-      tags: [VideoFiles]
+      tags: [VideoFile]
       operationId: createVideoFile
       summary: Cria um novo arquivo
       description: |
@@ -493,7 +493,7 @@ paths:
     parameters:
       - $ref: '#/components/parameters/FileIdPathParam'
     get:
-      tags: [VideoFiles]
+      tags: [VideoFile]
       operationId: getVideoFile
       summary: Busca um arquivo por id
       responses:
@@ -504,7 +504,7 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
     put:
-      tags: [VideoFiles]
+      tags: [VideoFile]
       operationId: updateVideoFile
       summary: Substitui os campos mutáveis do arquivo
       description: |
@@ -523,7 +523,7 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
     delete:
-      tags: [VideoFiles]
+      tags: [VideoFile]
       operationId: deleteVideoFile
       summary: Remove o arquivo
       description: Sem cascata — arquivo é folha.
@@ -602,7 +602,7 @@ paths:
     parameters:
       - $ref: '#/components/parameters/FileIdPathParam'
     get:
-      tags: [MediaProbes]
+      tags: [MediaProbe]
       operationId: getMediaProbe
       summary: Extrai o probe de um vídeo disponível em disco
       description: |
@@ -1167,7 +1167,7 @@ paths:
   # ---------- settings ----------
   /v1/settings:
     get:
-      tags: [Settings]
+      tags: [Setting]
       operationId: listSettings
       summary: Lista as preferências, opcionalmente filtrando por nome (substring da chave)
       parameters:
@@ -1182,7 +1182,7 @@ paths:
     parameters:
       - $ref: '#/components/parameters/SettingKeyPathParam'
     put:
-      tags: [Settings]
+      tags: [Setting]
       operationId: updateSetting
       summary: Atualiza o valor de uma preferência existente
       description: >-
@@ -1202,7 +1202,7 @@ paths:
   # ---------- notification ----------
   /v1/notifications:
     get:
-      tags: [Notifications]
+      tags: [Notification]
       operationId: listNotifications
       summary: Lista as notificações mais recentes
       description: |
@@ -1217,7 +1217,7 @@ paths:
 
   /v1/notifications/unread-count:
     get:
-      tags: [Notifications]
+      tags: [Notification]
       operationId: getUnreadCount
       summary: Conta as notificações não-lidas
       responses:
@@ -1230,7 +1230,7 @@ paths:
     parameters:
       - $ref: '#/components/parameters/NotificationIdPathParam'
     post:
-      tags: [Notifications]
+      tags: [Notification]
       operationId: markNotificationRead
       summary: Marca uma notificação como lida
       description: |
@@ -1247,7 +1247,7 @@ paths:
 
   /v1/notifications/read-all:
     post:
-      tags: [Notifications]
+      tags: [Notification]
       operationId: markAllNotificationsRead
       summary: Marca todas as notificações como lidas
       responses:

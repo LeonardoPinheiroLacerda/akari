@@ -1,12 +1,12 @@
 package io.github.leonardopinheirolacerda.akari.resources;
 
-import io.github.leonardopinheirolacerda.akari.api.StorageProvidersApi;
+import io.github.leonardopinheirolacerda.akari.api.StorageProviderApi;
 import io.github.leonardopinheirolacerda.akari.api.dto.CreateStorageProviderRequest;
 import io.github.leonardopinheirolacerda.akari.api.dto.StorageProviderHealth;
 import io.github.leonardopinheirolacerda.akari.api.dto.StorageProviderPage;
 import io.github.leonardopinheirolacerda.akari.api.dto.StorageProviderResponse;
 import io.github.leonardopinheirolacerda.akari.api.dto.UpdateStorageProviderConfigRequest;
-import io.github.leonardopinheirolacerda.akari.services.StorageProvidersService;
+import io.github.leonardopinheirolacerda.akari.services.StorageProviderService;
 import io.quarkus.logging.Log;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -17,10 +17,10 @@ import org.jboss.resteasy.reactive.server.ServerResponseFilter;
 import org.jboss.resteasy.reactive.server.SimpleResourceInfo;
 
 @ApplicationScoped
-public class StorageProvidersResource implements StorageProvidersApi {
+public class StorageProviderResource implements StorageProviderApi {
 
     @Inject
-    StorageProvidersService service;
+    StorageProviderService service;
 
     // Provider inacessível NÃO é erro: responde 200 com healthy=false.
     // 502 só quando o próprio rclone (rcd) está fora do ar.

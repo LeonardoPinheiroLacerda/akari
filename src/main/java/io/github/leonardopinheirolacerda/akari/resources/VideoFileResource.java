@@ -1,6 +1,6 @@
 package io.github.leonardopinheirolacerda.akari.resources;
 
-import io.github.leonardopinheirolacerda.akari.api.VideoFilesApi;
+import io.github.leonardopinheirolacerda.akari.api.VideoFileApi;
 import io.github.leonardopinheirolacerda.akari.api.dto.VideoFilePage;
 import io.github.leonardopinheirolacerda.akari.api.dto.VideoFileRequest;
 import io.github.leonardopinheirolacerda.akari.api.dto.VideoFileResponse;
@@ -9,7 +9,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
 @ApplicationScoped
-public class VideoFilesResource implements VideoFilesApi {
+public class VideoFileResource implements VideoFileApi {
 
     @Inject
     VideoFileService service;

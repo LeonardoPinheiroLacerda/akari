@@ -7,7 +7,7 @@ import io.github.leonardopinheirolacerda.akari.model.StorageProvider;
 import org.mapstruct.Mapper;
 
 @Mapper(componentModel = "cdi")
-public interface StorageProvidersMapper {
+public interface StorageProviderMapper {
 
     StorageProviderResponse toResponse(StorageProvider storageProvider);
 

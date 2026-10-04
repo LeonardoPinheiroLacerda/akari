@@ -1,6 +1,6 @@
 package io.github.leonardopinheirolacerda.akari.resources;
 
-import io.github.leonardopinheirolacerda.akari.api.MediaFoldersApi;
+import io.github.leonardopinheirolacerda.akari.api.MediaFolderApi;
 import io.github.leonardopinheirolacerda.akari.api.dto.MediaFolderPage;
 import io.github.leonardopinheirolacerda.akari.api.dto.MediaFolderRequest;
 import io.github.leonardopinheirolacerda.akari.api.dto.MediaFolderResponse;
@@ -14,7 +14,7 @@ import jakarta.ws.rs.core.Response;
 import java.util.List;
 
 @ApplicationScoped
-public class MediaFoldersResource implements MediaFoldersApi {
+public class MediaFolderResource implements MediaFolderApi {
 
     @Inject
     MediaFolderService service;

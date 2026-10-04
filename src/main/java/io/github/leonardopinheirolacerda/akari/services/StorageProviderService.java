@@ -8,7 +8,7 @@ import io.github.leonardopinheirolacerda.akari.api.dto.UpdateStorageProviderConf
 import io.github.leonardopinheirolacerda.akari.clients.rclone.RcloneClient;
 import io.github.leonardopinheirolacerda.akari.exceptions.IntegrationException;
 import io.github.leonardopinheirolacerda.akari.exceptions.ResourceNotFoundException;
-import io.github.leonardopinheirolacerda.akari.mapper.StorageProvidersMapper;
+import io.github.leonardopinheirolacerda.akari.mapper.StorageProviderMapper;
 import io.github.leonardopinheirolacerda.akari.model.pageable.PageResult;
 import io.github.leonardopinheirolacerda.akari.model.StorageProvider;
 import io.github.leonardopinheirolacerda.akari.providers.clients.RemoteStorageProviderClient;
@@ -25,7 +25,7 @@ import jakarta.ws.rs.WebApplicationException;
 import org.eclipse.microprofile.rest.client.inject.RestClient;
 
 @ApplicationScoped
-public class StorageProvidersService {
+public class StorageProviderService {
 
     @Inject
     ObscureFieldApplier obscureFieldApplier;
@@ -38,7 +38,7 @@ public class StorageProvidersService {
     RcloneClient rcloneClient;
 
     @Inject
-    StorageProvidersMapper mapper;
+    StorageProviderMapper mapper;
 
     @Transactional
     public StorageProviderResponse createStorageProvider(CreateStorageProviderRequest createStorageProviderRequest) {

@@ -1,6 +1,6 @@
 package io.github.leonardopinheirolacerda.akari.resources;
 
-import io.github.leonardopinheirolacerda.akari.api.NotificationsApi;
+import io.github.leonardopinheirolacerda.akari.api.NotificationApi;
 import io.github.leonardopinheirolacerda.akari.api.dto.Notification;
 import io.github.leonardopinheirolacerda.akari.api.dto.UnreadCount;
 import jakarta.ws.rs.WebApplicationException;
@@ -8,7 +8,7 @@ import jakarta.ws.rs.core.Response;
 
 import java.util.List;
 
-public class NotificationsResource implements NotificationsApi {
+public class NotificationResource implements NotificationApi {
 
     @Override
     public UnreadCount getUnreadCount() {
