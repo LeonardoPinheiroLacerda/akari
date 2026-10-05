@@ -1,33 +1,37 @@
 package io.github.leonardopinheirolacerda.akari.resources;
 
 import io.github.leonardopinheirolacerda.akari.api.NotificationApi;
-import io.github.leonardopinheirolacerda.akari.api.dto.Notification;
-import io.github.leonardopinheirolacerda.akari.api.dto.UnreadCount;
-import jakarta.ws.rs.WebApplicationException;
-import jakarta.ws.rs.core.Response;
+import io.github.leonardopinheirolacerda.akari.api.dto.NotificationResponse;
+import io.github.leonardopinheirolacerda.akari.api.dto.UnreadCountResponse;
+import io.github.leonardopinheirolacerda.akari.services.NotificationService;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 
 import java.util.List;
 
+@ApplicationScoped
 public class NotificationResource implements NotificationApi {
 
+    @Inject
+    NotificationService notificationService;
+
     @Override
-    public UnreadCount getUnreadCount() {
-        throw new WebApplicationException(Response.Status.NOT_IMPLEMENTED);
+    public UnreadCountResponse getUnreadCount() {
+        return notificationService.getUnreadCount();
     }
 
     @Override
-    public List<Notification> listNotifications() {
-        throw new WebApplicationException(Response.Status.NOT_IMPLEMENTED);
+    public List<NotificationResponse> listNotifications() {
+        return notificationService.listNotifications();
     }
 
     @Override
     public void markAllNotificationsRead() {
-        throw new WebApplicationException(Response.Status.NOT_IMPLEMENTED);
+        notificationService.markAllNotificationsRead();
     }
 
-    // notificationId inexistente NÃO é 404: responde 204 sem alterar nada (idempotente).
     @Override
     public void markNotificationRead(Integer notificationId) {
-        throw new WebApplicationException(Response.Status.NOT_IMPLEMENTED);
+        notificationService.markNotificationRead(notificationId);
     }
 }

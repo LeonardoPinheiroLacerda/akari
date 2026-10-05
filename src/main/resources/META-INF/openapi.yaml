@@ -1897,13 +1897,13 @@ components:
           schema:
             type: array
             items:
-              $ref: '#/components/schemas/Notification'
+              $ref: '#/components/schemas/NotificationResponse'
     UnreadCountOk:
       description: Contagem de não-lidas
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/UnreadCount'
+            $ref: '#/components/schemas/UnreadCountResponse'
     NotificationRead:
       description: Notificação marcada como lida
     AllNotificationsRead:
@@ -3552,7 +3552,7 @@ components:
         - WARNING
         - ERROR
 
-    Notification:
+    NotificationResponse:
       type: object
       description: |
         Notificação de observabilidade — hoje geradas pela ingestão (conclusão, falha geral e
@@ -3575,7 +3575,7 @@ components:
             Pasta do catalog do título a que a notificação se refere — o portal usa para linkar a
             revisão. `null` quando a notificação não é sobre um título (ex.: conclusão da
             ingestão).
-        animeTitle:
+        title:
           type: string
           nullable: true
           description: >-
@@ -3592,7 +3592,7 @@ components:
           format: date-time
           description: Momento em que a notificação foi gerada
 
-    UnreadCount:
+    UnreadCountResponse:
       type: object
       description: Contagem de notificações não-lidas
       required: [count]
