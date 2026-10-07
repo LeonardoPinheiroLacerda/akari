@@ -2,10 +2,15 @@ package io.github.leonardopinheirolacerda.akari.resources;
 
 import io.github.leonardopinheirolacerda.akari.api.AnilistSearchApi;
 import io.github.leonardopinheirolacerda.akari.api.dto.AnilistMediaSummaryPage;
-import jakarta.ws.rs.WebApplicationException;
-import jakarta.ws.rs.core.Response;
+import io.github.leonardopinheirolacerda.akari.services.AnilistSearchService;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 
+@ApplicationScoped
 public class AnilistSearchResource implements AnilistSearchApi {
+
+    @Inject
+    AnilistSearchService anilistSearchService;
 
     // Busca sem resultado: página vazia, não 404.
     @Override
@@ -14,6 +19,6 @@ public class AnilistSearchResource implements AnilistSearchApi {
             Integer page,
             Integer size,
             Boolean forceRefresh) {
-        throw new WebApplicationException(Response.Status.NOT_IMPLEMENTED);
+        return anilistSearchService.search(q, page, size, forceRefresh);
     }
 }

@@ -24,6 +24,8 @@ poucos arquivos. Não reintroduza ports, UseCases, adapters nem camadas de domí
 - **Nunca** escrever ternário que duplica tokens dos dois lados (`x + y ? a : x + z`). Use `if` com early return.
 - **Nunca** usar string literal onde há constante (`"application/json"` — use `MediaType.APPLICATION_JSON`).
 - **Nunca** escrever DTO de API à mão — eles são gerados do contrato.
+- **Nunca** aninhar um `record`/classe dentro de outro tipo. Cada tipo — incluindo records
+  auxiliares como um par de retorno ou um agrupamento de parâmetros — vai no próprio arquivo.
 - **Sempre** javadoc em português.
 - **Sempre** `final` em variáveis locais.
 
@@ -322,8 +324,9 @@ Helpers privados ficam depois dos métodos públicos, na ordem em que aparecem s
 ## Parâmetros agrupados
 
 Método de service com **4+ parâmetros** de escrita, ou com o mesmo shape montado por vários
-callers: agrupe num `record` aninhado no próprio service (`MediaFolderService.Filter`,
-`MediaFolderService.Changes`). Com 1-3 parâmetros, passe solto.
+callers: agrupe num `record` em arquivo próprio, no mesmo pacote do service que o usa
+(`MediaFolderFilter`, `MediaFolderChanges`) — nunca aninhado na classe. Com 1-3 parâmetros, passe
+solto.
 
 ## `@Transactional`
 
@@ -346,6 +349,8 @@ callers: agrupe num `record` aninhado no próprio service (`MediaFolderService.F
 - Ternário duplicando tokens dos dois lados.
 - String literal onde constante existe (`"application/json"`).
 - Wildcard imports (`import java.util.*;`).
+- `record`/classe aninhada dentro de outro tipo (ex.: um record de retorno declarado dentro de
+  uma classe utilitária ou de um service) — cada tipo vai no próprio arquivo.
 - Reintroduzir a arquitetura antiga: interfaces `*UseCase`/`*Port`, `*Adapter`, `*Repository`/
   `*DataProvider` em cima do Panache, ou modelo de domínio paralelo à entidade.
 - Subpacote por domínio dentro de `services/`, `resources/`, `models/` ou `mappers/`.
