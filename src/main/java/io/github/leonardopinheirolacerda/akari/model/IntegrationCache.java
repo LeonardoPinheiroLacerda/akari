@@ -1,6 +1,8 @@
 package io.github.leonardopinheirolacerda.akari.model;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.leonardopinheirolacerda.akari.utils.CacheEntry;
 import io.quarkus.hibernate.orm.panache.PanacheEntityBase;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -30,6 +32,22 @@ public class IntegrationCache extends PanacheEntityBase {
         return IntegrationCache
                 .find("cacheKey", cacheKey)
                 .firstResultOptional();
+    }
+
+    public static <T> Optional<CacheEntry<T>> readEntry(String cacheKey, Class<T> type, ObjectMapper objectMapper) {
+        return IntegrationCache
+                .find(cacheKey)
+                .map(entry -> new CacheEntry<>(objectMapper.convertValue(entry.payload, type), entry.fetchedAt));
+    }
+
+    public static void writeEntry(String cacheKey, Object payload, ObjectMapper objectMapper) {
+        final IntegrationCache entry = IntegrationCache.find(cacheKey).orElseGet(IntegrationCache::new);
+
+        entry.cacheKey = cacheKey;
+        entry.payload = objectMapper.valueToTree(payload);
+        entry.fetchedAt = OffsetDateTime.now();
+
+        entry.persist();
     }
 
 }

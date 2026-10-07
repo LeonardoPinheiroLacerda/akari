@@ -10,11 +10,12 @@ import io.github.leonardopinheirolacerda.akari.clients.anilist.dtos.AnilistMedia
 import io.github.leonardopinheirolacerda.akari.clients.anilist.dtos.AnilistPageResponse;
 import io.github.leonardopinheirolacerda.akari.clients.anilist.dtos.AnilistSearchResponse;
 import io.github.leonardopinheirolacerda.akari.exceptions.IntegrationException;
+import io.github.leonardopinheirolacerda.akari.exceptions.ResourceNotFoundException;
 import io.github.leonardopinheirolacerda.akari.mapper.AnilistMapper;
 import io.github.leonardopinheirolacerda.akari.model.IntegrationCache;
 import io.github.leonardopinheirolacerda.akari.model.Setting;
-import io.github.leonardopinheirolacerda.akari.utils.CacheEntry;
 import io.github.leonardopinheirolacerda.akari.utils.CacheUtils;
+import io.github.leonardopinheirolacerda.akari.utils.HttpErrors;
 import io.quarkus.logging.Log;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -24,9 +25,7 @@ import jakarta.ws.rs.WebApplicationException;
 import org.eclipse.microprofile.rest.client.inject.RestClient;
 
 import java.time.Duration;
-import java.time.OffsetDateTime;
 import java.util.Map;
-import java.util.Optional;
 
 @ApplicationScoped
 public class AnilistSearchService {
@@ -51,9 +50,9 @@ public class AnilistSearchService {
         return CacheUtils.resolve(
                 forceRefresh,
                 anilistCacheTtl(),
-                () -> readCache(cacheKey, AnilistMediaSummaryPage.class),
+                () -> IntegrationCache.readEntry(cacheKey, AnilistMediaSummaryPage.class, objectMapper),
                 () -> fetchSearchFromAnilist(query, page, size),
-                payload -> writeCache(cacheKey, payload)
+                payload -> IntegrationCache.writeEntry(cacheKey, payload, objectMapper)
         );
     }
 
@@ -64,9 +63,9 @@ public class AnilistSearchService {
         return CacheUtils.resolve(
                 forceRefresh,
                 anilistCacheTtl(),
-                () -> readCache(cacheKey, AnilistMediaResponse.class),
+                () -> IntegrationCache.readEntry(cacheKey, AnilistMediaResponse.class, objectMapper),
                 () -> fetchMediaFromAnilist(anilistId),
-                payload -> writeCache(cacheKey, payload)
+                payload -> IntegrationCache.writeEntry(cacheKey, payload, objectMapper)
         );
     }
 
@@ -112,6 +111,9 @@ public class AnilistSearchService {
             response = anilistClient.findById(request);
 
         } catch (ProcessingException | WebApplicationException e) {
+            if (HttpErrors.isNotFound(e)) {
+                throw new ResourceNotFoundException("Não foi possível localizar um anime com o id informado na AniList");
+            }
             Log.errorf(e, "Busca na AniList falhou para o id %d", anilistId);
             throw new IntegrationException("Busca na AniList falhou", e);
         }
@@ -122,24 +124,6 @@ public class AnilistSearchService {
     private Duration anilistCacheTtl() {
         final Setting setting = settingService.findOrThrow("anilist.cache.ttl");
         return Duration.parse(setting.value);
-    }
-
-    private <T> Optional<CacheEntry<T>> readCache(String cacheKey, Class<T> type) {
-        return IntegrationCache.find(cacheKey)
-                .map(entry -> {
-                    final T cache = objectMapper.convertValue(entry.payload, type);
-                    return new CacheEntry<>(cache, entry.fetchedAt);
-                });
-    }
-
-    private void writeCache(String cacheKey, Object payload) {
-        final IntegrationCache entry = IntegrationCache.find(cacheKey).orElseGet(IntegrationCache::new);
-
-        entry.cacheKey = cacheKey;
-        entry.payload = objectMapper.valueToTree(payload);
-        entry.fetchedAt = OffsetDateTime.now();
-
-        entry.persist();
     }
 
 }

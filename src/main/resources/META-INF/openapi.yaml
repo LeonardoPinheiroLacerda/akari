@@ -784,11 +784,11 @@ paths:
       summary: Busca paginada de filmes por texto livre
       description: |
         Busca no endpoint `/3/search/movie` do TMDB. Paginação **0-based**. Página vazia é
-        resposta válida — não devolve 404.
+        resposta válida — não devolve 404. Sem `size`: o TMDB pagina em blocos fixos de 20,
+        sem suporte a tamanho configurável.
       parameters:
         - $ref: '#/components/parameters/SearchQueryParam'
         - $ref: '#/components/parameters/PageParam'
-        - $ref: '#/components/parameters/SizeParam'
         - $ref: '#/components/parameters/LanguageParam'
         - $ref: '#/components/parameters/ForceRefreshParam'
       responses:
@@ -810,11 +810,11 @@ paths:
       summary: Busca paginada de séries por texto livre
       description: |
         Busca no endpoint `/3/search/tv` do TMDB. Paginação **0-based**. Página vazia é
-        resposta válida — não devolve 404.
+        resposta válida — não devolve 404. Sem `size`: o TMDB pagina em blocos fixos de 20,
+        sem suporte a tamanho configurável.
       parameters:
         - $ref: '#/components/parameters/SearchQueryParam'
         - $ref: '#/components/parameters/PageParam'
-        - $ref: '#/components/parameters/SizeParam'
         - $ref: '#/components/parameters/LanguageParam'
         - $ref: '#/components/parameters/ForceRefreshParam'
       responses:
