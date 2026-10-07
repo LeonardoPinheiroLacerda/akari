@@ -1,5 +1,6 @@
 package io.github.leonardopinheirolacerda.akari.utils;
 
+import io.github.leonardopinheirolacerda.akari.model.CacheEntry;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.Optional;

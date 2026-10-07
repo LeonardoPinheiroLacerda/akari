@@ -1,6 +1,6 @@
 ---
 name: write-javadoc
-description: Escreve Javadoc em português para classes, interfaces, records, enums e métodos do projeto akari (resources, services, models, mappers, clients, exceptions, config). Trigger em "documentar", "javadoc", "adicionar documentação", "documenta esse pacote", "escreve javadoc". Cobre argumentos, retornos e exceptions com o motivo pelo qual são lançados. Ao final, faz uma auditoria de cobertura.
+description: Escreve Javadoc em português para classes, interfaces, records, enums e métodos do projeto akari (domain/<domínio>/{model,resource,service,mapper,client}, exceptions, config, utils, model). Trigger em "documentar", "javadoc", "adicionar documentação", "documenta esse pacote", "escreve javadoc". Cobre argumentos, retornos e exceptions com o motivo pelo qual são lançados. Ao final, faz uma auditoria de cobertura.
 ---
 
 # write-javadoc
@@ -210,21 +210,21 @@ done
 
 ## Fluxo recomendado ao documentar um domínio inteiro
 
-O akari organiza o código por tipo de componente (`resources`, `services`, `models`, `mappers`,
-`clients`, `exceptions`, `config`), então um domínio (ex.: catálogo) está espalhado por vários
-pacotes: `MediaFolder` em `models`, `MediaFolderService` em `services`, `MediaFolderMapper` em
-`mappers`, `MediaFoldersResource` em `resources`.
+O akari organiza o código por domínio em `domain/<domínio>/`, com subpacote por tipo de
+componente dentro (`model`, `resource`, `service`, `mapper`, `client`). Documentar um domínio
+inteiro é documentar `domain/<domínio>/` inteiro: `MediaFolder` em `model`, `MediaFolderService`
+em `service`, `MediaFolderMapper` em `mapper`, `MediaFolderResource` em `resource`.
 
-1. **Inventário**: `find src/main/java -name "*.java" | grep -i <termo-do-dominio> | sort`
-   (ou o pacote inteiro, se a tarefa for por pacote).
-2. **Tasks por grupo**: TaskCreate uma por grupo, marcadas `in_progress` conforme ataca.
+1. **Inventário**: `find src/main/java/.../domain/<domínio> -name "*.java" | sort`.
+2. **Tasks por subpacote**: TaskCreate uma por subpacote (`model`, `service`, `client`, `mapper`,
+   `resource`), marcadas `in_progress` conforme ataca.
 3. **Ordem sugerida** — do vocabulário para as bordas:
-   - `models` — dá o vocabulário do domínio
-   - `services` — as regras de negócio
-   - `clients` — o protocolo dos sistemas externos
-   - `mappers` — as conversões
-   - `resources` — a borda HTTP
-   - `exceptions` / `config` — só se o domínio trouxe algo novo
+   - `model/` — dá o vocabulário do domínio
+   - `service/` — as regras de negócio
+   - `client/` — o protocolo dos sistemas externos (quando o domínio integrar um)
+   - `mapper/` — as conversões
+   - `resource/` — a borda HTTP
+   - `exceptions` / `config` (transversais, fora de `domain/`) — só se o domínio trouxe algo novo
 4. **Auditoria** ao final:
    ```bash
    DIR=src/main/java/io/github/leonardopinheirolacerda/akari

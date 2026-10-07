@@ -1,6 +1,7 @@
 package io.github.leonardopinheirolacerda.akari.exceptions;
 
 import io.github.leonardopinheirolacerda.akari.api.dto.ApiErrorCode;
+import io.github.leonardopinheirolacerda.akari.domain.mediafolder.model.MediaFolder;
 
 /**
  * Recurso procurado não existe — vira {@code 404} com {@code RESOURCE_NOT_FOUND}.

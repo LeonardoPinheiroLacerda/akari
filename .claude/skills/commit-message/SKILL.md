@@ -44,7 +44,7 @@ If there are only unstaged changes, do **not** stage them automatically. Ask whi
 ### Subject
 
 - **Tipo** (obrigatório) — um dos permitidos abaixo.
-- **Escopo** (opcional, entre parênteses) — domínio ou parte afetada (`catalog`, `playback`, `exceptions`, `contract`, `skills`, `ci`). Omita quando a mudança for global.
+- **Escopo** (opcional, entre parênteses) — domínio ou parte afetada (`mediafolder`, `playback`, `exceptions`, `contract`, `skills`, `ci`). Omita quando a mudança for global.
 - **Descrição** — verbo no imperativo, minúscula, em português, sem ponto final. Limite ≤ 72 caracteres incluindo tipo/escopo.
 
 Verbos preferidos: `adiciona`, `remove`, `corrige`, `renomeia`, `move`, `extrai`, `atualiza`, `refatora`, `documenta`, `simplifica`, `padroniza`, `desabilita`.
@@ -84,14 +84,15 @@ Se a mudança combina tipos, escolha o que descreve o **efeito principal** e exp
 
 ## Como escolher o escopo
 
-O akari é um único módulo, com pacotes por tipo de componente (`resources`, `services`,
-`models`, `mappers`, `clients`, `exceptions`, `config`). Uma funcionalidade costuma tocar vários
-desses pacotes ao mesmo tempo, então o escopo é o **domínio**, não o pacote.
+O akari é um único módulo, empacotado por domínio em `domain/<domínio>/`, com subpacote por tipo
+de componente dentro (`model`, `resource`, `service`, `mapper`, `client`). Uma funcionalidade
+costuma tocar vários desses subpacotes do mesmo domínio ao mesmo tempo, então o escopo é o
+**domínio** (o nome do pacote em `domain/`), não o subpacote de tipo.
 
-- Prefira o domínio afetado: `catalog`, `playback`, `cache`, `ingestion`, `settings`, `tmdb`, ...
+- Prefira o domínio afetado: `mediafolder`, `playback`, `cache`, `ingestion`, `setting`, `tmdb`, ...
   — mesmo que a mudança passe pelo resource, service, model e mapper dele.
-- Use o nome do pacote só para mudança transversal, que não pertence a um domínio:
-  `exceptions`, `config`.
+- Use o nome do pacote transversal só pra mudança que não pertence a um domínio (fora de
+  `domain/`): `exceptions`, `config`, `utils`, `model`.
 - Use `contract` para mudanças no contrato OpenAPI (`src/main/resources/META-INF/openapi.yaml`).
 - Mudanças no `pom.xml` usam o tipo `build`, sem escopo (ou com o nome da dependência/plugin, se ajudar).
 - Use `skills` para mudanças em `.claude/skills/*`.
@@ -102,9 +103,9 @@ desses pacotes ao mesmo tempo, então o escopo é o **domínio**, não o pacote.
 **Mudança pequena (feat):**
 
 ```
-feat(catalog): adiciona listagem de pastas por provider
+feat(mediafolder): adiciona listagem de pastas por provider
 
-- implementa listFolders no MediaFoldersResource com filtro por storageProviderId
+- implementa listFolders no MediaFolderResource com filtro por storageProviderId
 - adiciona a consulta findByProvider no model MediaFolder, com paginação 0-based
 ```
 

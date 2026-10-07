@@ -1,0 +1,69 @@
+package io.github.leonardopinheirolacerda.akari.domain.storageprovider.resource;
+
+import io.github.leonardopinheirolacerda.akari.api.StorageProviderApi;
+import io.github.leonardopinheirolacerda.akari.api.dto.CreateStorageProviderRequest;
+import io.github.leonardopinheirolacerda.akari.api.dto.StorageProviderHealth;
+import io.github.leonardopinheirolacerda.akari.api.dto.StorageProviderPage;
+import io.github.leonardopinheirolacerda.akari.api.dto.StorageProviderResponse;
+import io.github.leonardopinheirolacerda.akari.api.dto.UpdateStorageProviderConfigRequest;
+import io.github.leonardopinheirolacerda.akari.domain.storageprovider.service.StorageProviderService;
+import io.quarkus.logging.Log;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import jakarta.ws.rs.WebApplicationException;
+import jakarta.ws.rs.container.ContainerResponseContext;
+import jakarta.ws.rs.core.Response;
+import org.jboss.resteasy.reactive.server.ServerResponseFilter;
+import org.jboss.resteasy.reactive.server.SimpleResourceInfo;
+
+@ApplicationScoped
+public class StorageProviderResource implements StorageProviderApi {
+
+    @Inject
+    StorageProviderService storageProviderService;
+
+    // Provider inacessível NÃO é erro: responde 200 com healthy=false.
+    // 502 só quando o próprio rclone (rcd) está fora do ar.
+    @Override
+    public StorageProviderHealth checkStorageProviderHealth(Integer providerId) {
+        return storageProviderService.checkStorageProviderHealth(providerId);
+    }
+
+    @Override
+    public StorageProviderResponse createStorageProvider(CreateStorageProviderRequest createStorageProviderRequest) {
+        return storageProviderService.createStorageProvider(createStorageProviderRequest);
+    }
+
+    @Override
+    public void deleteStorageProvider(Integer providerId) {
+        storageProviderService.deleteStorageProvider(providerId);
+    }
+
+    @Override
+    public StorageProviderResponse getStorageProviderById(Integer providerId) {
+        return storageProviderService.getStorageProviderById(providerId);
+    }
+
+    @Override
+    public StorageProviderPage listStorageProviders(Integer page, Integer size) {
+        return storageProviderService.listStorageProviders(page, size);
+    }
+
+    @Override
+    public StorageProviderResponse updateStorageProviderConfig(Integer providerId,
+                                                               UpdateStorageProviderConfigRequest updateStorageProviderConfigRequest) {
+        return storageProviderService.updateStorageProviderConfig(providerId, updateStorageProviderConfigRequest);
+    }
+
+    @ServerResponseFilter
+    void addLocationHeader(ContainerResponseContext responseContext, SimpleResourceInfo simpleResourceInfo) {
+        if(!responseContext.getStatusInfo().getFamily().equals(Response.Status.Family.SUCCESSFUL))
+            return;
+
+        if("createStorageProvider".equals(simpleResourceInfo.getMethodName())) {
+            StorageProviderResponse response = (StorageProviderResponse) responseContext.getEntity();
+            Log.infof("Adicionando header Location pro storage provider %d criado", response.getId());
+            responseContext.getHeaders().add("Location", "/v1/storage/providers/" + response.getId());
+        }
+    }
+}
