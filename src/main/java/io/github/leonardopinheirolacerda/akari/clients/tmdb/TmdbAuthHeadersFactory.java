@@ -25,7 +25,7 @@ public class TmdbAuthHeadersFactory implements ClientHeadersFactory {
     public MultivaluedMap<String, String> update(
             MultivaluedMap<String, String> incomingHeaders,
             MultivaluedMap<String, String> clientOutgoingHeaders) {
-        final String apiKey = settingService.findOrThrow("tmdb.api-key").value;
+        final String apiKey = settingService.getTmdbApiKey();
 
         if (apiKey == null || apiKey.isBlank()) {
             throw new IntegrationNotConfiguredException(

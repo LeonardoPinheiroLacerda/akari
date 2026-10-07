@@ -15,7 +15,6 @@ import io.github.leonardopinheirolacerda.akari.exceptions.IntegrationException;
 import io.github.leonardopinheirolacerda.akari.exceptions.ResourceNotFoundException;
 import io.github.leonardopinheirolacerda.akari.mapper.TmdbMapper;
 import io.github.leonardopinheirolacerda.akari.model.IntegrationCache;
-import io.github.leonardopinheirolacerda.akari.model.Setting;
 import io.github.leonardopinheirolacerda.akari.utils.CacheUtils;
 import io.github.leonardopinheirolacerda.akari.utils.HttpErrors;
 import io.quarkus.logging.Log;
@@ -25,8 +24,6 @@ import jakarta.transaction.Transactional;
 import jakarta.ws.rs.ProcessingException;
 import jakarta.ws.rs.WebApplicationException;
 import org.eclipse.microprofile.rest.client.inject.RestClient;
-
-import java.time.Duration;
 
 @ApplicationScoped
 public class TmdbSearchService {
@@ -48,28 +45,30 @@ public class TmdbSearchService {
 
     @Transactional
     public TmdbMovieSearchResultPage searchMovies(String query, Integer page, String language, Boolean forceRefresh) {
-        final boolean includeAdult = tmdbIncludeAdult();
-        final String cacheKey = CacheUtils.buildKey("movie", query, String.valueOf(page), language, String.valueOf(includeAdult));
+        final boolean includeAdult = settingService.isTmdbIncludeAdult();
+        final String effectiveLanguage = effectiveLanguage(language);
+        final String cacheKey = CacheUtils.buildKey("movie", query, String.valueOf(page), effectiveLanguage, String.valueOf(includeAdult));
 
         return CacheUtils.resolve(
                 forceRefresh,
-                tmdbCacheTtl(),
+                settingService.getTmdbCacheTtl(),
                 () -> IntegrationCache.readEntry(cacheKey, TmdbMovieSearchResultPage.class, objectMapper),
-                () -> fetchMovieSearch(query, page, language, includeAdult),
+                () -> fetchMovieSearch(query, page, effectiveLanguage, includeAdult),
                 payload -> IntegrationCache.writeEntry(cacheKey, payload, objectMapper)
         );
     }
 
     @Transactional
     public TmdbTvSearchResultPage searchTv(String query, Integer page, String language, Boolean forceRefresh) {
-        final boolean includeAdult = tmdbIncludeAdult();
-        final String cacheKey = CacheUtils.buildKey("tv", query, String.valueOf(page), language, String.valueOf(includeAdult));
+        final boolean includeAdult = settingService.isTmdbIncludeAdult();
+        final String effectiveLanguage = effectiveLanguage(language);
+        final String cacheKey = CacheUtils.buildKey("tv", query, String.valueOf(page), effectiveLanguage, String.valueOf(includeAdult));
 
         return CacheUtils.resolve(
                 forceRefresh,
-                tmdbCacheTtl(),
+                settingService.getTmdbCacheTtl(),
                 () -> IntegrationCache.readEntry(cacheKey, TmdbTvSearchResultPage.class, objectMapper),
-                () -> fetchTvSearch(query, page, language, includeAdult),
+                () -> fetchTvSearch(query, page, effectiveLanguage, includeAdult),
                 payload -> IntegrationCache.writeEntry(cacheKey, payload, objectMapper)
         );
     }
@@ -80,7 +79,7 @@ public class TmdbSearchService {
 
         return CacheUtils.resolve(
                 forceRefresh,
-                tmdbCacheTtl(),
+                settingService.getTmdbCacheTtl(),
                 () -> IntegrationCache.readEntry(cacheKey, TmdbMovieDetailsResponse.class, objectMapper),
                 () -> fetchMovieDetails(movieId),
                 payload -> IntegrationCache.writeEntry(cacheKey, payload, objectMapper)
@@ -93,7 +92,7 @@ public class TmdbSearchService {
 
         return CacheUtils.resolve(
                 forceRefresh,
-                tmdbCacheTtl(),
+                settingService.getTmdbCacheTtl(),
                 () -> IntegrationCache.readEntry(cacheKey, TmdbImagesResponse.class, objectMapper),
                 () -> fetchMovieImages(movieId),
                 payload -> IntegrationCache.writeEntry(cacheKey, payload, objectMapper)
@@ -106,7 +105,7 @@ public class TmdbSearchService {
 
         return CacheUtils.resolve(
                 forceRefresh,
-                tmdbCacheTtl(),
+                settingService.getTmdbCacheTtl(),
                 () -> IntegrationCache.readEntry(cacheKey, TmdbTranslationsResponse.class, objectMapper),
                 () -> fetchMovieTranslations(movieId),
                 payload -> IntegrationCache.writeEntry(cacheKey, payload, objectMapper)
@@ -119,7 +118,7 @@ public class TmdbSearchService {
 
         return CacheUtils.resolve(
                 forceRefresh,
-                tmdbCacheTtl(),
+                settingService.getTmdbCacheTtl(),
                 () -> IntegrationCache.readEntry(cacheKey, TmdbTvDetailsResponse.class, objectMapper),
                 () -> fetchTvDetails(seriesId),
                 payload -> IntegrationCache.writeEntry(cacheKey, payload, objectMapper)
@@ -132,7 +131,7 @@ public class TmdbSearchService {
 
         return CacheUtils.resolve(
                 forceRefresh,
-                tmdbCacheTtl(),
+                settingService.getTmdbCacheTtl(),
                 () -> IntegrationCache.readEntry(cacheKey, TmdbImagesResponse.class, objectMapper),
                 () -> fetchTvImages(seriesId),
                 payload -> IntegrationCache.writeEntry(cacheKey, payload, objectMapper)
@@ -145,7 +144,7 @@ public class TmdbSearchService {
 
         return CacheUtils.resolve(
                 forceRefresh,
-                tmdbCacheTtl(),
+                settingService.getTmdbCacheTtl(),
                 () -> IntegrationCache.readEntry(cacheKey, TmdbTranslationsResponse.class, objectMapper),
                 () -> fetchTvTranslations(seriesId),
                 payload -> IntegrationCache.writeEntry(cacheKey, payload, objectMapper)
@@ -158,7 +157,7 @@ public class TmdbSearchService {
 
         return CacheUtils.resolve(
                 forceRefresh,
-                tmdbCacheTtl(),
+                settingService.getTmdbCacheTtl(),
                 () -> IntegrationCache.readEntry(cacheKey, TmdbSeasonResponse.class, objectMapper),
                 () -> fetchSeason(seriesId, seasonNumber),
                 payload -> IntegrationCache.writeEntry(cacheKey, payload, objectMapper)
@@ -285,14 +284,11 @@ public class TmdbSearchService {
         }
     }
 
-    private boolean tmdbIncludeAdult() {
-        final Setting setting = settingService.findOrThrow("tmdb.include-adult");
-        return Boolean.parseBoolean(setting.value);
-    }
-
-    private Duration tmdbCacheTtl() {
-        final Setting setting = settingService.findOrThrow("tmdb.cache.ttl");
-        return Duration.parse(setting.value);
+    private String effectiveLanguage(String requested) {
+        if (requested != null && !requested.isBlank()) {
+            return requested;
+        }
+        return settingService.getTmdbDefaultLanguage();
     }
 
 }

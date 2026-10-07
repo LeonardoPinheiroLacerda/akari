@@ -1401,7 +1401,9 @@ components:
       name: language
       in: query
       required: false
-      description: 'Idioma dos textos devolvidos, como tag BCP 47 (ex.: `en-US`, `pt-BR`)'
+      description: >-
+        Idioma dos textos devolvidos, como tag BCP 47 (ex.: `en-US`, `pt-BR`). Omitido, usa a
+        preferência `tmdb.default-language`.
       schema:
         $ref: '#/components/schemas/Language'
 
@@ -2853,7 +2855,6 @@ components:
     # ---------- tmdb ----------
     Language:
       type: string
-      default: en-US
       description: Tag de idioma BCP 47 (idioma ISO 639-1 + região ISO 3166-1)
 
     GenreId:

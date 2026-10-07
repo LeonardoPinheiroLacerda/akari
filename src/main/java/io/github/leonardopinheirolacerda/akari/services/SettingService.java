@@ -11,6 +11,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
 
+import java.time.Duration;
 import java.util.List;
 
 @ApplicationScoped
@@ -53,7 +54,47 @@ public class SettingService {
         return response;
     }
 
-    public Setting findOrThrow(String key) {
+    public Duration getAnilistCacheTtl() {
+        return Duration.parse(findOrThrow("anilist.cache.ttl").value);
+    }
+
+    public Duration getTmdbCacheTtl() {
+        return Duration.parse(findOrThrow("tmdb.cache.ttl").value);
+    }
+
+    public String getTmdbApiKey() {
+        return findOrThrow("tmdb.api-key").value;
+    }
+
+    public String getTmdbDefaultLanguage() {
+        return findOrThrow("tmdb.default-language").value;
+    }
+
+    public boolean isTmdbIncludeAdult() {
+        return Boolean.parseBoolean(findOrThrow("tmdb.include-adult").value);
+    }
+
+    public Long getCacheMaxSizeBytes() {
+        return Long.parseLong(findOrThrow("cache.max-size-bytes").value);
+    }
+
+    public String getCacheDir() {
+        return findOrThrow("cache.dir").value;
+    }
+
+    public String getPlaybackTranscodeHardwareAcceleration() {
+        return findOrThrow("playback.transcode.hardware-acceleration").value;
+    }
+
+    public Duration getPlaybackSessionHeartbeatTtl() {
+        return Duration.parse(findOrThrow("playback.session.heartbeat-ttl").value);
+    }
+
+    public String getPlaybackWorkBaseDir() {
+        return findOrThrow("playback.work.base-dir").value;
+    }
+
+    private Setting findOrThrow(String key) {
         return Setting.find(key)
                 .orElseThrow(() -> {
                     Log.warnf("Preferência %s não encontrada", key);

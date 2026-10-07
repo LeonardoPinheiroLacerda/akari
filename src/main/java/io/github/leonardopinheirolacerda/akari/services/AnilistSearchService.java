@@ -13,7 +13,6 @@ import io.github.leonardopinheirolacerda.akari.exceptions.IntegrationException;
 import io.github.leonardopinheirolacerda.akari.exceptions.ResourceNotFoundException;
 import io.github.leonardopinheirolacerda.akari.mapper.AnilistMapper;
 import io.github.leonardopinheirolacerda.akari.model.IntegrationCache;
-import io.github.leonardopinheirolacerda.akari.model.Setting;
 import io.github.leonardopinheirolacerda.akari.utils.CacheUtils;
 import io.github.leonardopinheirolacerda.akari.utils.HttpErrors;
 import io.quarkus.logging.Log;
@@ -24,7 +23,6 @@ import jakarta.ws.rs.ProcessingException;
 import jakarta.ws.rs.WebApplicationException;
 import org.eclipse.microprofile.rest.client.inject.RestClient;
 
-import java.time.Duration;
 import java.util.Map;
 
 @ApplicationScoped
@@ -49,7 +47,7 @@ public class AnilistSearchService {
 
         return CacheUtils.resolve(
                 forceRefresh,
-                anilistCacheTtl(),
+                settingService.getAnilistCacheTtl(),
                 () -> IntegrationCache.readEntry(cacheKey, AnilistMediaSummaryPage.class, objectMapper),
                 () -> fetchSearchFromAnilist(query, page, size),
                 payload -> IntegrationCache.writeEntry(cacheKey, payload, objectMapper)
@@ -62,7 +60,7 @@ public class AnilistSearchService {
 
         return CacheUtils.resolve(
                 forceRefresh,
-                anilistCacheTtl(),
+                settingService.getAnilistCacheTtl(),
                 () -> IntegrationCache.readEntry(cacheKey, AnilistMediaResponse.class, objectMapper),
                 () -> fetchMediaFromAnilist(anilistId),
                 payload -> IntegrationCache.writeEntry(cacheKey, payload, objectMapper)
@@ -119,11 +117,6 @@ public class AnilistSearchService {
         }
 
         return response.data().media();
-    }
-
-    private Duration anilistCacheTtl() {
-        final Setting setting = settingService.findOrThrow("anilist.cache.ttl");
-        return Duration.parse(setting.value);
     }
 
 }
