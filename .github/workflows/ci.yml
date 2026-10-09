@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  sonar:
+    name: Build, testes e análise Sonar
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configura o JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - name: Cache Maven/Sonar
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.m2
+            ~/.sonar/cache
+          key: ${{ runner.os }}-sonar-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-sonar-
+
+      - name: Build, testes e análise
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: ./mvnw -B verify sonar:sonar
+
+  trivy-deps:
+    name: Trivy - dependências Maven
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Scan de dependências (SCA)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: pom.xml
+          scanners: vuln
+          severity: CRITICAL,HIGH,MEDIUM
+          format: sarif
+          output: trivy-deps.sarif
+
+      - name: Publica resultado na aba Security
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-deps.sarif
+          category: trivy-deps
+
+  trivy-images:
+    name: Trivy - imagem ${{ matrix.image }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - postgres:17-alpine
+          - rclone/rclone:1.75.1
+    steps:
+      - name: Scan da imagem
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: image
+          image-ref: ${{ matrix.image }}
+          severity: CRITICAL,HIGH,MEDIUM
+          format: sarif
+          output: trivy-image.sarif
+
+      - name: Publica resultado na aba Security
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-image.sarif
+          category: trivy-image-${{ strategy.job-index }}

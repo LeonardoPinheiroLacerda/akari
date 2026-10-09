@@ -1,9 +1,3 @@
-# Dependências do akari — a aplicação roda fora do container, direto na máquina
-# (./mvnw quarkus:dev, ou o jar empacotado). Isso aqui só sobe o que ela precisa
-# pra falar com o mundo externo (banco, rclone/MEGA), publicadas em localhost.
-# Credenciais do banco: defina DB_USERNAME/DB_PASSWORD num .env (ignorado pelo git);
-# sem isso, valem os defaults abaixo.
-# Uso: docker compose up -d
 services:
   postgres:
     image: postgres:17-alpine
@@ -30,9 +24,6 @@ services:
   rclone:
     image: rclone/rclone:1.75.1
 
-    # --rc-addr precisa ser 0.0.0.0 (não localhost) pra ficar acessível pela
-    # porta publicada abaixo — quem fala com ele agora é a app rodando no
-    # host, não outro container.
     command: rcd --rc-no-auth --rc-addr 0.0.0.0:5572 --log-file /var/log/rclone/rclone.log
 
     ports:
