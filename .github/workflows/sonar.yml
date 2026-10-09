@@ -1,0 +1,55 @@
+name: Sonar
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  sonar:
+    name: Build, testes e análise Sonar
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configura o JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - name: Cache Maven/Sonar
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.m2
+            ~/.sonar/cache
+          key: ${{ runner.os }}-sonar-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-sonar-
+
+      - name: Garante que o projeto existe e é público no SonarCloud
+        if: always()
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          curl -s -u "$SONAR_TOKEN:" -X POST \
+            "https://sonarcloud.io/api/projects/create?project=akari&name=akari&organization=leonardopinheirolacerda&visibility=public" \
+            -o /dev/null -w "status: %{http_code}\n" || true
+
+      - name: Garante que "main" é a branch principal no SonarCloud
+        if: always()
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          curl -s -u "$SONAR_TOKEN:" -X POST \
+            "https://sonarcloud.io/api/project_branches/rename?project=akari&name=main" \
+            -o /dev/null -w "status: %{http_code}\n" || true
+
+      - name: Build, testes e análise
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: ./mvnw -B verify sonar:sonar
