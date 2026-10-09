@@ -39,12 +39,11 @@ jobs:
             "https://sonarcloud.io/api/projects/create?project=akari&name=akari&organization=leonardopinheirolacerda&visibility=public" \
             -o /dev/null -w "status: %{http_code}\n" || true
 
-      - name: Build, testes e análise
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        run: ./mvnw -B verify sonar:sonar
-
+      # Precisa rodar ANTES da primeira análise: o projects/create sempre nasce
+      # com uma branch "master" vazia marcada como principal. Se a análise sob
+      # "main" rodar antes do rename, o SonarCloud cria "main" como branch curta
+      # (feature/PR) separada — e depois não dá mais pra renomear "master" pra
+      # "main" (colisão de nome com a branch que já existe).
       - name: Garante que "main" é a branch principal no SonarCloud
         if: always()
         env:
@@ -53,6 +52,12 @@ jobs:
           curl -s -u "$SONAR_TOKEN:" -X POST \
             "https://sonarcloud.io/api/project_branches/rename?project=akari&name=main" \
             -o /dev/null -w "status: %{http_code}\n" || true
+
+      - name: Build, testes e análise
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: ./mvnw -B verify sonar:sonar
 
   trivy-deps:
     name: Trivy - dependências Maven
