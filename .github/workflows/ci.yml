@@ -36,6 +36,15 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: ./mvnw -B verify sonar:sonar
 
+      - name: Garante que "main" é a branch principal no SonarCloud
+        if: always()
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          curl -s -u "$SONAR_TOKEN:" -X POST \
+            "https://sonarcloud.io/api/project_branches/rename?project=akari&name=main" \
+            -o /dev/null -w "status: %{http_code}\n" || true
+
   trivy-deps:
     name: Trivy - dependências Maven
     runs-on: ubuntu-latest
