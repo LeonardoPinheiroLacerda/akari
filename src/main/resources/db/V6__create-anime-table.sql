@@ -1,0 +1,22 @@
+CREATE TABLE anime (
+      anilist_id INTEGER PRIMARY KEY,
+      folder_id INTEGER NOT NULL UNIQUE REFERENCES media_folder(id),
+      title_main TEXT NULL,
+      title_english TEXT NULL,
+      title_japanese TEXT NULL,
+      title_synonyms JSON NULL,
+      synopsis TEXT NULL,
+      thumbnail_small TEXT NULL,
+      thumbnail_medium TEXT NULL,
+      thumbnail_large TEXT NULL,
+      episodes INTEGER NULL,
+      duration TEXT NULL,
+      season_year INTEGER NULL,
+      format TEXT NULL,
+      season TEXT NULL,
+      score DOUBLE PRECISION NULL,
+      is_adult BOOLEAN NULL,
+      genres JSON NULL,
+      franchise_root_curation TEXT NOT NULL DEFAULT 'AUTO',
+      created_at TIMESTAMPTZ NOT NULL
+);

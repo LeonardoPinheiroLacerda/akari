@@ -138,7 +138,7 @@ tags:
         poster/backdrop/logo), file pairing (temporada/episódio/thumbnail por vídeo).
 
       O binding TMDB é opcional — anime funciona sem ele; só os campos `banner`/`logo` do
-      `AnimeView` ficam `null` sem TMDB + overrides.
+      `AnimeResponse` ficam `null` sem TMDB + overrides.
   - name: AnimeRelations
     description: Relações (sequel/prequel/side story) entre animes
   - name: AnimeTmdb
@@ -839,7 +839,7 @@ paths:
       summary: Lê a metadata do anime (base local, sem buscar de novo na AniList)
       responses:
         '200':
-          $ref: '#/components/responses/AnimeViewOk'
+          $ref: '#/components/responses/AnimeOk'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -865,7 +865,7 @@ paths:
       summary: Busca de novo na AniList, mantendo a pasta atual
       responses:
         '200':
-          $ref: '#/components/responses/AnimeViewOk'
+          $ref: '#/components/responses/AnimeOk'
         '404':
           $ref: '#/components/responses/NotFound'
         '502':
@@ -909,7 +909,7 @@ paths:
         $ref: '#/components/requestBodies/AnimeFranchiseRootRequestBody'
       responses:
         '200':
-          $ref: '#/components/responses/AnimeViewOk'
+          $ref: '#/components/responses/AnimeOk'
         '400':
           $ref: '#/components/responses/BadRequest'
         '404':
@@ -926,7 +926,7 @@ paths:
       summary: Lê a metadata do anime vinculado a uma pasta do catalog
       responses:
         '200':
-          $ref: '#/components/responses/AnimeViewOk'
+          $ref: '#/components/responses/AnimeOk'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -956,14 +956,14 @@ paths:
       operationId: listRelationRoots
       summary: Animes-raiz da coleção (paginado)
       description: |
-        Animes com `isFranchiseRoot = true`, mais os com `isFranchiseRoot = null` dos quais não
-        sai nenhuma relação `PREQUEL` nem `PARENT`. Ordenados por `anilistId`.
+        Animes com `franchiseRootCuration = MANUAL_ROOT`, mais os com `franchiseRootCuration =
+        AUTO` dos quais não sai nenhuma relação `PREQUEL` nem `PARENT`. Ordenados por `anilistId`.
       parameters:
         - $ref: '#/components/parameters/PageParam'
         - $ref: '#/components/parameters/SizeParam'
       responses:
         '200':
-          $ref: '#/components/responses/AnimeViewPageOk'
+          $ref: '#/components/responses/AnimePageOk'
         '400':
           $ref: '#/components/responses/BadRequest'
         '500':
@@ -1800,18 +1800,18 @@ components:
             $ref: '#/components/schemas/TmdbTvSearchResultPage'
 
     # ---------- animemetadata ----------
-    AnimeViewOk:
+    AnimeOk:
       description: Vista pública do anime
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/AnimeView'
-    AnimeViewPageOk:
+            $ref: '#/components/schemas/AnimeResponse'
+    AnimePageOk:
       description: Página (possivelmente vazia) de animes
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/AnimeViewPage'
+            $ref: '#/components/schemas/AnimePage'
     AnimeBindingsOk:
       description: Resumos de binding das pastas consultadas (só as vinculadas)
       content:
@@ -1825,7 +1825,7 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/AnimeView'
+            $ref: '#/components/schemas/AnimeResponse'
     AnimeDeleted:
       description: Metadata do anime removida
     AnimeRelationGraphOk:
@@ -3049,19 +3049,27 @@ components:
         folderId:
           $ref: '#/components/schemas/FolderId'
 
+    FranchiseRootCuration:
+      type: string
+      description: |
+        Curadoria da flag de raiz de franquia. `MANUAL_ROOT` força este anime como raiz, mesmo
+        com relação ancestral; `MANUAL_NOT_ROOT` força NÃO ser raiz (desabilita a raiz natural,
+        mesmo sem ancestral); `AUTO` deixa automático — é raiz quando não sai dele nenhuma
+        relação `PREQUEL` nem `PARENT`.
+      enum:
+        - AUTO
+        - MANUAL_ROOT
+        - MANUAL_NOT_ROOT
+
     AnimeFranchiseRootRequest:
       type: object
-      description: Payload da curadoria manual da raiz de franquia (tri-state)
+      description: Payload da curadoria manual da raiz de franquia
+      required: [franchiseRootCuration]
       properties:
-        isFranchiseRoot:
-          type: boolean
-          nullable: true
-          description: >-
-            `true` força este anime como raiz, mesmo com relação ancestral; `false` força NÃO ser
-            raiz (desabilita a raiz natural, mesmo sem ancestral); `null` volta ao automático — é
-            raiz quando não sai dele nenhuma relação `PREQUEL` nem `PARENT`.
+        franchiseRootCuration:
+          $ref: '#/components/schemas/FranchiseRootCuration'
 
-    AnimeViewTitles:
+    AnimeTitlesResponse:
       type: object
       description: Títulos localizados
       properties:
@@ -3081,7 +3089,7 @@ components:
           items:
             type: string
 
-    AnimeViewThumbnails:
+    AnimeThumbnailsResponse:
       type: object
       description: URLs de poster em 3 resoluções
       properties:
@@ -3099,7 +3107,7 @@ components:
       type: object
       description: |
         Resumo leve do binding de uma pasta — o suficiente para o card do catálogo
-        (status vinculado + capa + título). Para a vista completa use o `AnimeView`.
+        (status vinculado + capa + título). Para a vista completa use o `AnimeResponse`.
       required: [folderId, anilistId]
       properties:
         folderId:
@@ -3127,25 +3135,25 @@ components:
           nullable: true
           description: '`true` se o anime também tem binding TMDB'
 
-    AnimeView:
+    AnimeResponse:
       type: object
       description: |
         Vista pública de um anime. `banner`/`logo` só são preenchidos quando há binding
         TMDB + override manual. `synopsis` vem em HTML quando a fonte é AniList (pode
         conter `<br>`, `<i>`, `<b>`).
-      required: [anilistId]
+      required: [anilistId, franchiseRootCuration]
       properties:
         anilistId:
           $ref: '#/components/schemas/AnilistId'
         titles:
-          allOf: [{ $ref: '#/components/schemas/AnimeViewTitles' }]
+          allOf: [{ $ref: '#/components/schemas/AnimeTitlesResponse' }]
           nullable: true
         synopsis:
           type: string
           nullable: true
           description: Sinopse em HTML
         thumbnails:
-          allOf: [{ $ref: '#/components/schemas/AnimeViewThumbnails' }]
+          allOf: [{ $ref: '#/components/schemas/AnimeThumbnailsResponse' }]
           nullable: true
         banner:
           type: string
@@ -3189,14 +3197,10 @@ components:
           nullable: true
           items:
             type: string
-        isFranchiseRoot:
-          type: boolean
-          nullable: true
-          description: >-
-            Curadoria manual (tri-state): `true` força raiz; `false` força não-raiz; `null` =
-            automático (raiz quando não sai dele nenhuma relação `PREQUEL` nem `PARENT`).
+        franchiseRootCuration:
+          $ref: '#/components/schemas/FranchiseRootCuration'
 
-    AnimeViewPage:
+    AnimePage:
       description: Envelope paginado de animes
       allOf:
         - $ref: '#/components/schemas/Page'
@@ -3206,7 +3210,7 @@ components:
             data:
               type: array
               items:
-                $ref: '#/components/schemas/AnimeView'
+                $ref: '#/components/schemas/AnimeResponse'
 
     AnimeRelationNode:
       type: object
@@ -3231,15 +3235,16 @@ components:
           nullable: true
           description: >-
             Classificação de raiz já decidida no backend a partir da curadoria + estrutura do grafo.
-            Ausente/`null` = não é raiz. A curadoria crua (`isFranchiseRoot`) vive no detalhe do
-            anime, não no nó do grafo.
+            Ausente/`null` = não é raiz. A curadoria crua (`franchiseRootCuration`) vive no detalhe
+            do anime, não no nó do grafo.
 
     AnimeRootKind:
       type: string
       description: >-
         Tipo de raiz de franquia resolvido no backend. `MANUAL` = curadoria explícita
-        (`isFranchiseRoot = true`); `NATURAL` = curadoria automática (`isFranchiseRoot = null`) e
-        nenhuma relação ancestral (`PREQUEL` ou `PARENT`) sai do anime.
+        (`franchiseRootCuration = MANUAL_ROOT`); `NATURAL` = curadoria automática
+        (`franchiseRootCuration = AUTO`) e nenhuma relação ancestral (`PREQUEL` ou `PARENT`) sai
+        do anime.
       enum:
         - MANUAL
         - NATURAL

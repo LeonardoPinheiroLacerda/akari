@@ -2,7 +2,7 @@ package io.github.leonardopinheirolacerda.akari.domain.anime.resource;
 
 import io.github.leonardopinheirolacerda.akari.api.AnimeRelationsApi;
 import io.github.leonardopinheirolacerda.akari.api.dto.AnimeRelationGraphResponse;
-import io.github.leonardopinheirolacerda.akari.api.dto.AnimeViewPage;
+import io.github.leonardopinheirolacerda.akari.api.dto.AnimePage;
 import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
 
@@ -14,7 +14,7 @@ public class AnimeRelationsResource implements AnimeRelationsApi {
     }
 
     @Override
-    public AnimeViewPage listRelationRoots(Integer page, Integer size) {
+    public AnimePage listRelationRoots(Integer page, Integer size) {
         throw new WebApplicationException(Response.Status.NOT_IMPLEMENTED);
     }
 }

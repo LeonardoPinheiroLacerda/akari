@@ -4,48 +4,54 @@ import io.github.leonardopinheirolacerda.akari.api.AnimeApi;
 import io.github.leonardopinheirolacerda.akari.api.dto.AnimeBindingRequest;
 import io.github.leonardopinheirolacerda.akari.api.dto.AnimeBindingSummary;
 import io.github.leonardopinheirolacerda.akari.api.dto.AnimeFranchiseRootRequest;
-import io.github.leonardopinheirolacerda.akari.api.dto.AnimeView;
-import jakarta.ws.rs.WebApplicationException;
-import jakarta.ws.rs.core.Response;
+import io.github.leonardopinheirolacerda.akari.api.dto.AnimeResponse;
+import io.github.leonardopinheirolacerda.akari.domain.anime.service.AnimeService;
+import jakarta.inject.Inject;
 
 import java.util.List;
 
+/**
+ * Binding anime↔pasta, fetch/sync na AniList e curadoria manual da raiz de franquia.
+ */
 public class AnimeResource implements AnimeApi {
 
+    @Inject
+    AnimeService animeService;
+
     @Override
-    public AnimeView bindAnimeToFolder(Integer anilistId, AnimeBindingRequest animeBindingRequest) {
-        throw new WebApplicationException(Response.Status.NOT_IMPLEMENTED);
+    public AnimeResponse bindAnimeToFolder(Integer anilistId, AnimeBindingRequest animeBindingRequest) {
+        return animeService.bindAnimeToFolder(anilistId, animeBindingRequest);
     }
 
     @Override
     public void deleteAnime(Integer anilistId) {
-        throw new WebApplicationException(Response.Status.NOT_IMPLEMENTED);
+        animeService.deleteAnime(anilistId);
     }
 
     @Override
-    public AnimeView getAnime(Integer anilistId) {
-        throw new WebApplicationException(Response.Status.NOT_IMPLEMENTED);
+    public AnimeResponse getAnime(Integer anilistId) {
+        return animeService.getAnime(anilistId);
     }
 
     @Override
     public List<AnimeBindingSummary> getAnimeBindings(List<Integer> folderIds) {
-        throw new WebApplicationException(Response.Status.NOT_IMPLEMENTED);
+        return animeService.getAnimeBindings(folderIds);
     }
 
     @Override
-    public AnimeView getAnimeByFolder(Integer folderId) {
-        throw new WebApplicationException(Response.Status.NOT_IMPLEMENTED);
+    public AnimeResponse getAnimeByFolder(Integer folderId) {
+        return animeService.getAnimeByFolder(folderId);
     }
 
     @Override
-    public AnimeView setAnimeFranchiseRoot(
+    public AnimeResponse setAnimeFranchiseRoot(
             Integer anilistId,
             AnimeFranchiseRootRequest animeFranchiseRootRequest) {
-        throw new WebApplicationException(Response.Status.NOT_IMPLEMENTED);
+        return animeService.setAnimeFranchiseRoot(anilistId, animeFranchiseRootRequest);
     }
 
     @Override
-    public AnimeView syncAnime(Integer anilistId) {
-        throw new WebApplicationException(Response.Status.NOT_IMPLEMENTED);
+    public AnimeResponse syncAnime(Integer anilistId) {
+        return animeService.syncAnime(anilistId);
     }
 }
