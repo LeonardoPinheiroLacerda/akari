@@ -196,7 +196,15 @@ public class AnimeTmdbService {
                 .logoPath(toImageOptions(images.logos(), TmdbImageUtils::logo));
     }
 
-    private Anime findBoundAnimeOrThrow(Integer anilistId) {
+    /**
+     * Busca o anime e confirma que ele tem binding TMDB, ou lança 404. Usado também pelo
+     * {@link AnimeTmdbFilePairingService}, que exige o mesmo binding pra existir.
+     *
+     * @param anilistId id do anime na AniList
+     * @return o anime, com {@code tmdbId} garantidamente preenchido
+     * @throws ResourceNotFoundException se o anime não existir ou não tiver binding TMDB
+     */
+    public Anime findBoundAnimeOrThrow(Integer anilistId) {
         final Anime anime = animeService.findOrThrow(anilistId);
 
         if (anime.tmdbId == null) {

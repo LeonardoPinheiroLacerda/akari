@@ -41,6 +41,11 @@ public final class TmdbImageUtils {
         return build("w500", filePath);
     }
 
+    /** Thumbnail de still de episódio ({@code w300}) — bate com o seletor de episódios. */
+    public static String thumbnail(String filePath) {
+        return build("w300", filePath);
+    }
+
     private static String build(String size, String filePath) {
         if (filePath == null || filePath.isBlank()) {
             return null;

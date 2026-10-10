@@ -4,44 +4,43 @@ import io.github.leonardopinheirolacerda.akari.api.AnimeTmdbFilePairingApi;
 import io.github.leonardopinheirolacerda.akari.api.dto.TmdbFilePairingRequest;
 import io.github.leonardopinheirolacerda.akari.api.dto.TmdbFilePairingResponse;
 import io.github.leonardopinheirolacerda.akari.api.dto.TmdbFilePairingSchema;
-import jakarta.ws.rs.WebApplicationException;
-import jakarta.ws.rs.core.Response;
+import io.github.leonardopinheirolacerda.akari.domain.anime.service.AnimeTmdbFilePairingService;
+import jakarta.inject.Inject;
 
 import java.util.List;
 
+/**
+ * Pairing TMDB (temporada/episódio/thumbnail) dos arquivos de vídeo.
+ */
 public class AnimeTmdbFilePairingResource implements AnimeTmdbFilePairingApi {
 
-    // 404: arquivo sem pairing gravado.
+    @Inject
+    AnimeTmdbFilePairingService animeTmdbFilePairingService;
+
     @Override
     public void deleteTmdbFilePairing(Integer fileId) {
-        throw new WebApplicationException(Response.Status.NOT_IMPLEMENTED);
+        animeTmdbFilePairingService.deleteTmdbFilePairing(fileId);
     }
 
-    // Arquivo sem pairing NÃO é 404: responde 200 com seasonNumber, episodeNumber e
-    // thumbnailPath null.
-    // 404 só quando o fileId não existe no catalog.
     @Override
     public TmdbFilePairingResponse getTmdbFilePairing(Integer fileId) {
-        throw new WebApplicationException(Response.Status.NOT_IMPLEMENTED);
+        return animeTmdbFilePairingService.getTmdbFilePairing(fileId);
     }
 
-    // 404: anime sem binding TMDB.
-    // 400 BUSINESS_RULE_VIOLATION: binding de filme — só série tem temporadas/episódios.
     @Override
     public TmdbFilePairingSchema getTmdbFilePairingSchema(Integer anilistId) {
-        throw new WebApplicationException(Response.Status.NOT_IMPLEMENTED);
+        return animeTmdbFilePairingService.getTmdbFilePairingSchema(anilistId);
     }
 
     @Override
     public List<TmdbFilePairingResponse> getTmdbFilePairings(List<Integer> fileIds) {
-        throw new WebApplicationException(Response.Status.NOT_IMPLEMENTED);
+        return animeTmdbFilePairingService.getTmdbFilePairings(fileIds);
     }
 
-    // 404: fileId inexistente no catalog.
     @Override
     public TmdbFilePairingResponse updateTmdbFilePairing(
             Integer fileId,
             TmdbFilePairingRequest tmdbFilePairingRequest) {
-        throw new WebApplicationException(Response.Status.NOT_IMPLEMENTED);
+        return animeTmdbFilePairingService.updateTmdbFilePairing(fileId, tmdbFilePairingRequest);
     }
 }
