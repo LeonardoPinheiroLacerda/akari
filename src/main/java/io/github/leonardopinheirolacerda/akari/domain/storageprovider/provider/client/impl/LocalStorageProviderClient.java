@@ -1,7 +1,6 @@
 package io.github.leonardopinheirolacerda.akari.domain.storageprovider.provider.client.impl;
 
 import io.github.leonardopinheirolacerda.akari.domain.storageprovider.provider.client.StorageProviderClient;
-import io.github.leonardopinheirolacerda.akari.domain.storageprovider.provider.mapper.LocalStorageItemMapper;
 import io.github.leonardopinheirolacerda.akari.domain.storageprovider.provider.model.StorageItem;
 import io.quarkus.logging.Log;
 
@@ -17,7 +16,6 @@ import java.util.stream.Stream;
 public class LocalStorageProviderClient implements StorageProviderClient {
 
     private final Path root;
-    private final LocalStorageItemMapper mapper = new LocalStorageItemMapper();
 
     public LocalStorageProviderClient(Map<String, String> config) {
         this.root = Path.of(config.get("rootPath"));
@@ -34,7 +32,7 @@ public class LocalStorageProviderClient implements StorageProviderClient {
 
         try (Stream<Path> entries = Files.list(dir)) {
             return entries
-                    .map(entry -> mapper.toStorageItem(root, entry))
+                    .map(this::toStorageItem)
                     .toList();
         } catch (IOException e) {
             Log.errorf(e, "Falha ao listar diretório local: %s", dir);
@@ -71,7 +69,7 @@ public class LocalStorageProviderClient implements StorageProviderClient {
         try (Stream<Path> tree = Files.walk(start)) {
             return tree
                     .filter(entry -> !entry.equals(start))
-                    .map(entry -> mapper.toStorageItem(root, entry))
+                    .map(this::toStorageItem)
                     .toList();
 
         } catch (IOException e) {
@@ -105,5 +103,44 @@ public class LocalStorageProviderClient implements StorageProviderClient {
         return Files.isRegularFile(resolved)
                 ? Optional.of(resolved)
                 : Optional.empty();
+    }
+
+    private StorageItem toStorageItem(Path entry) {
+        final boolean isDir = Files.isDirectory(entry);
+        final String relative = root.relativize(entry).toString();
+
+        return new StorageItem(
+                relative,
+                entry.getFileName().toString(),
+                isDir ? null : sizeOf(entry),
+                isDir ? null : mimeTypeOf(entry),
+                modTimeOf(entry),
+                isDir,
+                null
+        );
+    }
+
+    private static Long sizeOf(Path file) {
+        try {
+            return Files.size(file);
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
+    private static String modTimeOf(Path entry) {
+        try {
+            return Files.getLastModifiedTime(entry).toInstant().toString();
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
+    private static String mimeTypeOf(Path file) {
+        try {
+            return Files.probeContentType(file);
+        } catch (IOException e) {
+            return null;
+        }
     }
 }
