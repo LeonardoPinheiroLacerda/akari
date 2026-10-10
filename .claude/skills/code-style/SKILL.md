@@ -74,7 +74,7 @@ target/generated-sources/openapi/.../app/api/dto/   # DTOs gerados (ApiError, *R
 ```
 
 - Subpacote por tipo **sempre singular**: `model/`, `resource/`, `service/`, `mapper/`,
-  `client/`. Classe na raiz do pacote de domínio (`domain/cliente/Cliente.java`) é erro —
+  `client/`, `scheduler/`. Classe na raiz do pacote de domínio (`domain/cliente/Cliente.java`) é erro —
   toda classe do domínio mora no subpacote do seu tipo (`domain/cliente/model/Cliente.java`).
 - `client/` só existe no domínio que integra sistema externo, e separa os records de
   request/response do upstream em `client/dtos/` (nome do upstream, ex.: `PagamentoChargeResponse`
@@ -107,6 +107,7 @@ target/generated-sources/openapi/.../app/api/dto/   # DTOs gerados (ApiError, *R
 | (sem sufixo) | `domain/<domínio>/model/` | entidade Panache — nome do conceito: `Pedido`, `Cliente` |
 | `*Mapper` | `domain/<domínio>/mapper/` | MapStruct (`@Mapper(componentModel = "cdi")`) |
 | `*Client` | `domain/<domínio>/client/` | REST client (`@RegisterRestClient`) |
+| `*Scheduler` | `domain/<domínio>/scheduler/` | dispara tarefas `@Scheduled` do domínio, chamando o `*Service` |
 | `*Exception` | `exceptions/` | subclasse de `AppException`, fixa status + `ApiErrorCode` |
 | `*ExceptionMapper` | `exceptions/mapper/` | `@ServerExceptionMapper` → `ApiError`, uma classe por tipo de erro |
 | `*HealthCheck` | `config/` | `@Liveness`/`@Readiness` do SmallRye Health |
@@ -196,7 +197,10 @@ public static Optional<Pedido> findByClienteAndStatus(Integer clienteId, String 
   `BusinessRuleException`, `IntegrationException`, `IntegrationNotConfiguredException`).
 - Embrulham falhas de `clients` em `IntegrationException` — exceção de REST client nunca escapa
   crua.
-- Tarefas `@Scheduled` ficam no service do domínio a que pertencem.
+- Tarefas `@Scheduled` **não** ficam no service. Moram numa classe `*Scheduler` própria, em
+  `domain/<domínio>/scheduler/`, que injeta o `*Service` e só delega — mesma separação resource
+  → service, aplicada ao agendamento: o `*Service` fica testável/chamável sem depender do
+  scheduler, e o `*Scheduler` fica burro (igual o resource), sem regra de negócio.
 - `find*` devolve `Optional<T>` quando "não achou" é resultado legítimo; `get*` lança
   `ResourceNotFoundException`.
 
@@ -416,7 +420,7 @@ solto.
 ## Checklist para arquivo novo
 
 - [ ] Pacote `domain/<domínio>` certo, subpacote de tipo certo (`model`, `resource`, `service`,
-      `mapper`, `client` ou `client/dtos`), nada solto na raiz do domínio. Transversal
+      `mapper`, `client` ou `client/dtos`, `scheduler`), nada solto na raiz do domínio. Transversal
       (`exceptions`, `exceptions/mapper`, `config`, `utils`, `model` na raiz) só quando não
       pertence a nenhum domínio.
 - [ ] Sufixo da classe bate com o papel (models sem sufixo).
