@@ -1,6 +1,7 @@
 package io.github.leonardopinheirolacerda.akari.domain.anime.model;
 
 import io.github.leonardopinheirolacerda.akari.api.dto.FranchiseRootCuration;
+import io.github.leonardopinheirolacerda.akari.api.dto.TmdbMediaType;
 import io.github.leonardopinheirolacerda.akari.domain.mediafolder.model.MediaFolder;
 import io.github.leonardopinheirolacerda.akari.model.PageResult;
 import io.quarkus.hibernate.orm.panache.PanacheEntityBase;
@@ -88,6 +89,31 @@ public class Anime extends PanacheEntityBase {
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)
     public OffsetDateTime createdAt;
+
+    @Column(name = "tmdb_id")
+    public Integer tmdbId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "tmdb_media_type")
+    public TmdbMediaType tmdbMediaType;
+
+    @Column(name = "tmdb_bound_at")
+    public OffsetDateTime tmdbBoundAt;
+
+    @Column(name = "override_title")
+    public String overrideTitle;
+
+    @Column(name = "override_synopsis", columnDefinition = "text")
+    public String overrideSynopsis;
+
+    @Column(name = "override_poster_path")
+    public String overridePosterPath;
+
+    @Column(name = "override_backdrop_path")
+    public String overrideBackdropPath;
+
+    @Column(name = "override_logo_path")
+    public String overrideLogoPath;
 
     /**
      * Busca pelo {@code anilistId}, a própria chave primária.

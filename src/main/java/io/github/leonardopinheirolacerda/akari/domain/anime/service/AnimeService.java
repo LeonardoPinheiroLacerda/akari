@@ -187,7 +187,15 @@ public class AnimeService {
         return animeMapper.toView(anime);
     }
 
-    private Anime findOrThrow(Integer anilistId) {
+    /**
+     * Busca o anime pelo {@code anilistId} ou lança 404. Usado também por outros services do
+     * domínio (ex.: {@link AnimeTmdbService}) que precisam do model cru, não do DTO.
+     *
+     * @param anilistId id do anime na AniList
+     * @return o anime
+     * @throws ResourceNotFoundException se não há metadata salva pro id informado
+     */
+    public Anime findOrThrow(Integer anilistId) {
         return Anime.find(anilistId)
                 .orElseThrow(() -> {
                     Log.warnf("Anime %d não encontrado", anilistId);

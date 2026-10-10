@@ -3034,12 +3034,10 @@ components:
 
     TmdbMediaType:
       type: string
-      description: |
-        Discriminador do binding TMDB. Aceito em ambas as caixas no request; a resposta
-        sempre serializa em minúsculas (`tv` ou `movie`).
+      description: Discriminador do binding TMDB — `TV` (série) ou `MOVIE` (filme).
       enum:
-        - tv
-        - movie
+        - TV
+        - MOVIE
 
     AnimeBindingRequest:
       type: object

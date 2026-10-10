@@ -5,37 +5,39 @@ import io.github.leonardopinheirolacerda.akari.api.dto.TmdbAnimeStateResponse;
 import io.github.leonardopinheirolacerda.akari.api.dto.TmdbBindingRequest;
 import io.github.leonardopinheirolacerda.akari.api.dto.TmdbOverrides;
 import io.github.leonardopinheirolacerda.akari.api.dto.TmdbOverridesSchema;
-import jakarta.ws.rs.WebApplicationException;
-import jakarta.ws.rs.core.Response;
+import io.github.leonardopinheirolacerda.akari.domain.anime.service.AnimeTmdbService;
+import jakarta.inject.Inject;
 
+/**
+ * Binding TMDB (série ou filme) e os overrides manuais de título, sinopse e imagens.
+ */
 public class AnimeTmdbResource implements AnimeTmdbApi {
 
+    @Inject
+    AnimeTmdbService animeTmdbService;
+
     @Override
-    public TmdbAnimeStateResponse bindTmdb(
-            Integer anilistId,
-            TmdbBindingRequest tmdbBindingRequest) {
-        throw new WebApplicationException(Response.Status.NOT_IMPLEMENTED);
+    public TmdbAnimeStateResponse bindTmdb(Integer anilistId, TmdbBindingRequest tmdbBindingRequest) {
+        return animeTmdbService.bindTmdb(anilistId, tmdbBindingRequest);
     }
 
     @Override
     public void clearTmdbBinding(Integer anilistId) {
-        throw new WebApplicationException(Response.Status.NOT_IMPLEMENTED);
+        animeTmdbService.clearTmdbBinding(anilistId);
     }
 
     @Override
     public TmdbOverridesSchema getTmdbOverridesSchema(Integer anilistId, Boolean forceRefresh) {
-        throw new WebApplicationException(Response.Status.NOT_IMPLEMENTED);
+        return animeTmdbService.getTmdbOverridesSchema(anilistId, forceRefresh);
     }
 
     @Override
     public TmdbAnimeStateResponse getTmdbState(Integer anilistId) {
-        throw new WebApplicationException(Response.Status.NOT_IMPLEMENTED);
+        return animeTmdbService.getTmdbState(anilistId);
     }
 
     @Override
-    public TmdbAnimeStateResponse updateTmdbOverrides(
-            Integer anilistId,
-            TmdbOverrides tmdbOverrides) {
-        throw new WebApplicationException(Response.Status.NOT_IMPLEMENTED);
+    public TmdbAnimeStateResponse updateTmdbOverrides(Integer anilistId, TmdbOverrides tmdbOverrides) {
+        return animeTmdbService.updateTmdbOverrides(anilistId, tmdbOverrides);
     }
 }

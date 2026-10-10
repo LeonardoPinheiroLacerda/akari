@@ -4,6 +4,7 @@ import io.github.leonardopinheirolacerda.akari.api.dto.TmdbMovieSearchResult;
 import io.github.leonardopinheirolacerda.akari.api.dto.TmdbTvSearchResult;
 import io.github.leonardopinheirolacerda.akari.domain.tmdb.client.dtos.TmdbMovieSearchItemResponse;
 import io.github.leonardopinheirolacerda.akari.domain.tmdb.client.dtos.TmdbTvSearchItemResponse;
+import io.github.leonardopinheirolacerda.akari.utils.TmdbImageUtils;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
 import org.mapstruct.Named;
@@ -30,12 +31,12 @@ public interface TmdbMapper {
     // poster/backdrop vêm como path relativo do TMDB; o contrato pede URL absoluta já montada.
     @Named("posterUrl")
     default String toPosterUrl(String posterPath) {
-        return posterPath == null ? null : "https://image.tmdb.org/t/p/w185" + posterPath;
+        return TmdbImageUtils.posterSmall(posterPath);
     }
 
     @Named("backdropUrl")
     default String toBackdropUrl(String backdropPath) {
-        return backdropPath == null ? null : "https://image.tmdb.org/t/p/original" + backdropPath;
+        return TmdbImageUtils.backdrop(backdropPath);
     }
 
 }

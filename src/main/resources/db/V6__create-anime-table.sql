@@ -18,5 +18,13 @@ CREATE TABLE anime (
       is_adult BOOLEAN NULL,
       genres JSON NULL,
       franchise_root_curation TEXT NOT NULL DEFAULT 'AUTO',
-      created_at TIMESTAMPTZ NOT NULL
+      created_at TIMESTAMPTZ NOT NULL,
+      tmdb_id INTEGER NULL,
+      tmdb_media_type TEXT NULL,
+      tmdb_bound_at TIMESTAMPTZ NULL,
+      override_title TEXT NULL,
+      override_synopsis TEXT NULL,
+      override_poster_path TEXT NULL,
+      override_backdrop_path TEXT NULL,
+      override_logo_path TEXT NULL
 );
