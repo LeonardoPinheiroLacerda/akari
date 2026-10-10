@@ -4,6 +4,7 @@ import io.github.leonardopinheirolacerda.akari.api.dto.AnimePage;
 import io.github.leonardopinheirolacerda.akari.api.dto.AnimeRelationEdge;
 import io.github.leonardopinheirolacerda.akari.api.dto.AnimeRelationGraphResponse;
 import io.github.leonardopinheirolacerda.akari.api.dto.AnimeRelationNode;
+import io.github.leonardopinheirolacerda.akari.api.dto.AnimeResponse;
 import io.github.leonardopinheirolacerda.akari.api.dto.AnimeRootKind;
 import io.github.leonardopinheirolacerda.akari.domain.anilist.client.dtos.AnilistMediaResponse;
 import io.github.leonardopinheirolacerda.akari.domain.anilist.client.dtos.AnilistRelationEdgeResponse;
@@ -43,6 +44,9 @@ public class AnimeRelationsService {
     AnimeRelationMapper animeRelationMapper;
 
     @Inject
+    AnimeOverrideService animeOverrideService;
+
+    @Inject
     AnilistSearchService anilistSearchService;
 
     /**
@@ -69,7 +73,18 @@ public class AnimeRelationsService {
      */
     public AnimePage listRelationRoots(Integer page, Integer size) {
         final PageResult<Anime> roots = Anime.findRoots(page, size);
-        return animeMapper.toAnimePage(roots);
+
+        final List<AnimeResponse> data = roots.data()
+                .stream()
+                .map(anime -> animeOverrideService.applyTo(animeMapper.toView(anime), anime))
+                .toList();
+
+        return new AnimePage()
+                .page(roots.page())
+                .size(roots.size())
+                .totalElements(roots.totalElements())
+                .totalPages(roots.totalPages())
+                .data(data);
     }
 
     /**
@@ -118,8 +133,8 @@ public class AnimeRelationsService {
         final List<AnimeRelationNode> nodes = animes.stream()
                 .map(anime -> animeRelationMapper.toNode(
                         anime,
-                        animeMapper.toDisplayTitle(anime),
-                        animeMapper.toDisplayThumbnail(anime),
+                        animeOverrideService.resolveTitle(anime),
+                        animeOverrideService.resolveThumbnailMedium(anime),
                         rootKindOf(anime, edges)))
                 .toList();
 

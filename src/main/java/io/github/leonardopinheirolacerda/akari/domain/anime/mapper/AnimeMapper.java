@@ -1,44 +1,36 @@
 package io.github.leonardopinheirolacerda.akari.domain.anime.mapper;
 
 import io.github.leonardopinheirolacerda.akari.api.dto.AnimeBindingSummary;
-import io.github.leonardopinheirolacerda.akari.api.dto.AnimePage;
 import io.github.leonardopinheirolacerda.akari.api.dto.AnimeResponse;
 import io.github.leonardopinheirolacerda.akari.api.dto.AnimeThumbnailsResponse;
 import io.github.leonardopinheirolacerda.akari.api.dto.AnimeTitlesResponse;
 import io.github.leonardopinheirolacerda.akari.domain.anilist.client.dtos.AnilistMediaResponse;
 import io.github.leonardopinheirolacerda.akari.domain.anime.model.Anime;
-import io.github.leonardopinheirolacerda.akari.model.PageResult;
-import io.github.leonardopinheirolacerda.akari.utils.TmdbImageUtils;
-import java.util.List;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
 import org.mapstruct.MappingTarget;
 
 /**
  * Converte entre o model {@link Anime}, a resposta da AniList usada pra popular seus campos, e
- * os DTOs gerados do contrato.
+ * os DTOs gerados do contrato. Só cópia de campos — a resolução de overrides TMDB é regra de
+ * negócio e mora no {@code AnimeOverrideService}, não aqui.
  */
 @Mapper(componentModel = "cdi")
 public interface AnimeMapper {
 
     @Mapping(source = "seasonYear", target = "year")
     @Mapping(target = "titles", expression = "java(toTitles(anime))")
-    @Mapping(target = "synopsis", expression = "java(toSynopsis(anime))")
     @Mapping(target = "thumbnails", expression = "java(toThumbnails(anime))")
-    @Mapping(target = "banner", expression = "java(toBanner(anime))")
-    @Mapping(target = "logo", expression = "java(toLogo(anime))")
+    @Mapping(target = "banner", ignore = true)
+    @Mapping(target = "logo", ignore = true)
     AnimeResponse toView(Anime anime);
 
     @Mapping(source = "folder.id", target = "folderId")
-    @Mapping(target = "title", expression = "java(toDisplayTitle(anime))")
-    @Mapping(target = "thumbnail", expression = "java(toDisplayThumbnail(anime))")
+    @Mapping(source = "titleMain", target = "title")
+    @Mapping(source = "thumbnailMedium", target = "thumbnail")
     @Mapping(source = "seasonYear", target = "year")
     @Mapping(target = "hasTmdb", expression = "java(anime.tmdbId != null)")
     AnimeBindingSummary toBindingSummary(Anime anime);
-
-    List<AnimeBindingSummary> toBindingSummaryList(List<Anime> animes);
-
-    AnimePage toAnimePage(PageResult<Anime> pageResult);
 
     /**
      * Copia os campos de metadata da resposta da AniList pro model, usado tanto no binding
@@ -71,57 +63,19 @@ public interface AnimeMapper {
     @Mapping(target = "overrideLogoPath", ignore = true)
     void applyAnilistData(AnilistMediaResponse source, @MappingTarget Anime anime);
 
-    // override de título troca só o main — english/japanese/synonyms continuam da AniList
     default AnimeTitlesResponse toTitles(Anime anime) {
         return new AnimeTitlesResponse()
-                .main(toDisplayTitle(anime))
+                .main(anime.titleMain)
                 .english(anime.titleEnglish)
                 .japanese(anime.titleJapanese)
                 .synonyms(anime.titleSynonyms);
     }
 
-    default String toSynopsis(Anime anime) {
-        return hasText(anime.overrideSynopsis) ? anime.overrideSynopsis : anime.synopsis;
-    }
-
-    // override de poster troca os 3 tamanhos juntos, a partir do mesmo filePath do TMDB
     default AnimeThumbnailsResponse toThumbnails(Anime anime) {
-        if (hasText(anime.overridePosterPath)) {
-            return new AnimeThumbnailsResponse()
-                    .small(TmdbImageUtils.posterSmall(anime.overridePosterPath))
-                    .medium(toDisplayThumbnail(anime))
-                    .large(TmdbImageUtils.posterLarge(anime.overridePosterPath));
-        }
-
         return new AnimeThumbnailsResponse()
                 .small(anime.thumbnailSmall)
-                .medium(toDisplayThumbnail(anime))
+                .medium(anime.thumbnailMedium)
                 .large(anime.thumbnailLarge);
-    }
-
-    // título/poster em resolução média exibidos fora do AnimeResponse (binding summary,
-    // nó do grafo de relações) — mesma regra de override, reaproveitada nos dois lugares
-    default String toDisplayTitle(Anime anime) {
-        return hasText(anime.overrideTitle) ? anime.overrideTitle : anime.titleMain;
-    }
-
-    default String toDisplayThumbnail(Anime anime) {
-        return hasText(anime.overridePosterPath)
-                ? TmdbImageUtils.posterMedium(anime.overridePosterPath)
-                : anime.thumbnailMedium;
-    }
-
-    // banner/logo só existem via override manual — sem TMDB + override, ficam null
-    default String toBanner(Anime anime) {
-        return TmdbImageUtils.backdrop(anime.overrideBackdropPath);
-    }
-
-    default String toLogo(Anime anime) {
-        return TmdbImageUtils.logo(anime.overrideLogoPath);
-    }
-
-    private boolean hasText(String value) {
-        return value != null && !value.isBlank();
     }
 
     // a AniList devolve a duração em minutos crus; o contrato pede formato livre pro consumidor

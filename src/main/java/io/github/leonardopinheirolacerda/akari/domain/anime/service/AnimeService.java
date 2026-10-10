@@ -37,6 +37,9 @@ public class AnimeService {
     @Inject
     AnimeRelationsService animeRelationsService;
 
+    @Inject
+    AnimeOverrideService animeOverrideService;
+
     /**
      * Busca o anime na AniList e cria a metadata vinculada à pasta informada. Também
      * sincroniza as arestas do grafo de relações com os animes já conhecidos localmente.
@@ -76,7 +79,7 @@ public class AnimeService {
 
         Log.infof("Anime %d vinculado à pasta %d com sucesso", anilistId, folder.id);
 
-        return animeMapper.toView(anime);
+        return toResponse(anime);
     }
 
     /**
@@ -88,7 +91,7 @@ public class AnimeService {
      */
     public AnimeResponse getAnime(Integer anilistId) {
         final Anime anime = findOrThrow(anilistId);
-        return animeMapper.toView(anime);
+        return toResponse(anime);
     }
 
     /**
@@ -106,7 +109,7 @@ public class AnimeService {
                             "Não foi possível localizar um anime vinculado à pasta informada");
                 });
 
-        return animeMapper.toView(anime);
+        return toResponse(anime);
     }
 
     /**
@@ -117,9 +120,10 @@ public class AnimeService {
      * @return os resumos das pastas que têm anime vinculado
      */
     public List<AnimeBindingSummary> getAnimeBindings(List<Integer> folderIds) {
-        final List<Anime> animes = Anime.findByFolderIds(folderIds);
-
-        return animeMapper.toBindingSummaryList(animes);
+        return Anime.findByFolderIds(folderIds)
+                .stream()
+                .map(this::toBindingSummary)
+                .toList();
     }
 
     /**
@@ -145,7 +149,7 @@ public class AnimeService {
 
         Log.infof("Anime %d sincronizado com sucesso", anilistId);
 
-        return animeMapper.toView(anime);
+        return toResponse(anime);
     }
 
     /**
@@ -184,7 +188,7 @@ public class AnimeService {
 
         anime.franchiseRootCuration = animeFranchiseRootRequest.getFranchiseRootCuration();
 
-        return animeMapper.toView(anime);
+        return toResponse(anime);
     }
 
     /**
@@ -202,6 +206,23 @@ public class AnimeService {
                     return new ResourceNotFoundException(
                             "Não foi possível localizar a metadata de um anime com o id informado");
                 });
+    }
+
+    private AnimeResponse toResponse(Anime anime) {
+        final AnimeResponse response = animeMapper.toView(anime);
+        return animeOverrideService.applyTo(response, anime);
+    }
+
+    private AnimeBindingSummary toBindingSummary(Anime anime) {
+        final AnimeBindingSummary summary = animeMapper.toBindingSummary(anime);
+
+        final String title = animeOverrideService.resolveTitle(anime);
+        final String thumbnail = animeOverrideService.resolveThumbnailMedium(anime);
+
+        summary.title(title);
+        summary.thumbnail(thumbnail);
+
+        return summary;
     }
 
 }
