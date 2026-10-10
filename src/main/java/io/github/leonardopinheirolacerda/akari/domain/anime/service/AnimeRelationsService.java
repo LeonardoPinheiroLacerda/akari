@@ -1,6 +1,10 @@
 package io.github.leonardopinheirolacerda.akari.domain.anime.service;
 
-import io.github.leonardopinheirolacerda.akari.api.dto.*;
+import io.github.leonardopinheirolacerda.akari.api.dto.AnimePage;
+import io.github.leonardopinheirolacerda.akari.api.dto.AnimeRelationEdge;
+import io.github.leonardopinheirolacerda.akari.api.dto.AnimeRelationGraphResponse;
+import io.github.leonardopinheirolacerda.akari.api.dto.AnimeRelationNode;
+import io.github.leonardopinheirolacerda.akari.api.dto.AnimeRootKind;
 import io.github.leonardopinheirolacerda.akari.domain.anilist.client.dtos.AnilistMediaResponse;
 import io.github.leonardopinheirolacerda.akari.domain.anilist.client.dtos.AnilistRelationEdgeResponse;
 import io.github.leonardopinheirolacerda.akari.domain.anilist.client.dtos.AnilistRelationNodeResponse;
@@ -112,7 +116,11 @@ public class AnimeRelationsService {
         final List<AnimeRelation> edges = new ArrayList<>(edgesById.values());
 
         final List<AnimeRelationNode> nodes = animes.stream()
-                .map(anime -> animeRelationMapper.toNode(anime, rootKindOf(anime, edges)))
+                .map(anime -> animeRelationMapper.toNode(
+                        anime,
+                        animeMapper.toDisplayTitle(anime),
+                        animeMapper.toDisplayThumbnail(anime),
+                        rootKindOf(anime, edges)))
                 .toList();
 
         final List<AnimeRelationEdge> edgeList = animeRelationMapper.toEdgeList(edges);

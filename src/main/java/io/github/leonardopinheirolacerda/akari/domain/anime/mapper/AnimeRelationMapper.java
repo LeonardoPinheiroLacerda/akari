@@ -23,12 +23,20 @@ public interface AnimeRelationMapper {
 
     List<AnimeRelationEdge> toEdgeList(List<AnimeRelation> relations);
 
+    /**
+     * @param anime anime a representar como nó
+     * @param title título já resolvido (considera override TMDB) — ver
+     *              {@link AnimeMapper#toDisplayTitle(Anime)}
+     * @param posterUrl poster já resolvido (considera override TMDB) — ver
+     *                  {@link AnimeMapper#toDisplayThumbnail(Anime)}
+     * @param rootKind classificação de raiz já resolvida pelo grafo
+     */
     @Mapping(source = "anime.anilistId", target = "anilistId")
-    @Mapping(source = "anime.titleMain", target = "title")
-    @Mapping(source = "anime.thumbnailMedium", target = "posterUrl")
+    @Mapping(source = "title", target = "title")
+    @Mapping(source = "posterUrl", target = "posterUrl")
     @Mapping(source = "anime.folder.id", target = "folderId")
     @Mapping(source = "rootKind", target = "rootKind")
-    AnimeRelationNode toNode(Anime anime, AnimeRootKind rootKind);
+    AnimeRelationNode toNode(Anime anime, String title, String posterUrl, AnimeRootKind rootKind);
 
     /**
      * Converte o tipo bruto de relação da AniList pro enum interno. Tipos sem relevância pro

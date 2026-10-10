@@ -30,9 +30,10 @@ public interface AnimeMapper {
     AnimeResponse toView(Anime anime);
 
     @Mapping(source = "folder.id", target = "folderId")
-    @Mapping(source = "titleMain", target = "title")
-    @Mapping(source = "thumbnailMedium", target = "thumbnail")
+    @Mapping(target = "title", expression = "java(toDisplayTitle(anime))")
+    @Mapping(target = "thumbnail", expression = "java(toDisplayThumbnail(anime))")
     @Mapping(source = "seasonYear", target = "year")
+    @Mapping(target = "hasTmdb", expression = "java(anime.tmdbId != null)")
     AnimeBindingSummary toBindingSummary(Anime anime);
 
     List<AnimeBindingSummary> toBindingSummaryList(List<Anime> animes);
@@ -72,10 +73,8 @@ public interface AnimeMapper {
 
     // override de título troca só o main — english/japanese/synonyms continuam da AniList
     default AnimeTitlesResponse toTitles(Anime anime) {
-        final String main = hasText(anime.overrideTitle) ? anime.overrideTitle : anime.titleMain;
-
         return new AnimeTitlesResponse()
-                .main(main)
+                .main(toDisplayTitle(anime))
                 .english(anime.titleEnglish)
                 .japanese(anime.titleJapanese)
                 .synonyms(anime.titleSynonyms);
@@ -90,14 +89,26 @@ public interface AnimeMapper {
         if (hasText(anime.overridePosterPath)) {
             return new AnimeThumbnailsResponse()
                     .small(TmdbImageUtils.posterSmall(anime.overridePosterPath))
-                    .medium(TmdbImageUtils.posterMedium(anime.overridePosterPath))
+                    .medium(toDisplayThumbnail(anime))
                     .large(TmdbImageUtils.posterLarge(anime.overridePosterPath));
         }
 
         return new AnimeThumbnailsResponse()
                 .small(anime.thumbnailSmall)
-                .medium(anime.thumbnailMedium)
+                .medium(toDisplayThumbnail(anime))
                 .large(anime.thumbnailLarge);
+    }
+
+    // título/poster em resolução média exibidos fora do AnimeResponse (binding summary,
+    // nó do grafo de relações) — mesma regra de override, reaproveitada nos dois lugares
+    default String toDisplayTitle(Anime anime) {
+        return hasText(anime.overrideTitle) ? anime.overrideTitle : anime.titleMain;
+    }
+
+    default String toDisplayThumbnail(Anime anime) {
+        return hasText(anime.overridePosterPath)
+                ? TmdbImageUtils.posterMedium(anime.overridePosterPath)
+                : anime.thumbnailMedium;
     }
 
     // banner/logo só existem via override manual — sem TMDB + override, ficam null
