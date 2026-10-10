@@ -1,5 +1,6 @@
 CREATE TABLE anime (
       anilist_id INTEGER PRIMARY KEY,
+      mal_id INTEGER NULL,
       folder_id INTEGER NOT NULL UNIQUE REFERENCES media_folder(id),
       title_main TEXT NULL,
       title_english TEXT NULL,

@@ -34,6 +34,9 @@ public class Anime extends PanacheEntityBase {
     @Column(name = "anilist_id")
     public Integer anilistId;
 
+    @Column(name = "mal_id")
+    public Integer malId;
+
     @OneToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "folder_id", unique = true)
     public MediaFolder folder;

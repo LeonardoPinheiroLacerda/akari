@@ -31,6 +31,7 @@ public interface AnimeRelationMapper {
      * @param rootKind classificação de raiz já resolvida pelo grafo
      */
     @Mapping(source = "anime.anilistId", target = "anilistId")
+    @Mapping(source = "anime.malId", target = "malId")
     @Mapping(source = "title", target = "title")
     @Mapping(source = "posterUrl", target = "posterUrl")
     @Mapping(source = "anime.folder.id", target = "folderId")

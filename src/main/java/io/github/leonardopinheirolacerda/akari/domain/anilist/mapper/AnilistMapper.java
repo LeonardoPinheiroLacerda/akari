@@ -13,6 +13,7 @@ import java.util.List;
 public interface AnilistMapper {
 
     @Mapping(source = "id", target = "anilistId")
+    @Mapping(source = "idMal", target = "malId")
     AnilistMediaSummary toSummary(AnilistMediaResponse media);
 
     List<AnilistMediaSummary> toSummaryList(List<AnilistMediaResponse> media);

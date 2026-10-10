@@ -2786,6 +2786,11 @@ components:
       properties:
         anilistId:
           $ref: '#/components/schemas/AnilistId'
+        malId:
+          type: integer
+          format: int32
+          nullable: true
+          description: Id correspondente do anime no MyAnimeList, quando a AniList souber o match
         title:
           allOf: [{ $ref: '#/components/schemas/AnilistTitle' }]
           nullable: true
@@ -3112,6 +3117,11 @@ components:
           $ref: '#/components/schemas/FolderId'
         anilistId:
           $ref: '#/components/schemas/AnilistId'
+        malId:
+          type: integer
+          format: int32
+          nullable: true
+          description: Id correspondente do anime no MyAnimeList, quando a AniList souber o match
         title:
           type: string
           nullable: true
@@ -3143,6 +3153,11 @@ components:
       properties:
         anilistId:
           $ref: '#/components/schemas/AnilistId'
+        malId:
+          type: integer
+          format: int32
+          nullable: true
+          description: Id correspondente do anime no MyAnimeList, quando a AniList souber o match
         titles:
           allOf: [{ $ref: '#/components/schemas/AnimeTitlesResponse' }]
           nullable: true
@@ -3217,6 +3232,11 @@ components:
       properties:
         anilistId:
           $ref: '#/components/schemas/AnilistId'
+        malId:
+          type: integer
+          format: int32
+          nullable: true
+          description: Id correspondente do anime no MyAnimeList, quando a AniList souber o match
         title:
           type: string
           nullable: true

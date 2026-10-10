@@ -40,6 +40,7 @@ public interface AnimeMapper {
      * @param anime model a ser atualizado
      */
     @Mapping(source = "id", target = "anilistId")
+    @Mapping(source = "idMal", target = "malId")
     @Mapping(source = "title.romaji", target = "titleMain")
     @Mapping(source = "title.english", target = "titleEnglish")
     @Mapping(source = "title.nativeTitle", target = "titleJapanese")

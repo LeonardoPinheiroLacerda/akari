@@ -14,6 +14,7 @@ public final class AnilistQueries {
                 pageInfo { total perPage currentPage lastPage hasNextPage }
                 media(search: $search, type: ANIME) {
                   id
+                  idMal
                   title { romaji english native userPreferred }
                   synonyms
                   coverImage { medium large extraLarge }
@@ -39,6 +40,7 @@ public final class AnilistQueries {
             query ($id: Int!) {
               Media(id: $id, type: ANIME) {
                 id
+                idMal
                 title { romaji english native userPreferred }
                 synonyms
                 coverImage { medium large extraLarge }

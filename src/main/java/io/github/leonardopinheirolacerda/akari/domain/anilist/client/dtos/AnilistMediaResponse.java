@@ -8,6 +8,7 @@ import java.util.List;
  * preenchido).
  *
  * @param id id do anime na AniList
+ * @param idMal id correspondente do anime no MyAnimeList, ou {@code null} se não houver match
  * @param title bloco de títulos
  * @param synonyms sinônimos conhecidos
  * @param coverImage URLs de poster
@@ -25,6 +26,7 @@ import java.util.List;
  */
 public record AnilistMediaResponse(
         Integer id,
+        Integer idMal,
         AnilistTitleResponse title,
         List<String> synonyms,
         AnilistCoverImageResponse coverImage,
