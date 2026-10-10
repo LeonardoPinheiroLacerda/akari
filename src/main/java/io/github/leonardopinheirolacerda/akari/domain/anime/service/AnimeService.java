@@ -34,8 +34,12 @@ public class AnimeService {
     @Inject
     AnilistSearchService anilistSearchService;
 
+    @Inject
+    AnimeRelationsService animeRelationsService;
+
     /**
-     * Busca o anime na AniList e cria a metadata vinculada à pasta informada.
+     * Busca o anime na AniList e cria a metadata vinculada à pasta informada. Também
+     * sincroniza as arestas do grafo de relações com os animes já conhecidos localmente.
      *
      * @param anilistId id do anime na AniList
      * @param animeBindingRequest payload com o {@code folderId} a vincular
@@ -67,6 +71,8 @@ public class AnimeService {
         anime.franchiseRootCuration = FranchiseRootCuration.AUTO;
 
         anime.persist();
+
+        animeRelationsService.syncRelations(anilistMedia);
 
         Log.infof("Anime %d vinculado à pasta %d com sucesso", anilistId, folder.id);
 
@@ -118,7 +124,8 @@ public class AnimeService {
 
     /**
      * Busca o anime de novo na AniList e atualiza a metadata, mantendo a pasta vinculada e a
-     * curadoria manual da raiz de franquia.
+     * curadoria manual da raiz de franquia. Também ressincroniza as arestas do grafo de
+     * relações.
      *
      * @param anilistId id do anime na AniList
      * @return a metadata atualizada
@@ -133,6 +140,8 @@ public class AnimeService {
         final AnilistMediaResponse anilistMedia = anilistSearchService.findById(anilistId, true);
 
         animeMapper.applyAnilistData(anilistMedia, anime);
+
+        animeRelationsService.syncRelations(anilistMedia);
 
         Log.infof("Anime %d sincronizado com sucesso", anilistId);
 

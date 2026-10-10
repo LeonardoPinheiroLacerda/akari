@@ -3215,7 +3215,7 @@ components:
     AnimeRelationNode:
       type: object
       description: Vértice do grafo (payload minimalista para o front)
-      required: [anilistId]
+      required: [anilistId, rootKind]
       properties:
         anilistId:
           $ref: '#/components/schemas/AnilistId'
@@ -3232,11 +3232,9 @@ components:
           nullable: true
         rootKind:
           allOf: [{ $ref: '#/components/schemas/AnimeRootKind' }]
-          nullable: true
           description: >-
             Classificação de raiz já decidida no backend a partir da curadoria + estrutura do grafo.
-            Ausente/`null` = não é raiz. A curadoria crua (`franchiseRootCuration`) vive no detalhe
-            do anime, não no nó do grafo.
+            A curadoria crua (`franchiseRootCuration`) vive no detalhe do anime, não no nó do grafo.
 
     AnimeRootKind:
       type: string
@@ -3244,10 +3242,12 @@ components:
         Tipo de raiz de franquia resolvido no backend. `MANUAL` = curadoria explícita
         (`franchiseRootCuration = MANUAL_ROOT`); `NATURAL` = curadoria automática
         (`franchiseRootCuration = AUTO`) e nenhuma relação ancestral (`PREQUEL` ou `PARENT`) sai
-        do anime.
+        do anime; `NOT_ROOT` = não é raiz (curadoria `MANUAL_NOT_ROOT`, ou `AUTO` com relação
+        ancestral).
       enum:
         - MANUAL
         - NATURAL
+        - NOT_ROOT
 
     AnimeRelationEdge:
       type: object

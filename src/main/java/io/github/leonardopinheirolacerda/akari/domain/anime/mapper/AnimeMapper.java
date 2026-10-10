@@ -1,11 +1,13 @@
 package io.github.leonardopinheirolacerda.akari.domain.anime.mapper;
 
 import io.github.leonardopinheirolacerda.akari.api.dto.AnimeBindingSummary;
+import io.github.leonardopinheirolacerda.akari.api.dto.AnimePage;
 import io.github.leonardopinheirolacerda.akari.api.dto.AnimeResponse;
 import io.github.leonardopinheirolacerda.akari.api.dto.AnimeThumbnailsResponse;
 import io.github.leonardopinheirolacerda.akari.api.dto.AnimeTitlesResponse;
 import io.github.leonardopinheirolacerda.akari.domain.anilist.client.dtos.AnilistMediaResponse;
 import io.github.leonardopinheirolacerda.akari.domain.anime.model.Anime;
+import io.github.leonardopinheirolacerda.akari.model.PageResult;
 import java.util.List;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
@@ -30,6 +32,8 @@ public interface AnimeMapper {
     AnimeBindingSummary toBindingSummary(Anime anime);
 
     List<AnimeBindingSummary> toBindingSummaryList(List<Anime> animes);
+
+    AnimePage toAnimePage(PageResult<Anime> pageResult);
 
     /**
      * Copia os campos de metadata da resposta da AniList pro model, usado tanto no binding

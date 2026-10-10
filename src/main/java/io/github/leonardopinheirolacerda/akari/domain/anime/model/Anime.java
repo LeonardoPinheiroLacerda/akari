@@ -2,7 +2,9 @@ package io.github.leonardopinheirolacerda.akari.domain.anime.model;
 
 import io.github.leonardopinheirolacerda.akari.api.dto.FranchiseRootCuration;
 import io.github.leonardopinheirolacerda.akari.domain.mediafolder.model.MediaFolder;
+import io.github.leonardopinheirolacerda.akari.model.PageResult;
 import io.quarkus.hibernate.orm.panache.PanacheEntityBase;
+import io.quarkus.hibernate.orm.panache.PanacheQuery;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -121,6 +123,38 @@ public class Anime extends PanacheEntityBase {
         return Anime
                 .find("folder.id in ?1", folderIds)
                 .list();
+    }
+
+    /**
+     * Animes-raiz da coleção, paginados: curadoria manual em {@code MANUAL_ROOT}, mais os em
+     * {@code AUTO} dos quais não sai nenhuma relação ancestral ({@link RelationType#ANCESTOR_LINKS}).
+     *
+     * @param page página 0-based
+     * @param size tamanho da página
+     * @return a página de raízes, ordenada por {@code anilistId}
+     */
+    public static PageResult<Anime> findRoots(Integer page, Integer size) {
+        final PanacheQuery<Anime> query = Anime
+                .find(
+                        "FROM Anime a WHERE a.franchiseRootCuration = ?1"
+                                + " OR (a.franchiseRootCuration = ?2 AND NOT EXISTS ("
+                                + "   SELECT 1 FROM AnimeRelation r"
+                                + "   WHERE r.fromAnilistId = a.anilistId AND r.relationType IN ?3"
+                                + " ))"
+                                + " ORDER BY a.anilistId",
+                        FranchiseRootCuration.MANUAL_ROOT,
+                        FranchiseRootCuration.AUTO,
+                        RelationType.ANCESTOR_LINKS
+                )
+                .page(page, size);
+
+        return new PageResult<>(
+                query.list(),
+                page,
+                size,
+                query.count(),
+                query.pageCount()
+        );
     }
 
 }
