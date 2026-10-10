@@ -180,7 +180,7 @@ public class AnimeRelationsService {
         final AnimeRelation relation = new AnimeRelation();
         relation.fromAnilistId = fromAnilistId;
         relation.toAnilistId = node.id();
-        relation.relationType = animeRelationMapper.toRelationType(edge.relationType());
+        relation.relationType = toRelationType(edge.relationType());
         relation.persist();
 
         if (!visited.contains(node.id())) {
@@ -226,6 +226,33 @@ public class AnimeRelationsService {
                 .anyMatch(edge ->
                         edge.fromAnilistId.equals(anilistId)
                                 && RelationType.ANCESTOR_LINKS.contains(edge.relationType));
+    }
+
+    /**
+     * Converte o tipo bruto de relação da AniList pro enum interno. Tipos sem relevância pro
+     * grafo caem em {@link RelationType#OTHER}; valores desconhecidos em
+     * {@link RelationType#UNKNOWN} — curadoria de quais categorias da AniList importam pro
+     * grafo de franquia, por isso vive aqui e não no mapper.
+     *
+     * @param rawRelationType valor bruto (ex.: {@code SEQUEL}, {@code ADAPTATION})
+     * @return o {@link RelationType} correspondente
+     */
+    private static RelationType toRelationType(String rawRelationType) {
+        if (rawRelationType == null) {
+            return RelationType.UNKNOWN;
+        }
+
+        return switch (rawRelationType) {
+            case "SEQUEL" -> RelationType.SEQUEL;
+            case "PREQUEL" -> RelationType.PREQUEL;
+            case "SIDE_STORY" -> RelationType.SIDE_STORY;
+            case "PARENT" -> RelationType.PARENT;
+            case "SUMMARY" -> RelationType.SUMMARY;
+            case "ALTERNATIVE" -> RelationType.ALTERNATIVE;
+            case "SPIN_OFF" -> RelationType.SPIN_OFF;
+            case "OTHER", "ADAPTATION", "CHARACTER", "CONTAINS", "COMPILATION", "SOURCE" -> RelationType.OTHER;
+            default -> RelationType.UNKNOWN;
+        };
     }
 
 }
