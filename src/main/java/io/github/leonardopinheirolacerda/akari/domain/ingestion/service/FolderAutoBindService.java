@@ -23,6 +23,7 @@ import io.github.leonardopinheirolacerda.akari.domain.tmdb.service.TmdbSearchSer
 import io.github.leonardopinheirolacerda.akari.domain.videofile.model.VideoFile;
 import io.github.leonardopinheirolacerda.akari.domain.videofile.service.VideoFileService;
 import io.github.leonardopinheirolacerda.akari.exceptions.IntegrationException;
+import io.github.leonardopinheirolacerda.akari.exceptions.ResourceNotFoundException;
 import io.github.leonardopinheirolacerda.akari.utils.RetryUtils;
 import io.quarkus.logging.Log;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -215,7 +216,7 @@ public class FolderAutoBindService {
                     anime.anilistId,
                     request));
 
-        } catch (IntegrationException e) {
+        } catch (IntegrationException | ResourceNotFoundException e) {
             Log.warnf(e, "Bind TMDB %d falhou pro anime %d (pasta %d)", best.tmdbId(), anime.anilistId, folderId);
             notificationService.notify(
                     NotificationLevel.WARNING, folderName, "Bind no TMDB falhou", folderId, null);
@@ -258,11 +259,20 @@ public class FolderAutoBindService {
         final List<VideoFile> videoFiles = videoFileService.listByFolder(folderId);
         final Map<Integer, List<TmdbEpisodeResponse>> episodesBySeason = new HashMap<>();
 
-        final int absoluteOffset = absoluteEpisodeOffsetService.computeOffset(anime.anilistId);
+        // Pasta de 1 arquivo + anime de 1 episódio: aquele arquivo só pode ser o episódio 1 —
+        // usado como último recurso, depois de qualquer outra tentativa falhar. Cobre tanto o
+        // arquivo sem número reconhecível quanto o caso comum de OVA/special numerado pela
+        // contagem absoluta da série principal (ex.: "Clannad After Story - 25 OVA"), que não
+        // bate com o range local (1-1) do segment do anibridge pra esse special.
+        final boolean singleEpisodeFolder = videoFiles.size() == 1
+                && anime.episodes != null
+                && anime.episodes == 1;
 
-        final Optional<List<MappingSegment>> offsetSegments = absoluteOffset > 0
-                ? ingestionTmdbMappingService.restrictToFullSeasonCoverage(safeSegments.get(), anime.episodes)
-                : Optional.empty();
+        final List<Integer> absoluteOffsetCandidates = absoluteEpisodeOffsetService.computeOffsetCandidates(anime.anilistId);
+
+        final Optional<List<MappingSegment>> offsetSegments = absoluteOffsetCandidates.isEmpty()
+                ? Optional.empty()
+                : ingestionTmdbMappingService.restrictToFullSeasonCoverage(safeSegments.get(), anime.episodes);
 
         int paired = 0;
         boolean ambiguousAbsoluteNumbering = false;
@@ -270,27 +280,41 @@ public class FolderAutoBindService {
         for (VideoFile videoFile : videoFiles) {
             final OptionalInt episodeNumber = EpisodeNumberExtractor.extract(videoFile.name);
 
-            if (episodeNumber.isEmpty()) {
-                continue;
-            }
+            Optional<ResolvedEpisode> resolved = Optional.empty();
+            boolean offsetNeededButIneligible = false;
 
-            Optional<ResolvedEpisode> resolved = ingestionTmdbMappingService.resolveEpisode(
-                    safeSegments.get(),
-                    episodeNumber.getAsInt()
-            );
+            if (episodeNumber.isPresent()) {
+                resolved = ingestionTmdbMappingService.resolveEpisode(
+                        safeSegments.get(),
+                        episodeNumber.getAsInt()
+                );
 
-            if (resolved.isEmpty() && absoluteOffset > 0) {
-                if (offsetSegments.isPresent()) {
-                    resolved = ingestionTmdbMappingService.resolveEpisode(
-                            offsetSegments.get(),
-                            episodeNumber.getAsInt() - absoluteOffset
-                    );
-                } else {
-                    ambiguousAbsoluteNumbering = true;
+                if (resolved.isEmpty() && !absoluteOffsetCandidates.isEmpty()) {
+                    if (offsetSegments.isPresent()) {
+                        for (Integer offsetCandidate : absoluteOffsetCandidates) {
+                            resolved = ingestionTmdbMappingService.resolveEpisode(
+                                    offsetSegments.get(),
+                                    episodeNumber.getAsInt() - offsetCandidate
+                            );
+
+                            if (resolved.isPresent()) {
+                                break;
+                            }
+                        }
+                    } else {
+                        offsetNeededButIneligible = true;
+                    }
                 }
             }
 
+            if (resolved.isEmpty() && singleEpisodeFolder) {
+                resolved = ingestionTmdbMappingService.resolveEpisode(safeSegments.get(), 1);
+            }
+
             if (resolved.isEmpty()) {
+                if (offsetNeededButIneligible) {
+                    ambiguousAbsoluteNumbering = true;
+                }
                 continue;
             }
 
@@ -406,7 +430,7 @@ public class FolderAutoBindService {
                                 false
                         ).episodes());
 
-            } catch (IntegrationException e) {
+            } catch (IntegrationException | ResourceNotFoundException e) {
                 Log.warnf(e, "Busca da temporada %d no TMDB falhou pra pasta %d (%s)", seasonNumber, folderId, folderName);
                 return List.of();
             }
@@ -414,8 +438,8 @@ public class FolderAutoBindService {
 
         return episodes.stream()
                 .filter(episode -> episode.episodeNumber().equals(resolved.tmdbEpisode()))
-                .map(TmdbEpisodeResponse::stillPath)
                 .findFirst()
+                .map(TmdbEpisodeResponse::stillPath)
                 .orElse(null);
     }
 

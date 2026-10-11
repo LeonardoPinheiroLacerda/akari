@@ -204,7 +204,7 @@ public class IngestionService {
             for (FolderReconciliationResult result : foldersWithVideos) {
                 folderAutoBindService.autoBindFolder(result.folderId(), result.folderName());
 
-                //ThreadUtils.sleepUninterruptibly(AUTO_BIND_THROTTLE_MILLIS);
+                ThreadUtils.sleepUninterruptibly(AUTO_BIND_THROTTLE_MILLIS);
             }
 
             notificationService.notify(
