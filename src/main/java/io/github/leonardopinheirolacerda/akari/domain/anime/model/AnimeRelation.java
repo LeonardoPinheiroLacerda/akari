@@ -10,6 +10,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Aresta direcionada do grafo de relações entre animes — "{@code fromAnilistId} tem uma
@@ -45,6 +46,19 @@ public class AnimeRelation extends PanacheEntityBase {
         return AnimeRelation
                 .find("fromAnilistId = ?1 or toAnilistId = ?1", anilistId)
                 .list();
+    }
+
+    /**
+     * Busca a aresta de prequel direto que sai do anime informado — usado pra andar a cadeia de
+     * numeração absoluta (cada temporada aponta pra sua antecessora direta via {@code PREQUEL}).
+     *
+     * @param anilistId anime cujo prequel se procura
+     * @return a aresta, se esse anime tiver um prequel registrado
+     */
+    public static Optional<AnimeRelation> findPrequelEdge(Integer anilistId) {
+        return AnimeRelation
+                .find("fromAnilistId = ?1 and relationType = ?2", anilistId, RelationType.PREQUEL)
+                .firstResultOptional();
     }
 
     /**

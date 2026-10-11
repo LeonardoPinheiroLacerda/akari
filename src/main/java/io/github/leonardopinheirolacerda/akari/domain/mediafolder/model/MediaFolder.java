@@ -71,6 +71,27 @@ public class MediaFolder extends PanacheEntityBase {
                 .firstResultOptional();
     }
 
+    /**
+     * Busca todas as pastas do provider sob um subtree — a própria pasta do {@code rootPath}
+     * (se existir como pasta) e tudo abaixo dela. {@code rootPath} vazio/{@code null} devolve a
+     * árvore inteira do provider.
+     *
+     * @param storageProviderId id do storage provider
+     * @param rootPath prefixo do subtree; vazio ou {@code null} para o provider inteiro
+     * @return as pastas do subtree, em nenhuma ordem garantida
+     */
+    public static List<MediaFolder> findSubtree(Integer storageProviderId, String rootPath) {
+        if (rootPath == null || rootPath.isBlank()) {
+            return MediaFolder
+                    .find("storageProvider.id = ?1", storageProviderId)
+                    .list();
+        }
+
+        return MediaFolder
+                .find("storageProvider.id = ?1 and (path = ?2 or path like ?2 || '/%')", storageProviderId, rootPath)
+                .list();
+    }
+
     public static PageResult<MediaFolder> findPage(
             Integer page,
             Integer size,

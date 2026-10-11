@@ -14,6 +14,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Optional;
 import org.hibernate.annotations.CreationTimestamp;
 
@@ -46,6 +47,19 @@ public class VideoFile extends PanacheEntityBase {
         return VideoFile
                 .find("id = ?1", id)
                 .firstResultOptional();
+    }
+
+    /**
+     * Busca todos os arquivos de uma pasta, sem paginação — usado pela ingestão pra reconciliar
+     * o conjunto inteiro de uma vez.
+     *
+     * @param folderId id da pasta no catalog
+     * @return os arquivos da pasta
+     */
+    public static List<VideoFile> findByFolderId(Integer folderId) {
+        return VideoFile
+                .find("folder.id = ?1", folderId)
+                .list();
     }
 
     public static PageResult<VideoFile> findPage(Integer folderId, Integer page, Integer size) {

@@ -65,6 +65,21 @@ public class AnimeRelationsService {
     }
 
     /**
+     * Busca o id do prequel direto de um anime, se houver uma aresta {@code PREQUEL} registrada
+     * saindo dele — usado por quem precisa andar a cadeia de prequels (ex.: {@code ingestion},
+     * pra calcular deslocamento de numeração absoluta), sem acessar {@link AnimeRelation}
+     * diretamente.
+     *
+     * @param anilistId anime cujo prequel se procura
+     * @return o anilistId do prequel direto, ou vazio se não houver
+     */
+    @Transactional
+    public Optional<Integer> findDirectPrequelId(Integer anilistId) {
+        return AnimeRelation.findPrequelEdge(anilistId)
+                .map(edge -> edge.toAnilistId);
+    }
+
+    /**
      * Lista os animes-raiz da coleção, paginados.
      *
      * @param page página 0-based

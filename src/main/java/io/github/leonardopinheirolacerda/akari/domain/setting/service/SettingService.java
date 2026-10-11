@@ -66,6 +66,16 @@ public class SettingService {
         return findOrThrow("tmdb.api-key").value;
     }
 
+    /**
+     * Confirma se a preferência {@code tmdb.api-key} está preenchida.
+     *
+     * @return {@code true} se há um token cadastrado
+     */
+    public boolean isTmdbConfigured() {
+        final String apiKey = getTmdbApiKey();
+        return apiKey != null && !apiKey.isBlank();
+    }
+
     public String getTmdbDefaultLanguage() {
         return findOrThrow("tmdb.default-language").value;
     }

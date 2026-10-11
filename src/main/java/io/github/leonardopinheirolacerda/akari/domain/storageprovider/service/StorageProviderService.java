@@ -16,6 +16,7 @@ import io.github.leonardopinheirolacerda.akari.domain.storageprovider.provider.c
 import io.github.leonardopinheirolacerda.akari.domain.storageprovider.provider.StorageProviderClientFactory;
 import io.github.leonardopinheirolacerda.akari.domain.storageprovider.provider.StorageProviderConfigs;
 import io.github.leonardopinheirolacerda.akari.domain.storageprovider.provider.processor.ObscureFieldApplier;
+import io.github.leonardopinheirolacerda.akari.utils.DirectoryUtils;
 import io.quarkus.logging.Log;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -124,6 +125,23 @@ public class StorageProviderService {
 
         return new StorageProviderHealth()
                 .healthy(healthy);
+    }
+
+    /**
+     * Confirma se um path existe de fato no provider — nem rclone nem o provider {@code LOCAL}
+     * distinguem diretório vazio de inexistente na própria listagem do path, então a checagem é
+     * via listagem do pai, procurando o path exato entre os filhos.
+     *
+     * @param client client do provider já resolvido
+     * @param path path a confirmar
+     * @return {@code true} se o path existe
+     */
+    public boolean existsPath(StorageProviderClient client, String path) {
+        final String parentPath = DirectoryUtils.parentOf(path);
+
+        return client.listChildDirectories(parentPath)
+                .stream()
+                .anyMatch(item -> item.path().equals(path));
     }
 
     public StorageProvider findOrThrow(Integer providerId) {

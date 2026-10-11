@@ -1,5 +1,6 @@
 package io.github.leonardopinheirolacerda.akari.domain.notification.service;
 
+import io.github.leonardopinheirolacerda.akari.api.dto.NotificationLevel;
 import io.github.leonardopinheirolacerda.akari.api.dto.NotificationResponse;
 import io.github.leonardopinheirolacerda.akari.api.dto.UnreadCountResponse;
 import io.github.leonardopinheirolacerda.akari.domain.notification.mapper.NotificationMapper;
@@ -45,6 +46,31 @@ public class NotificationService {
         final long updated = Notification.markAllAsRead();
 
         Log.infof("%d notificações marcadas como lidas", updated);
+    }
+
+    /**
+     * Cria uma notificação. Primeiro produtor do projeto — hoje só a ingestão gera notificação
+     * (conclusão, falha geral e falhas parciais do binding automático de cada pasta).
+     *
+     * @param level severidade
+     * @param title título, ou {@code null}
+     * @param message mensagem
+     * @param folderId pasta relacionada, ou {@code null} se não houver uma
+     * @param coverImageUrl capa pra exibição, ou {@code null}
+     */
+    @Transactional
+    public void notify(NotificationLevel level, String title, String message, Integer folderId, String coverImageUrl) {
+        final Notification notification = new Notification();
+        notification.level = level;
+        notification.title = title;
+        notification.message = message;
+        notification.folderId = folderId;
+        notification.coverImageUrl = coverImageUrl;
+        notification.read = false;
+
+        notification.persist();
+
+        Log.infof("Notificação %s criada: %s", level, message);
     }
 
 }

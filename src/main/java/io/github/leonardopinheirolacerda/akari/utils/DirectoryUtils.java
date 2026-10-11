@@ -23,4 +23,13 @@ public final class DirectoryUtils {
         return parentPath + "/" + name;
     }
 
+    public static String lastSegmentOf(String path) {
+        final int lastSlash = path.lastIndexOf('/');
+        return lastSlash < 0 ? path : path.substring(lastSlash + 1);
+    }
+
+    public static int depthOf(String path) {
+        return path.isEmpty() ? 0 : path.split("/").length;
+    }
+
 }

@@ -18,6 +18,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Binding anime↔pasta, fetch/sync na AniList e curadoria manual da raiz de franquia.
@@ -66,7 +67,7 @@ public class AnimeService {
             throw new BusinessRuleException("Essa pasta já está vinculada a um anime");
         }
 
-        final AnilistMediaResponse anilistMedia = anilistSearchService.findById(anilistId, true);
+        final AnilistMediaResponse anilistMedia = anilistSearchService.findById(anilistId, false);
 
         final Anime anime = new Anime();
         animeMapper.applyAnilistData(anilistMedia, anime);
@@ -110,6 +111,44 @@ public class AnimeService {
                 });
 
         return toResponse(anime);
+    }
+
+    /**
+     * Busca o model cru do anime vinculado à pasta, sem lançar se não houver. Usado por outros
+     * domínios (ex.: {@code ingestion}) que precisam checar o binding antes de agir, de contextos
+     * sem transação ambiente — por isso é {@code @Transactional} mesmo sendo leitura.
+     *
+     * @param folderId id da pasta no catalog
+     * @return o anime vinculado, se houver
+     */
+    @Transactional
+    public Optional<Anime> findByFolder(Integer folderId) {
+        return Anime.findByFolderId(folderId);
+    }
+
+    /**
+     * Confirma se já existe metadata salva pro anime. Mesma motivação de {@link #findByFolder}
+     * — leitura marcada {@code @Transactional} pra funcionar fora de contexto de request.
+     *
+     * @param anilistId id do anime na AniList
+     * @return {@code true} se já existe metadata salva
+     */
+    @Transactional
+    public boolean exists(Integer anilistId) {
+        return Anime.find(anilistId).isPresent();
+    }
+
+    /**
+     * Busca o model cru do anime pelo {@code anilistId}, sem lançar se não houver. Mesma
+     * motivação de {@link #findByFolder} — leitura marcada {@code @Transactional} pra funcionar
+     * fora de contexto de request.
+     *
+     * @param anilistId id do anime na AniList
+     * @return o anime, se houver metadata salva
+     */
+    @Transactional
+    public Optional<Anime> find(Integer anilistId) {
+        return Anime.find(anilistId);
     }
 
     /**

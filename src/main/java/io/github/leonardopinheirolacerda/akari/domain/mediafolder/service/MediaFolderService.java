@@ -12,12 +12,15 @@ import io.github.leonardopinheirolacerda.akari.domain.mediafolder.model.MediaFol
 import io.github.leonardopinheirolacerda.akari.domain.storageprovider.model.StorageProvider;
 import io.github.leonardopinheirolacerda.akari.domain.storageprovider.service.StorageProviderService;
 import io.github.leonardopinheirolacerda.akari.utils.DirectoryUtils;
+import io.quarkus.hibernate.orm.panache.Panache;
 import io.quarkus.logging.Log;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @ApplicationScoped
 public class MediaFolderService {
@@ -164,6 +167,98 @@ public class MediaFolderService {
                     Log.warnf("Pasta %d não encontrada", folderId);
                     return new ResourceNotFoundException("Não foi possível localizar uma pasta com o id informado");
                 });
+    }
+
+    /**
+     * Busca a pasta pelo provider+path.
+     *
+     * @param storageProviderId id do provider
+     * @param path path completo da pasta
+     * @return a pasta, se existir
+     */
+    public Optional<MediaFolder> findByProviderAndPath(Integer storageProviderId, String path) {
+        return MediaFolder.findByProviderAndPath(storageProviderId, path);
+    }
+
+    /**
+     * Busca todas as pastas de um subtree do provider.
+     *
+     * @param storageProviderId id do provider
+     * @param rootPath raiz do subtree; vazio significa o provider inteiro
+     * @return as pastas do subtree
+     */
+    public List<MediaFolder> findSubtree(Integer storageProviderId, String rootPath) {
+        return MediaFolder.findSubtree(storageProviderId, rootPath);
+    }
+
+    /**
+     * Cria a pasta, resolvendo o pai automaticamente pelo path — diferente de
+     * {@link #createFolder}, não valida se já existe uma pasta com esse caminho (quem chama já
+     * sabe que não existe); pensado pra reconciliação em lote da ingestão, onde cada pasta é
+     * persistida em sua própria transação antes da próxima (filha) ser processada.
+     *
+     * @param storageProviderId id do provider
+     * @param path path completo da pasta
+     * @param name nome da pasta
+     * @param mediaType tipo de mídia
+     * @return a pasta recém-criada
+     */
+    @Transactional
+    public MediaFolder create(Integer storageProviderId, String path, String name, MediaType mediaType) {
+        final StorageProvider storageProvider = storageProviderService.findOrThrow(storageProviderId);
+        final String parentPath = DirectoryUtils.parentOf(path);
+        final MediaFolder parent = MediaFolder.findByProviderAndPath(storageProviderId, parentPath)
+                .orElse(null);
+
+        final MediaFolder folder = new MediaFolder();
+
+        folder.mediaType = mediaType;
+        folder.name = name;
+        folder.path = path;
+        folder.parent = parent;
+        folder.storageProvider = storageProvider;
+
+        folder.persist();
+
+        Log.infof("Pasta %d criada com sucesso", folder.id);
+
+        return folder;
+    }
+
+    /**
+     * Remove só as raízes do conjunto informado (pai não está no próprio conjunto) — {@code ON
+     * DELETE CASCADE} em {@code parent_id}/{@code folder_id}/{@code file_id} cuida do resto.
+     *
+     * <p>Usa {@code delete} em lote (por query), não {@code folder.delete()} de instância —
+     * removendo uma pasta "raiz" enquanto outras pastas do mesmo lote (os filhos, ainda
+     * carregados na mesma sessão porque vieram do mesmo {@code findSubtree}) têm uma associação
+     * {@code @ManyToOne} pra ela ainda não resolvida faz o Hibernate lançar {@code
+     * TransientPropertyValueException} ao tentar validar o grafo de entidades no flush — um
+     * falso positivo confirmado empiricamente nesse domínio. O delete em lote manda o {@code
+     * DELETE} direto pro banco, sem passar pela validação de grafo.
+     *
+     * <p>O {@link Panache#flush()} explícito antes garante que qualquer remoção pendente de
+     * outra entidade referenciada (ex.: {@code Anime} vinculado à pasta, removido por quem
+     * chama antes desse método) já esteja de fato no banco — senão o delete em lote da pasta
+     * rodaria antes, e uma FK que ainda aponta pra ela bloquearia a operação.
+     *
+     * @param folders pastas do subtree a remover (o conjunto inteiro, não só as raízes)
+     */
+    @Transactional
+    public void deleteRoots(List<MediaFolder> folders) {
+        Panache.flush();
+
+        final Set<Integer> folderIds = folders.stream()
+                .map(folder -> folder.id)
+                .collect(Collectors.toSet());
+
+        for (MediaFolder folder : folders) {
+            final boolean isRoot = folder.parent == null || !folderIds.contains(folder.parent.id);
+
+            if (isRoot) {
+                MediaFolder.delete("id = ?1", folder.id);
+            }
+        }
     }
 
 }

@@ -14,6 +14,7 @@ import io.quarkus.logging.Log;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
+import java.util.List;
 
 @ApplicationScoped
 public class VideoFileService {
@@ -93,6 +94,19 @@ public class VideoFileService {
         );
 
         return videoFileMapper.toPage(pageResult);
+    }
+
+    /**
+     * Lista todos os arquivos de uma pasta, sem paginação. Usado pela ingestão (reconciliação e
+     * pairing automático) de contextos sem transação ambiente — por isso é {@code @Transactional}
+     * mesmo sendo leitura.
+     *
+     * @param folderId id da pasta no catalog
+     * @return os arquivos da pasta
+     */
+    @Transactional
+    public List<VideoFile> listByFolder(Integer folderId) {
+        return VideoFile.findByFolderId(folderId);
     }
 
     public VideoFile findOrThrow(Integer fileId) {

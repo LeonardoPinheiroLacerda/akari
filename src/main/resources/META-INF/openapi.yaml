@@ -286,7 +286,9 @@ paths:
         Dispara a reconciliação do subtree indicado por `rootPath` (ou a raiz, se omitido)
         com o catalog **em background** e retorna `202` imediatamente, sem aguardar o resultado.
 
-        Só são síncronos a validação do payload (`400`) e o precheck de existência do
+        Só são síncronos a validação do payload (`400`), o precheck de que o TMDB está
+        configurado — `400` se a preferência `tmdb.api-key` estiver vazia, já que sem TMDB
+        nenhum anime completaria o binding automático — e o precheck de existência do
         provider (`404`). Todo o resto roda depois da resposta — inclusive a verificação de
         que o `rootPath` existe no provider. O resultado é reportado pelo módulo
         `notification`: uma notificação `INFO` ao concluir, ou `ERROR` se a ingestão falhar.
