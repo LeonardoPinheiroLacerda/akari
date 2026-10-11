@@ -3,6 +3,7 @@ package io.github.leonardopinheirolacerda.akari.domain.ingestion.service;
 import io.github.leonardopinheirolacerda.akari.api.dto.AnilistMediaSummary;
 import io.github.leonardopinheirolacerda.akari.api.dto.AnilistMediaSummaryPage;
 import io.github.leonardopinheirolacerda.akari.api.dto.AnimeBindingRequest;
+import io.github.leonardopinheirolacerda.akari.api.dto.AnimeReviewStatus;
 import io.github.leonardopinheirolacerda.akari.api.dto.NotificationLevel;
 import io.github.leonardopinheirolacerda.akari.api.dto.TmdbBindingRequest;
 import io.github.leonardopinheirolacerda.akari.api.dto.TmdbFilePairingRequest;
@@ -42,6 +43,11 @@ import java.util.OptionalInt;
  * <p>Idempotente em cada estágio — pode ser chamado de novo numa pasta já (parcialmente) ligada
  * sem duplicar nada nem travar, já que a reconciliação roda de novo a cada disparo. Nunca lança
  * — qualquer falha isolada na pasta vira notificação {@code WARNING}, nunca aborta as outras.
+ *
+ * <p>Também atualiza {@code anime.reviewStatus} ao final de cada tentativa (via
+ * {@link AnimeService#updateReviewStatusIfNotReviewed}) — {@code PENDING_REVIEW} quando o
+ * binding/pareamento termina completo, {@code PARTIAL} quando fica incompleto por qualquer
+ * motivo. Nunca sobrescreve um anime já marcado {@code REVIEWED} manualmente.
  *
  * <p>Não tem {@code @Transactional} próprio — só orquestra chamadas a outros services, cada um
  * já transacional na sua própria operação. Isso evita segurar uma transação aberta durante as
@@ -106,7 +112,14 @@ public class FolderAutoBindService {
 
         final Anime boundAnime = bindTmdb(folderId, folderName, anime);
 
-        if (boundAnime == null || boundAnime.tmdbMediaType != TmdbMediaType.TV) {
+        if (boundAnime.tmdbId == null) {
+            animeService.updateReviewStatusIfNotReviewed(boundAnime.anilistId, AnimeReviewStatus.PARTIAL);
+            return;
+        }
+
+        if (boundAnime.tmdbMediaType != TmdbMediaType.TV) {
+            // Filme não tem pairing de episódio — o bind TMDB sozinho já é a ingestão completa.
+            animeService.updateReviewStatusIfNotReviewed(boundAnime.anilistId, AnimeReviewStatus.PENDING_REVIEW);
             return;
         }
 
@@ -234,6 +247,7 @@ public class FolderAutoBindService {
         );
 
         if (candidate.isEmpty()) {
+            animeService.updateReviewStatusIfNotReviewed(anime.anilistId, AnimeReviewStatus.PARTIAL);
             return;
         }
 
@@ -247,6 +261,7 @@ public class FolderAutoBindService {
                             + "pareamento automático não tentado",
                     folderId,
                     null);
+            animeService.updateReviewStatusIfNotReviewed(anime.anilistId, AnimeReviewStatus.PARTIAL);
             return;
         }
 
@@ -349,6 +364,12 @@ public class FolderAutoBindService {
                     folderId,
                     null);
         }
+
+        final AnimeReviewStatus reviewStatus = paired == videoFiles.size()
+                ? AnimeReviewStatus.PENDING_REVIEW
+                : AnimeReviewStatus.PARTIAL;
+
+        animeService.updateReviewStatusIfNotReviewed(anime.anilistId, reviewStatus);
     }
 
     /**

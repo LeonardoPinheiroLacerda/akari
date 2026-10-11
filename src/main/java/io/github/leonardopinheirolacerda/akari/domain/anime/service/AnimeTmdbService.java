@@ -9,6 +9,7 @@ import io.github.leonardopinheirolacerda.akari.api.dto.TmdbOverrides;
 import io.github.leonardopinheirolacerda.akari.api.dto.TmdbOverridesSchema;
 import io.github.leonardopinheirolacerda.akari.domain.anime.mapper.AnimeTmdbMapper;
 import io.github.leonardopinheirolacerda.akari.domain.anime.model.Anime;
+import io.github.leonardopinheirolacerda.akari.domain.setting.service.SettingService;
 import io.github.leonardopinheirolacerda.akari.domain.tmdb.client.dtos.TmdbImageResponse;
 import io.github.leonardopinheirolacerda.akari.domain.tmdb.client.dtos.TmdbImagesResponse;
 import io.github.leonardopinheirolacerda.akari.domain.tmdb.client.dtos.TmdbMovieDetailsResponse;
@@ -17,7 +18,9 @@ import io.github.leonardopinheirolacerda.akari.domain.tmdb.client.dtos.TmdbTrans
 import io.github.leonardopinheirolacerda.akari.domain.tmdb.client.dtos.TmdbTvDetailsResponse;
 import io.github.leonardopinheirolacerda.akari.domain.tmdb.service.TmdbSearchService;
 import io.github.leonardopinheirolacerda.akari.exceptions.BusinessRuleException;
+import io.github.leonardopinheirolacerda.akari.exceptions.IntegrationException;
 import io.github.leonardopinheirolacerda.akari.exceptions.ResourceNotFoundException;
+import io.github.leonardopinheirolacerda.akari.utils.RetryUtils;
 import io.github.leonardopinheirolacerda.akari.utils.TmdbImageUtils;
 import io.quarkus.logging.Log;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -25,7 +28,9 @@ import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
 import java.util.function.Function;
 
 /**
@@ -43,9 +48,14 @@ public class AnimeTmdbService {
     @Inject
     TmdbSearchService tmdbSearchService;
 
+    @Inject
+    SettingService settingService;
+
     /**
      * Cria o binding TMDB do anime, confirmando antes que o {@code tmdbId} existe no TMDB pro
-     * {@code mediaType} informado.
+     * {@code mediaType} informado. Também pré-preenche {@code overrideBackdropPath}/
+     * {@code overrideLogoPath} com a imagem mais votada da galeria do TMDB (ver
+     * {@link #prefillImageOverrides}) — melhor esforço, nunca falha o bind.
      *
      * @param anilistId id do anime na AniList
      * @param tmdbBindingRequest payload com {@code tmdbId} e {@code mediaType}
@@ -82,6 +92,8 @@ public class AnimeTmdbService {
         anime.tmdbId = tmdbId;
         anime.tmdbMediaType = mediaType;
         anime.tmdbBoundAt = OffsetDateTime.now();
+
+        prefillImageOverrides(anime, tmdbId, mediaType);
 
         Log.infof("Anime %d vinculado ao TMDB %d com sucesso", anilistId, tmdbId);
 
@@ -213,6 +225,70 @@ public class AnimeTmdbService {
         }
 
         return anime;
+    }
+
+    /**
+     * Pré-preenche backdrop e logo com a imagem mais votada da galeria do TMDB, priorizando o
+     * idioma configurado em {@code tmdb.image.backdrop-language}/{@code tmdb.image.logo-language}
+     * (ver {@link #selectImage}). Só roda no bind inicial — o anime nunca chega aqui de novo com
+     * esses campos já preenchidos, já que {@link #bindTmdb} só executa uma vez por anime. Falha
+     * aqui nunca aborta o bind: sem imagens, os campos simplesmente ficam {@code null}, igual um
+     * override manual que ainda não foi preenchido.
+     */
+    private void prefillImageOverrides(Anime anime, Integer tmdbId, TmdbMediaType mediaType) {
+        final TmdbImagesResponse images;
+
+        try {
+            images = RetryUtils.withRateLimitRetry(() -> mediaType == TmdbMediaType.TV
+                    ? tmdbSearchService.getTvImages(tmdbId, false)
+                    : tmdbSearchService.getMovieImages(tmdbId, false));
+
+        } catch (IntegrationException | ResourceNotFoundException e) {
+            Log.warnf(e, "Busca de imagens no TMDB %d falhou, binding segue sem backdrop/logo", tmdbId);
+            return;
+        }
+
+        anime.overrideBackdropPath = selectImage(
+                images.backdrops(),
+                settingService.getTmdbImageBackdropLanguage()
+        );
+
+        anime.overrideLogoPath = selectImage(
+                images.logos(),
+                settingService.getTmdbImageLogoLanguage()
+        );
+    }
+
+    /**
+     * Escolhe a imagem mais popular (maior {@code voteCount}, desempate por {@code voteAverage},
+     * depois por largura) dentro do idioma preferido; sem nenhuma imagem nesse idioma, cai pra
+     * popularidade entre todas — nem todo título tem logo japonês ou backdrop sem idioma
+     * catalogado no TMDB.
+     *
+     * @param images galeria de imagens do TMDB (backdrops ou logos)
+     * @param preferredLanguage {@code iso_639_1} preferido, ou {@code null} pra imagem sem idioma
+     * @return o {@code filePath} escolhido, ou {@code null} se a galeria estiver vazia
+     */
+    private static String selectImage(List<TmdbImageResponse> images, String preferredLanguage) {
+        if (images == null || images.isEmpty()) {
+            return null;
+        }
+
+        final List<TmdbImageResponse> filtered = images.stream()
+                .filter(image -> Objects.equals(image.iso6391(), preferredLanguage))
+                .toList();
+
+        final List<TmdbImageResponse> candidates = filtered.isEmpty()
+                ? images
+                : filtered;
+
+        return candidates.stream()
+                .max(Comparator
+                        .comparing(TmdbImageResponse::voteCount, Comparator.nullsFirst(Comparator.naturalOrder()))
+                        .thenComparing(TmdbImageResponse::voteAverage, Comparator.nullsFirst(Comparator.naturalOrder()))
+                        .thenComparing(TmdbImageResponse::width, Comparator.nullsFirst(Comparator.naturalOrder())))
+                .map(TmdbImageResponse::filePath)
+                .orElse(null);
     }
 
     private static List<TmdbLocalizedOption> collectTexts(

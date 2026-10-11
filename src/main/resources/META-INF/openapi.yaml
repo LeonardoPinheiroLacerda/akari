@@ -919,6 +919,24 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /v1/metadata/animes/{anilistId}/review:
+    parameters:
+      - $ref: '#/components/parameters/AnilistIdPathParam'
+    put:
+      tags: [Anime]
+      operationId: markAnimeAsReviewed
+      summary: Confirma manualmente que a ingestão desse anime está correta
+      description: |
+        Marca `reviewStatus` como `REVIEWED`. A partir daqui, o auto-bind da ingestão nunca
+        mais altera esse campo, mesmo reprocessando a pasta numa reconciliação futura.
+      responses:
+        '200':
+          $ref: '#/components/responses/AnimeOk'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /v1/metadata/folders/{folderId}/anime:
     parameters:
       - $ref: '#/components/parameters/FolderIdPathParam'
@@ -3074,6 +3092,20 @@ components:
         franchiseRootCuration:
           $ref: '#/components/schemas/FranchiseRootCuration'
 
+    AnimeReviewStatus:
+      type: string
+      description: |
+        Estado de revisão da ingestão automática de um anime.
+        - `PENDING_REVIEW`: ingestão completa (AniList + TMDB + todos os arquivos pareados),
+          aguardando confirmação manual.
+        - `PARTIAL`: ingestão incompleta (TMDB não vinculado, temporadas conflitantes, ou nem
+          todo arquivo pareado) — precisa de atenção.
+        - `REVIEWED`: confirmado manualmente; o auto-bind nunca sobrescreve esse estado.
+      enum:
+        - PENDING_REVIEW
+        - PARTIAL
+        - REVIEWED
+
     AnimeTitlesResponse:
       type: object
       description: Títulos localizados
@@ -3148,8 +3180,9 @@ components:
     AnimeResponse:
       type: object
       description: |
-        Vista pública de um anime. `banner`/`logo` só são preenchidos quando há binding
-        TMDB + override manual. `synopsis` vem em HTML quando a fonte é AniList (pode
+        Vista pública de um anime. `banner`/`logo` só são preenchidos quando há binding TMDB —
+        o bind já escolhe a imagem mais votada automaticamente, e um override manual pode
+        trocar essa escolha depois. `synopsis` vem em HTML quando a fonte é AniList (pode
         conter `<br>`, `<i>`, `<b>`).
       required: [anilistId, franchiseRootCuration]
       properties:
@@ -3214,6 +3247,10 @@ components:
             type: string
         franchiseRootCuration:
           $ref: '#/components/schemas/FranchiseRootCuration'
+        reviewStatus:
+          allOf: [{ $ref: '#/components/schemas/AnimeReviewStatus' }]
+          nullable: true
+          description: '`null` até o auto-bind terminar de processar a pasta pela primeira vez'
 
     AnimePage:
       description: Envelope paginado de animes

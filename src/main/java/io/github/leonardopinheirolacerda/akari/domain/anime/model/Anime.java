@@ -1,5 +1,6 @@
 package io.github.leonardopinheirolacerda.akari.domain.anime.model;
 
+import io.github.leonardopinheirolacerda.akari.api.dto.AnimeReviewStatus;
 import io.github.leonardopinheirolacerda.akari.api.dto.FranchiseRootCuration;
 import io.github.leonardopinheirolacerda.akari.api.dto.TmdbMediaType;
 import io.github.leonardopinheirolacerda.akari.domain.mediafolder.model.MediaFolder;
@@ -117,6 +118,10 @@ public class Anime extends PanacheEntityBase {
 
     @Column(name = "override_logo_path")
     public String overrideLogoPath;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "review_status")
+    public AnimeReviewStatus reviewStatus;
 
     /**
      * Busca pelo {@code anilistId}, a própria chave primária.

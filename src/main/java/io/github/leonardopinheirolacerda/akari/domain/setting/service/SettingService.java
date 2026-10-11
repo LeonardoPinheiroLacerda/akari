@@ -80,6 +80,14 @@ public class SettingService {
         return findOrThrow("tmdb.default-language").value;
     }
 
+    public String getTmdbImageLogoLanguage() {
+        return findOrThrow("tmdb.image.logo-language").value;
+    }
+
+    public String getTmdbImageBackdropLanguage() {
+        return findOrThrow("tmdb.image.backdrop-language").value;
+    }
+
     public boolean isTmdbIncludeAdult() {
         return Boolean.parseBoolean(findOrThrow("tmdb.include-adult").value);
     }

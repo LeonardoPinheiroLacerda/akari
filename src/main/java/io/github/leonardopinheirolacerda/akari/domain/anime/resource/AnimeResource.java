@@ -44,6 +44,11 @@ public class AnimeResource implements AnimeApi {
     }
 
     @Override
+    public AnimeResponse markAnimeAsReviewed(Integer anilistId) {
+        return animeService.markAsReviewed(anilistId);
+    }
+
+    @Override
     public AnimeResponse setAnimeFranchiseRoot(
             Integer anilistId,
             AnimeFranchiseRootRequest animeFranchiseRootRequest) {

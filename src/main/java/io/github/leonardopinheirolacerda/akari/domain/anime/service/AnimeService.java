@@ -4,6 +4,7 @@ import io.github.leonardopinheirolacerda.akari.api.dto.AnimeBindingRequest;
 import io.github.leonardopinheirolacerda.akari.api.dto.AnimeBindingSummary;
 import io.github.leonardopinheirolacerda.akari.api.dto.AnimeFranchiseRootRequest;
 import io.github.leonardopinheirolacerda.akari.api.dto.AnimeResponse;
+import io.github.leonardopinheirolacerda.akari.api.dto.AnimeReviewStatus;
 import io.github.leonardopinheirolacerda.akari.api.dto.FranchiseRootCuration;
 import io.github.leonardopinheirolacerda.akari.domain.anilist.client.dtos.AnilistMediaResponse;
 import io.github.leonardopinheirolacerda.akari.domain.anilist.service.AnilistSearchService;
@@ -226,6 +227,44 @@ public class AnimeService {
         final Anime anime = findOrThrow(anilistId);
 
         anime.franchiseRootCuration = animeFranchiseRootRequest.getFranchiseRootCuration();
+
+        return toResponse(anime);
+    }
+
+    /**
+     * Atualiza o status de revisão da ingestão, exceto se já estiver {@code REVIEWED} —
+     * revisão manual tem precedência sobre qualquer recálculo automático do auto-bind, mesmo
+     * que a pasta seja reprocessada numa reconciliação futura.
+     *
+     * @param anilistId id do anime na AniList
+     * @param status novo status calculado pelo auto-bind
+     */
+    @Transactional
+    public void updateReviewStatusIfNotReviewed(Integer anilistId, AnimeReviewStatus status) {
+        final Anime anime = findOrThrow(anilistId);
+
+        if (anime.reviewStatus == AnimeReviewStatus.REVIEWED) {
+            return;
+        }
+
+        anime.reviewStatus = status;
+    }
+
+    /**
+     * Confirma manualmente que a ingestão desse anime está correta — a partir daqui, o
+     * auto-bind nunca mais altera esse campo (ver {@link #updateReviewStatusIfNotReviewed}).
+     *
+     * @param anilistId id do anime na AniList
+     * @return a metadata atualizada
+     * @throws ResourceNotFoundException se não há metadata salva pro id informado
+     */
+    @Transactional
+    public AnimeResponse markAsReviewed(Integer anilistId) {
+        Log.infof("Confirmando revisão manual do anime %d", anilistId);
+
+        final Anime anime = findOrThrow(anilistId);
+
+        anime.reviewStatus = AnimeReviewStatus.REVIEWED;
 
         return toResponse(anime);
     }
