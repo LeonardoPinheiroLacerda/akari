@@ -40,7 +40,9 @@ componente** dentro de cada um. Nunca uma classe solta na raiz do pacote de dom�
 src/main/java/com/example/app/
 ├── domain/
 │   ├── cliente/
-│   │   ├── model/Cliente.java          # entidade JPA/Panache (active record)
+│   │   ├── model/Cliente.java          # entidade JPA/Panache (active record), ou record
+│   │   │                               #   interno sem persistência (ex.: retorno composto
+│   │   │                               #   de um service, não gerado do contrato)
 │   │   ├── resource/ClienteResource.java  # implementa a interface *Api gerada do contrato
 │   │   ├── service/ClienteService.java    # regra de negócio
 │   │   └── mapper/ClienteMapper.java      # MapStruct: model ↔ DTO gerado
@@ -67,7 +69,7 @@ src/main/java/com/example/app/
 ├── exceptions/    # AppException e subclasses
 │   └── mapper/    #   ExceptionMappers → ApiError (+ ApiErrorResponses)
 ├── config/        # configuração transversal: health checks, @ConfigMapping, producers
-└── utils/         # helpers puros, sem estado, usados por mais de um domínio
+└── utils/         # helpers puros, sem estado, de uso geral
 
 target/generated-sources/openapi/.../app/api/       # interfaces JAX-RS geradas (*Api)
 target/generated-sources/openapi/.../app/api/dto/   # DTOs gerados (ApiError, *Response, ...)
@@ -81,7 +83,15 @@ target/generated-sources/openapi/.../app/api/dto/   # DTOs gerados (ApiError, *R
   — não são DTOs da nossa API).
 - Domínio com implementação de client mais complexa (múltiplos providers, configs por provider)
   usa um subpacote próprio pra isso (ex.: `entrega/provider/`) — isso **não** é subpacote
-  por domínio, é separação por responsabilidade dentro do mesmo domínio.
+  por domínio, é separação por responsabilidade dentro do mesmo domínio. Mesma lógica pra outras
+  responsabilidades que não cabem em `model/service/resource/mapper/client` sem forçar: nomeie o
+  subpacote pela responsabilidade real da classe, não genérico — um parser de formato
+  estruturado (JSON, XML) vai em `parser/` (ex.: `anibridge/parser/`); um helper de extração por
+  regex/pattern-matching (não transforma um formato estruturado, só casa um padrão num texto) vai
+  em `extractor/` (ex.: `ingestion/extractor/EpisodeNumberExtractor`); um CDI bean de estado/dedup
+  sem regra de negócio (não é `*Service`) vai num subpacote nomeado pela responsabilidade (ex.:
+  `ingestion/registry/IngestionRunRegistry`) — nunca solto em `service/`, que é só pra classe que
+  de fato orquestra regra de negócio.
 - `exceptions/`, `config/`, `utils/` e `model/` são espaço comum, **não** domínio — não entram em
   `domain/` e não têm subpacote por tipo (são eles mesmos o "tipo").
 - `model/` (raiz, fora de `domain/`) é o lugar pra tipo genérico sem dono de domínio único — hoje
@@ -184,6 +194,16 @@ public static Optional<Pedido> findByClienteAndStatus(Integer clienteId, String 
 - Enums persistidos ficam no `model/` do domínio; o `*Mapper` converte para o enum gerado do
   contrato (o MapStruct mapeia enums de mesmo nome sozinho).
 - Nunca injetar `EntityManager` diretamente — use a API do Panache.
+
+### Records internos (sem persistência)
+
+`model/` também é onde moram records simples do domínio que **não** são entidade Panache nem
+DTO gerado do contrato — ex.: o retorno composto de um método de service, usado só entre
+service/service ou service/outro-service-do-mesmo-domínio (`TmdbMappingCandidate`,
+`ResolvedEpisode`, `FolderReconciliationResult`). Nunca ficam em `service/`, mesmo que só um
+service use: `service/` é só pra classe `@ApplicationScoped`, nunca pra tipo de dado. Seguem a
+mesma regra de qualquer record do projeto — arquivo próprio, nunca aninhado, javadoc em
+português com `@param` de cada componente.
 
 ## Services
 
@@ -312,14 +332,28 @@ return ApiErrorResponses.of(
 );
 ```
 
-- Stream/method chains: cada operador numa linha:
+- Qualquer chamada encadeada — stream, builder, `Optional`, qualquer method chain — **sempre**
+  um operador por linha, mesmo cadeia curta de 2 chamadas. Sem exceção pra "cabe numa linha":
 
 ```java
+// certo
 return Pedido
         .<Pedido>find("clienteId", clienteId)
         .stream()
         .map(pedido -> pedido.status)
         .toList();
+
+final MediaFolder parent = MediaFolder.findByProviderAndPath(providerId, parentPath)
+        .orElse(null);
+
+final TmdbFilePairingRequest request = new TmdbFilePairingRequest()
+        .seasonNumber(resolved.seasonNumber())
+        .episodeNumber(resolved.tmdbEpisode())
+        .thumbnailPath(thumbnailPath);
+
+// errado — tudo espremido numa linha, mesmo cabendo nas ~100 colunas
+final Set<Integer> folderIds = folders.stream().map(folder -> folder.id).collect(Collectors.toSet());
+final MediaFolder parent = MediaFolder.findByProviderAndPath(providerId, parentPath).orElse(null);
 ```
 
 ### Blank lines dentro de métodos
@@ -370,9 +404,9 @@ Helpers privados ficam depois dos métodos públicos, na ordem em que aparecem s
 ## Parâmetros agrupados
 
 Método de service com **4+ parâmetros** de escrita, ou com o mesmo shape montado por vários
-callers: agrupe num `record` em arquivo próprio, no mesmo pacote do service que o usa
-(`PedidoFilter`, `PedidoChanges`) — nunca aninhado na classe. Com 1-3 parâmetros, passe
-solto.
+callers: agrupe num `record` em arquivo próprio no `model/` do domínio (`PedidoFilter`,
+`PedidoChanges`) — nunca aninhado na classe, nunca em `service/` (ver "Records internos (sem
+persistência)"). Com 1-3 parâmetros, passe solto.
 
 ## `@Transactional`
 
@@ -387,6 +421,8 @@ solto.
 
 ## Reject
 
+- Method chain (stream, builder, `Optional`, qualquer encadeamento) espremido numa linha só,
+  mesmo cadeia curta de 2 chamadas — sempre um operador por linha.
 - Constructor injection (`@Inject public XxxService(...)` — proibido; use campo).
 - `@Inject` inline (`@Inject Foo bar;`).
 - Sufixo de classe removido do nome do campo (`pedidos` no lugar de `pedidoService`).
