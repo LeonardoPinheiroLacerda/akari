@@ -8,17 +8,17 @@ import io.github.leonardopinheirolacerda.akari.api.dto.TmdbBindingRequest;
 import io.github.leonardopinheirolacerda.akari.api.dto.TmdbFilePairingRequest;
 import io.github.leonardopinheirolacerda.akari.api.dto.TmdbMediaType;
 import io.github.leonardopinheirolacerda.akari.domain.anibridge.model.MappingSegment;
+import io.github.leonardopinheirolacerda.akari.domain.anibridge.model.ResolvedEpisode;
+import io.github.leonardopinheirolacerda.akari.domain.anibridge.model.TmdbMappingCandidate;
+import io.github.leonardopinheirolacerda.akari.domain.anibridge.service.AnibridgeResolutionService;
 import io.github.leonardopinheirolacerda.akari.domain.anilist.service.AnilistSearchService;
 import io.github.leonardopinheirolacerda.akari.domain.anime.model.Anime;
 import io.github.leonardopinheirolacerda.akari.domain.anime.service.AnimeService;
 import io.github.leonardopinheirolacerda.akari.domain.anime.service.AnimeTmdbFilePairingService;
 import io.github.leonardopinheirolacerda.akari.domain.anime.service.AnimeTmdbService;
-import io.github.leonardopinheirolacerda.akari.domain.ingestion.model.ResolvedEpisode;
-import io.github.leonardopinheirolacerda.akari.domain.ingestion.model.TmdbMappingCandidate;
 import io.github.leonardopinheirolacerda.akari.domain.ingestion.extractor.EpisodeNumberExtractor;
 import io.github.leonardopinheirolacerda.akari.domain.notification.service.NotificationService;
 import io.github.leonardopinheirolacerda.akari.domain.tmdb.client.dtos.TmdbEpisodeResponse;
-import io.github.leonardopinheirolacerda.akari.domain.tmdb.client.dtos.TmdbSeasonSummaryResponse;
 import io.github.leonardopinheirolacerda.akari.domain.tmdb.service.TmdbSearchService;
 import io.github.leonardopinheirolacerda.akari.domain.videofile.model.VideoFile;
 import io.github.leonardopinheirolacerda.akari.domain.videofile.service.VideoFileService;
@@ -33,8 +33,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
-import java.util.Set;
-import java.util.stream.Collectors;
 
 /**
  * Liga uma pasta automaticamente: busca/vincula AniList, resolve/vincula TMDB via anibridge, e
@@ -69,7 +67,7 @@ public class FolderAutoBindService {
     VideoFileService videoFileService;
 
     @Inject
-    IngestionTmdbMappingService ingestionTmdbMappingService;
+    AnibridgeResolutionService anibridgeResolutionService;
 
     @Inject
     AbsoluteEpisodeOffsetService absoluteEpisodeOffsetService;
@@ -188,7 +186,7 @@ public class FolderAutoBindService {
             return anime;
         }
 
-        final Optional<TmdbMappingCandidate> candidate = ingestionTmdbMappingService.resolveBestCandidate(
+        final Optional<TmdbMappingCandidate> candidate = anibridgeResolutionService.resolveBestCandidate(
                 anime.anilistId,
                 anime.malId,
                 anime.episodes
@@ -229,7 +227,7 @@ public class FolderAutoBindService {
 
     private void pairEpisodes(Integer folderId, String folderName, Anime anime) {
 
-        final Optional<TmdbMappingCandidate> candidate = ingestionTmdbMappingService.resolveBestCandidate(
+        final Optional<TmdbMappingCandidate> candidate = anibridgeResolutionService.resolveBestCandidate(
                 anime.anilistId,
                 anime.malId,
                 anime.episodes
@@ -239,11 +237,7 @@ public class FolderAutoBindService {
             return;
         }
 
-        final Optional<List<MappingSegment>> safeSegments = resolveSafeSegments(
-                candidate.get(),
-                folderId,
-                folderName
-        );
+        final Optional<List<MappingSegment>> safeSegments = anibridgeResolutionService.resolveSafeSegments(candidate.get());
 
         if (safeSegments.isEmpty()) {
             notificationService.notify(
@@ -272,7 +266,7 @@ public class FolderAutoBindService {
 
         final Optional<List<MappingSegment>> offsetSegments = absoluteOffsetCandidates.isEmpty()
                 ? Optional.empty()
-                : ingestionTmdbMappingService.restrictToFullSeasonCoverage(safeSegments.get(), anime.episodes);
+                : anibridgeResolutionService.restrictToFullSeasonCoverage(safeSegments.get(), anime.episodes);
 
         int paired = 0;
         boolean ambiguousAbsoluteNumbering = false;
@@ -284,7 +278,7 @@ public class FolderAutoBindService {
             boolean offsetNeededButIneligible = false;
 
             if (episodeNumber.isPresent()) {
-                resolved = ingestionTmdbMappingService.resolveEpisode(
+                resolved = anibridgeResolutionService.resolveEpisode(
                         safeSegments.get(),
                         episodeNumber.getAsInt()
                 );
@@ -292,7 +286,7 @@ public class FolderAutoBindService {
                 if (resolved.isEmpty() && !absoluteOffsetCandidates.isEmpty()) {
                     if (offsetSegments.isPresent()) {
                         for (Integer offsetCandidate : absoluteOffsetCandidates) {
-                            resolved = ingestionTmdbMappingService.resolveEpisode(
+                            resolved = anibridgeResolutionService.resolveEpisode(
                                     offsetSegments.get(),
                                     episodeNumber.getAsInt() - offsetCandidate
                             );
@@ -308,7 +302,7 @@ public class FolderAutoBindService {
             }
 
             if (resolved.isEmpty() && singleEpisodeFolder) {
-                resolved = ingestionTmdbMappingService.resolveEpisode(safeSegments.get(), 1);
+                resolved = anibridgeResolutionService.resolveEpisode(safeSegments.get(), 1);
             }
 
             if (resolved.isEmpty()) {
@@ -355,54 +349,6 @@ public class FolderAutoBindService {
                     folderId,
                     null);
         }
-    }
-
-    /**
-     * Resolve os segments seguros pra usar no pairing. Sem sobreposição de range entre eles
-     * ({@link IngestionTmdbMappingService#hasOverlap}), usa a lista crua direto — caso comum,
-     * sem ambiguidade, sem precisar confirmar temporada real no TMDB. Só paga essa chamada
-     * extra quando existe conflito de fato pra resolver, tentando descartar o(s) segment(s)
-     * residual(is)/errado(s) do anibridge que apontam pra uma temporada que o show nem tem mais.
-     * Só pra {@code TV}; filme não tem a noção de "temporada" que a validação resolve.
-     */
-    private Optional<List<MappingSegment>> resolveSafeSegments(TmdbMappingCandidate candidate,
-                                                               Integer folderId,
-                                                               String folderName) {
-
-        final List<MappingSegment> rawSegments = candidate.segments();
-
-        if (!ingestionTmdbMappingService.hasOverlap(rawSegments)) {
-            return Optional.of(rawSegments);
-        }
-
-        if (candidate.mediaType() != TmdbMediaType.TV) {
-            return Optional.empty();
-        }
-
-        final Set<Integer> existingSeasonNumbers;
-
-        try {
-            existingSeasonNumbers = RetryUtils.withRateLimitRetry(() -> tmdbSearchService
-                    .getTvDetails(candidate.tmdbId(), false)
-                    .seasons()
-                    .stream()
-                    .map(TmdbSeasonSummaryResponse::seasonNumber)
-                    .collect(Collectors.toSet()));
-
-        } catch (IntegrationException e) {
-            Log.warnf(e, "Busca das temporadas do TMDB %d falhou pra pasta %d (%s)", candidate.tmdbId(), folderId, folderName);
-            return Optional.empty();
-        }
-
-        final List<MappingSegment> validSegments = rawSegments.stream()
-                .filter(segment -> existingSeasonNumbers.contains(segment.seasonNumber))
-                .toList();
-
-        if (validSegments.isEmpty() || ingestionTmdbMappingService.hasOverlap(validSegments)) {
-            return Optional.empty();
-        }
-
-        return Optional.of(validSegments);
     }
 
     /**

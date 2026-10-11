@@ -1,6 +1,4 @@
-package io.github.leonardopinheirolacerda.akari.domain.ingestion.model;
-
-import io.github.leonardopinheirolacerda.akari.domain.anibridge.model.MappingSegment;
+package io.github.leonardopinheirolacerda.akari.domain.anibridge.model;
 
 /**
  * Resultado da conversão de um episódio do anime pro TMDB — temporada e episódio já resolvidos

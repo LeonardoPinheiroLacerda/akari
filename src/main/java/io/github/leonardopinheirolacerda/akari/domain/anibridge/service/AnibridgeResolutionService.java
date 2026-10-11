@@ -1,10 +1,15 @@
-package io.github.leonardopinheirolacerda.akari.domain.ingestion.service;
+package io.github.leonardopinheirolacerda.akari.domain.anibridge.service;
 
+import io.github.leonardopinheirolacerda.akari.api.dto.TmdbMediaType;
+import io.github.leonardopinheirolacerda.akari.domain.anibridge.model.CoverageResult;
 import io.github.leonardopinheirolacerda.akari.domain.anibridge.model.MappingSegment;
-import io.github.leonardopinheirolacerda.akari.domain.anibridge.service.AnibridgeMappingService;
-import io.github.leonardopinheirolacerda.akari.domain.ingestion.model.CoverageResult;
-import io.github.leonardopinheirolacerda.akari.domain.ingestion.model.ResolvedEpisode;
-import io.github.leonardopinheirolacerda.akari.domain.ingestion.model.TmdbMappingCandidate;
+import io.github.leonardopinheirolacerda.akari.domain.anibridge.model.ResolvedEpisode;
+import io.github.leonardopinheirolacerda.akari.domain.anibridge.model.TmdbMappingCandidate;
+import io.github.leonardopinheirolacerda.akari.domain.tmdb.client.dtos.TmdbSeasonSummaryResponse;
+import io.github.leonardopinheirolacerda.akari.domain.tmdb.service.TmdbSearchService;
+import io.github.leonardopinheirolacerda.akari.exceptions.IntegrationException;
+import io.github.leonardopinheirolacerda.akari.utils.RetryUtils;
+import io.quarkus.logging.Log;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import java.util.ArrayList;
@@ -17,16 +22,21 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * Escolhe o melhor candidato TMDB pra um anime a partir dos segments crus do anibridge, e
- * converte episódio do anime em episódio do TMDB. Essa lógica fica aqui, não em
- * {@code anibridge}, de propósito — o anibridge só devolve a lista crua de segments, quem
- * consome decide o que precisa a partir dela.
+ * Resolve ambiguidade e colisão nos segments crus do anibridge — escolhe o candidato TMDB
+ * confiável quando um anime bate em mais de um, converte episódio do anime em episódio do TMDB,
+ * e confirma no TMDB a validade de segments conflitantes. Fica à parte de
+ * {@link AnibridgeMappingService} só pra manter a separação "busca crua" (lá) vs. "julgamento
+ * sobre a qualidade do dado" (aqui) — quem consome recebe o resultado já resolvido, nunca a
+ * lista crua de segments conflitantes.
  */
 @ApplicationScoped
-public class IngestionTmdbMappingService {
+public class AnibridgeResolutionService {
 
     @Inject
     AnibridgeMappingService anibridgeMappingService;
+
+    @Inject
+    TmdbSearchService tmdbSearchService;
 
     /**
      * Escolhe o candidato TMDB pro anime — primeiro tenta pelo {@code anilistId}, cai pro
@@ -139,12 +149,11 @@ public class IngestionTmdbMappingService {
     }
 
     /**
-     * Restringe os segments (já livres de sobreposição — ver {@link #hasOverlap}) a uma
-     * única temporada cobrindo do episódio 1 até {@code totalEpisodes} — pré-condição pra confiar
-     * no fallback de numeração absoluta ({@link AbsoluteEpisodeOffsetService}): o offset assume
-     * que a pasta representa uma temporada isolada da franquia, então não se aplica quando o
-     * candidato legitimamente emenda mais de uma temporada sem sobreposição (ex.: um anime cujo
-     * mapeamento do anibridge cobre season 1 e season 2 em sequência, sem repetir episódio).
+     * Restringe os segments (já livres de sobreposição — ver {@link #hasOverlap}) a uma única
+     * temporada cobrindo do episódio 1 até {@code totalEpisodes} — confirma que o candidato
+     * representa uma temporada isolada e completa da franquia, sem emendar mais de uma
+     * temporada (ex.: um anime cujo mapeamento do anibridge cobre season 1 e season 2 em
+     * sequência, sem repetir episódio, não passa essa validação).
      *
      * @param segments segments já livres de sobreposição (ver {@link #hasOverlap})
      * @param totalEpisodes total de episódios da temporada segundo a AniList ({@code anime.episodes})
@@ -177,6 +186,55 @@ public class IngestionTmdbMappingService {
         }
 
         return Optional.of(segments);
+    }
+
+    /**
+     * Resolve os segments seguros pra usar no pairing. Sem sobreposição de range entre eles
+     * (ver {@link #hasOverlap}), usa a lista crua direto — caso comum, sem ambiguidade, sem
+     * precisar confirmar temporada real no TMDB. Só paga essa chamada extra quando existe
+     * conflito de fato pra resolver, tentando descartar o(s) segment(s) residual(is)/errado(s)
+     * do anibridge que apontam pra uma temporada que o show nem tem mais. Só pra {@code TV};
+     * filme não tem a noção de "temporada" que a validação resolve.
+     *
+     * @param candidate candidato escolhido (ver {@link #resolveBestCandidate})
+     * @return os segments seguros pra usar, ou vazio se o conflito não foi resolvido (continua
+     *         ambíguo mesmo depois de descartar temporadas inexistentes no TMDB)
+     */
+    public Optional<List<MappingSegment>> resolveSafeSegments(TmdbMappingCandidate candidate) {
+        final List<MappingSegment> rawSegments = candidate.segments();
+
+        if (!hasOverlap(rawSegments)) {
+            return Optional.of(rawSegments);
+        }
+
+        if (candidate.mediaType() != TmdbMediaType.TV) {
+            return Optional.empty();
+        }
+
+        final Set<Integer> existingSeasonNumbers;
+
+        try {
+            existingSeasonNumbers = RetryUtils.withRateLimitRetry(() -> tmdbSearchService
+                    .getTvDetails(candidate.tmdbId(), false)
+                    .seasons()
+                    .stream()
+                    .map(TmdbSeasonSummaryResponse::seasonNumber)
+                    .collect(Collectors.toSet()));
+
+        } catch (IntegrationException e) {
+            Log.warnf(e, "Busca das temporadas do TMDB %d falhou", candidate.tmdbId());
+            return Optional.empty();
+        }
+
+        final List<MappingSegment> validSegments = rawSegments.stream()
+                .filter(segment -> existingSeasonNumbers.contains(segment.seasonNumber))
+                .toList();
+
+        if (validSegments.isEmpty() || hasOverlap(validSegments)) {
+            return Optional.empty();
+        }
+
+        return Optional.of(validSegments);
     }
 
     /**

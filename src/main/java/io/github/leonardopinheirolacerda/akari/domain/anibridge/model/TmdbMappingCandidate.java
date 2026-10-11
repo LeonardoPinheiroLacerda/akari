@@ -1,14 +1,12 @@
-package io.github.leonardopinheirolacerda.akari.domain.ingestion.model;
+package io.github.leonardopinheirolacerda.akari.domain.anibridge.model;
 
 import io.github.leonardopinheirolacerda.akari.api.dto.TmdbMediaType;
-import io.github.leonardopinheirolacerda.akari.domain.anibridge.model.MappingSegment;
-import io.github.leonardopinheirolacerda.akari.domain.ingestion.service.IngestionTmdbMappingService;
 import java.util.List;
 
 /**
  * Um candidato de binding TMDB pra um anime, com todos os segments do anibridge que apontam pra
  * esse {@code tmdbId}/{@code mediaType}. Quando um anime bate em mais de um candidato (filme e
- * série simultaneamente, por exemplo), o {@link IngestionTmdbMappingService} escolhe o que não é
+ * série simultaneamente, por exemplo), o {@code AnibridgeResolutionService} escolhe o que não é
  * suspeito (sem sobreposição interna, sem cobrir mais episódios do que o anime tem de verdade) —
  * cobertura de episódios só desempata entre candidatos do mesmo nível.
  *
