@@ -20,21 +20,3 @@ services:
       retries: 10
 
     restart: unless-stopped
-
-  rclone:
-    image: rclone/rclone:1.75.1
-
-    command: rcd --rc-no-auth --rc-addr 0.0.0.0:5572 --log-file /var/log/rclone/rclone.log
-
-    ports:
-      - "5572:5572"
-
-    volumes:
-      - ./data/rclone-logs:/var/log/rclone
-      # Monta no mesmo path absoluto do host: o rclone roda no container, mas o
-      # Quarkus (cache.dir) roda direto no host — os dois precisam enxergar o
-      # arquivo baixado pelo mesmo caminho, já que a app lê o arquivo (ffprobe,
-      # playback) fora do container.
-      - ./data/cache-dir:/Users/leonardopinheirolacerda/akari/data/cache-dir
-
-    restart: unless-stopped
