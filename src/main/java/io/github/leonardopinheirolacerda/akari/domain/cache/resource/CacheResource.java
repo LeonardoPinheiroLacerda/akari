@@ -4,26 +4,28 @@ import io.github.leonardopinheirolacerda.akari.api.CacheApi;
 import io.github.leonardopinheirolacerda.akari.api.dto.CacheItem;
 import io.github.leonardopinheirolacerda.akari.api.dto.CacheItemPage;
 import io.github.leonardopinheirolacerda.akari.api.dto.CacheQueueRequest;
-import jakarta.ws.rs.WebApplicationException;
-import jakarta.ws.rs.core.Response;
+import io.github.leonardopinheirolacerda.akari.domain.cache.service.CacheService;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 
+@ApplicationScoped
 public class CacheResource implements CacheApi {
+
+    @Inject
+    CacheService cacheService;
 
     @Override
     public CacheItemPage listCaches(Integer page, Integer size) {
-        throw new WebApplicationException(Response.Status.NOT_IMPLEMENTED);
+        return cacheService.listCaches(page, size);
     }
 
     @Override
     public CacheItemPage listPendingCaches(Integer page, Integer size) {
-        throw new WebApplicationException(Response.Status.NOT_IMPLEMENTED);
+        return cacheService.listPendingCaches(page, size);
     }
 
-    // 400 BUSINESS_RULE_VIOLATION: arquivo já QUEUED, DOWNLOADING ou COMPLETED (FAILED pode ser
-    // reenfileirado), ou arquivo de provider LOCAL (lido direto do disco, sem cache).
-    // 404: fileId inexistente no catalog.
     @Override
     public CacheItem queueCacheDownload(CacheQueueRequest cacheQueueRequest) {
-        throw new WebApplicationException(Response.Status.NOT_IMPLEMENTED);
+        return cacheService.queueCacheDownload(cacheQueueRequest);
     }
 }
