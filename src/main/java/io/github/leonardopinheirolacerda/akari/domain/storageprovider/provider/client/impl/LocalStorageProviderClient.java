@@ -13,14 +13,31 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Stream;
 
+/**
+ * {@link StorageProviderClient} pra um provider servido direto do filesystem local — sem
+ * rclone, sem rede, sem cache: todo arquivo já está acessível pelo path real sob {@code root}.
+ */
 public class LocalStorageProviderClient implements StorageProviderClient {
 
     private final Path root;
 
+    /**
+     * Cria o client a partir da config do provider.
+     *
+     * @param config config do provider; deve conter a chave {@code "rootPath"} com o diretório
+     *               raiz absoluto no filesystem local
+     */
     public LocalStorageProviderClient(Map<String, String> config) {
         this.root = Path.of(config.get("rootPath"));
     }
 
+    /**
+     * Lista os itens diretamente filhos do path, sem descer em subdiretórios.
+     *
+     * @param path path relativo a {@code root}
+     * @return os itens filhos; lista vazia se o diretório não existir
+     * @throws UncheckedIOException se a listagem do diretório falhar por I/O
+     */
     @Override
     public List<StorageItem> listChildren(String path) {
         final Path dir = root.resolve(path);
@@ -40,6 +57,12 @@ public class LocalStorageProviderClient implements StorageProviderClient {
         }
     }
 
+    /**
+     * Lista só os subdiretórios diretamente filhos do path.
+     *
+     * @param path path relativo a {@code root}
+     * @return os itens filhos que são diretórios
+     */
     @Override
     public List<StorageItem> listChildDirectories(String path) {
         return listChildren(path)
@@ -48,6 +71,12 @@ public class LocalStorageProviderClient implements StorageProviderClient {
                 .toList();
     }
 
+    /**
+     * Lista só os arquivos de vídeo diretamente filhos do path, pelo MIME type.
+     *
+     * @param path path relativo a {@code root}
+     * @return os itens filhos cujo {@code mimeType} começa com {@code "video/"}
+     */
     @Override
     public List<StorageItem> listChildVideos(String path) {
         return listChildren(path)
@@ -57,6 +86,14 @@ public class LocalStorageProviderClient implements StorageProviderClient {
                 .toList();
     }
 
+    /**
+     * Lista toda a árvore do path, descendo recursivamente em subdiretórios.
+     *
+     * @param path path relativo a {@code root}
+     * @return todos os itens da subárvore (sem incluir o próprio {@code path}); lista vazia se
+     *         o diretório não existir
+     * @throws UncheckedIOException se a varredura da árvore falhar por I/O
+     */
     @Override
     public List<StorageItem> listTree(String path) {
         final Path start = root.resolve(path);
@@ -78,13 +115,27 @@ public class LocalStorageProviderClient implements StorageProviderClient {
         }
     }
 
-    /** Provider local não usa cache — nada a baixar. */
+    /**
+     * Nunca baixa nada: provider local não usa cache, o arquivo já está acessível direto pelo
+     * path real.
+     *
+     * @param remoteFilePath ignorado
+     * @param localDestinationDir ignorado
+     * @param localFileName ignorado
+     * @return nunca retorna
+     * @throws UnsupportedOperationException sempre
+     */
     @Override
     public Long downloadFile(String remoteFilePath, String localDestinationDir, String localFileName) {
         Log.warnf("Download de %s pedido num provider local (%s) — não suportado", remoteFilePath, root);
         throw new UnsupportedOperationException("Provider local não usa cache; download não se aplica");
     }
 
+    /**
+     * Testa a conexão confirmando que {@code root} existe e é um diretório.
+     *
+     * @return {@code true} se {@code root} for um diretório acessível
+     */
     @Override
     public boolean checkConnection() {
         final boolean exists = Files.isDirectory(root);
@@ -94,6 +145,12 @@ public class LocalStorageProviderClient implements StorageProviderClient {
         return exists;
     }
 
+    /**
+     * Resolve o path real em disco de um arquivo, sob {@code root}.
+     *
+     * @param relativePath path relativo a {@code root}
+     * @return o path real, se existir como arquivo regular; vazio caso contrário
+     */
     @Override
     public Optional<Path> resolveLocalPath(String relativePath) {
         Log.infof("Resolvendo path local \"%s\" sob %s", relativePath, root);

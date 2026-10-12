@@ -7,6 +7,32 @@ import java.util.List;
 
 /**
  * Envelope de {@code GET /3/movie/{id}} — reflete integralmente o body devolvido pelo TMDB v3.
+ *
+ * @param adult se é conteúdo adulto
+ * @param backdropPath path relativo da imagem de fundo
+ * @param budget orçamento de produção em dólares
+ * @param genres gêneros do filme
+ * @param homepage site oficial
+ * @param id id do filme no TMDB
+ * @param imdbId id correspondente no IMDb
+ * @param originCountry países de origem (códigos ISO 3166-1)
+ * @param originalLanguage idioma original (código ISO 639-1)
+ * @param originalTitle título no idioma original
+ * @param overview sinopse
+ * @param popularity métrica de popularidade do TMDB
+ * @param posterPath path relativo do poster
+ * @param productionCompanies produtoras envolvidas
+ * @param productionCountries países de produção
+ * @param releaseDate data de lançamento em ISO-8601
+ * @param revenue bilheteria em dólares
+ * @param runtime duração em minutos
+ * @param spokenLanguages idiomas falados no filme
+ * @param status status de lançamento (ex.: {@code "Released"})
+ * @param tagline frase de efeito do filme
+ * @param title título no idioma solicitado
+ * @param video se é um vídeo (não um filme de verdade) — campo do TMDB, quase sempre {@code false}
+ * @param voteAverage nota média dos usuários do TMDB
+ * @param voteCount total de votos
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record TmdbMovieDetailsResponse(

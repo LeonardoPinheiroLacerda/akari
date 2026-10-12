@@ -7,6 +7,11 @@ import io.github.leonardopinheirolacerda.akari.model.PageResult;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
 
+/**
+ * Converte {@link MediaFolder} (model) para os DTOs gerados do contrato ({@code
+ * MediaFolderResponse}, {@code MediaFolderPage}), resolvendo os ids das associações lazy
+ * ({@code storageProvider}, {@code parent}).
+ */
 @Mapper(componentModel = "cdi")
 public interface MediaFolderMapper {
 

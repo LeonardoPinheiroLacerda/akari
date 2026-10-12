@@ -26,6 +26,15 @@ import jakarta.ws.rs.ProcessingException;
 import jakarta.ws.rs.WebApplicationException;
 import org.eclipse.microprofile.rest.client.inject.RestClient;
 
+/**
+ * Busca e detalhes de filme/série no TMDB, cache-first via {@link IntegrationCache} (TTL de
+ * {@code tmdb.cache.ttl}).
+ *
+ * <p>Todo método público é {@code @Transactional} mesmo sendo leitura: o cache-aside
+ * ({@link CacheUtils#resolve}) grava em {@link IntegrationCache} como efeito colateral de um
+ * cache miss. {@code language} nulo/em branco cai pra {@code tmdb.default-language}; busca usa
+ * {@code tmdb.include-adult} pra decidir se inclui conteúdo adulto.
+ */
 @ApplicationScoped
 public class TmdbSearchService {
 
@@ -44,6 +53,17 @@ public class TmdbSearchService {
     @Inject
     ObjectMapper objectMapper;
 
+    /**
+     * Busca paginada de filme no TMDB, cache-first.
+     *
+     * @param query termo de busca
+     * @param page página desejada, 0-based
+     * @param language idioma das traduções; {@code null}/em branco usa
+     *                  {@code tmdb.default-language}
+     * @param forceRefresh se {@code true}, ignora o cache e busca de novo no TMDB
+     * @return a página de resultados encontrados
+     * @throws IntegrationException se a chamada ao TMDB falhar
+     */
     @Transactional
     public TmdbMovieSearchResultPage searchMovies(String query, Integer page, String language, Boolean forceRefresh) {
         final boolean includeAdult = settingService.isTmdbIncludeAdult();
@@ -59,6 +79,17 @@ public class TmdbSearchService {
         );
     }
 
+    /**
+     * Busca paginada de série no TMDB, cache-first.
+     *
+     * @param query termo de busca
+     * @param page página desejada, 0-based
+     * @param language idioma das traduções; {@code null}/em branco usa
+     *                  {@code tmdb.default-language}
+     * @param forceRefresh se {@code true}, ignora o cache e busca de novo no TMDB
+     * @return a página de resultados encontrados
+     * @throws IntegrationException se a chamada ao TMDB falhar
+     */
     @Transactional
     public TmdbTvSearchResultPage searchTv(String query, Integer page, String language, Boolean forceRefresh) {
         final boolean includeAdult = settingService.isTmdbIncludeAdult();
@@ -74,6 +105,15 @@ public class TmdbSearchService {
         );
     }
 
+    /**
+     * Lê os detalhes de um filme no TMDB, cache-first.
+     *
+     * @param movieId id do filme no TMDB
+     * @param forceRefresh se {@code true}, ignora o cache e busca de novo no TMDB
+     * @return os detalhes do filme
+     * @throws ResourceNotFoundException se o {@code movieId} não existir no TMDB
+     * @throws IntegrationException se a chamada ao TMDB falhar por outro motivo
+     */
     @Transactional
     public TmdbMovieDetailsResponse getMovieDetails(Integer movieId, Boolean forceRefresh) {
         final String cacheKey = CacheUtils.buildKey("movie", String.valueOf(movieId));
@@ -87,6 +127,15 @@ public class TmdbSearchService {
         );
     }
 
+    /**
+     * Lê as imagens disponíveis (posters/backdrops) de um filme no TMDB, cache-first.
+     *
+     * @param movieId id do filme no TMDB
+     * @param forceRefresh se {@code true}, ignora o cache e busca de novo no TMDB
+     * @return as imagens do filme
+     * @throws ResourceNotFoundException se o {@code movieId} não existir no TMDB
+     * @throws IntegrationException se a chamada ao TMDB falhar por outro motivo
+     */
     @Transactional
     public TmdbImagesResponse getMovieImages(Integer movieId, Boolean forceRefresh) {
         final String cacheKey = CacheUtils.buildKey("movie", "images", String.valueOf(movieId));
@@ -100,6 +149,15 @@ public class TmdbSearchService {
         );
     }
 
+    /**
+     * Lê as traduções de título/sinopse disponíveis de um filme no TMDB, cache-first.
+     *
+     * @param movieId id do filme no TMDB
+     * @param forceRefresh se {@code true}, ignora o cache e busca de novo no TMDB
+     * @return as traduções do filme
+     * @throws ResourceNotFoundException se o {@code movieId} não existir no TMDB
+     * @throws IntegrationException se a chamada ao TMDB falhar por outro motivo
+     */
     @Transactional
     public TmdbTranslationsResponse getMovieTranslations(Integer movieId, Boolean forceRefresh) {
         final String cacheKey = CacheUtils.buildKey("movie", "translations", String.valueOf(movieId));
@@ -113,6 +171,15 @@ public class TmdbSearchService {
         );
     }
 
+    /**
+     * Lê os detalhes de uma série no TMDB, cache-first.
+     *
+     * @param seriesId id da série no TMDB
+     * @param forceRefresh se {@code true}, ignora o cache e busca de novo no TMDB
+     * @return os detalhes da série
+     * @throws ResourceNotFoundException se o {@code seriesId} não existir no TMDB
+     * @throws IntegrationException se a chamada ao TMDB falhar por outro motivo
+     */
     @Transactional
     public TmdbTvDetailsResponse getTvDetails(Integer seriesId, Boolean forceRefresh) {
         final String cacheKey = CacheUtils.buildKey("tv", String.valueOf(seriesId));
@@ -126,6 +193,15 @@ public class TmdbSearchService {
         );
     }
 
+    /**
+     * Lê as imagens disponíveis (posters/backdrops) de uma série no TMDB, cache-first.
+     *
+     * @param seriesId id da série no TMDB
+     * @param forceRefresh se {@code true}, ignora o cache e busca de novo no TMDB
+     * @return as imagens da série
+     * @throws ResourceNotFoundException se o {@code seriesId} não existir no TMDB
+     * @throws IntegrationException se a chamada ao TMDB falhar por outro motivo
+     */
     @Transactional
     public TmdbImagesResponse getTvImages(Integer seriesId, Boolean forceRefresh) {
         final String cacheKey = CacheUtils.buildKey("tv", "images", String.valueOf(seriesId));
@@ -139,6 +215,15 @@ public class TmdbSearchService {
         );
     }
 
+    /**
+     * Lê as traduções de título/sinopse disponíveis de uma série no TMDB, cache-first.
+     *
+     * @param seriesId id da série no TMDB
+     * @param forceRefresh se {@code true}, ignora o cache e busca de novo no TMDB
+     * @return as traduções da série
+     * @throws ResourceNotFoundException se o {@code seriesId} não existir no TMDB
+     * @throws IntegrationException se a chamada ao TMDB falhar por outro motivo
+     */
     @Transactional
     public TmdbTranslationsResponse getTvTranslations(Integer seriesId, Boolean forceRefresh) {
         final String cacheKey = CacheUtils.buildKey("tv", "translations", String.valueOf(seriesId));
@@ -152,6 +237,17 @@ public class TmdbSearchService {
         );
     }
 
+    /**
+     * Lê os episódios de uma temporada de série no TMDB, cache-first.
+     *
+     * @param seriesId id da série no TMDB
+     * @param seasonNumber número da temporada
+     * @param forceRefresh se {@code true}, ignora o cache e busca de novo no TMDB
+     * @return a temporada com seus episódios
+     * @throws ResourceNotFoundException se a série ou a temporada informada não existirem no
+     *         TMDB
+     * @throws IntegrationException se a chamada ao TMDB falhar por outro motivo
+     */
     @Transactional
     public TmdbSeasonResponse getSeason(Integer seriesId, Integer seasonNumber, Boolean forceRefresh) {
         final String cacheKey = CacheUtils.buildKey("tv", "season", String.valueOf(seriesId), String.valueOf(seasonNumber));

@@ -17,6 +17,7 @@ import io.github.leonardopinheirolacerda.akari.domain.storageprovider.provider.m
 import io.github.leonardopinheirolacerda.akari.domain.storageprovider.service.StorageProviderService;
 import io.github.leonardopinheirolacerda.akari.exceptions.BusinessRuleException;
 import io.github.leonardopinheirolacerda.akari.exceptions.IntegrationException;
+import io.github.leonardopinheirolacerda.akari.exceptions.ResourceNotFoundException;
 import io.github.leonardopinheirolacerda.akari.utils.DirectoryUtils;
 import io.github.leonardopinheirolacerda.akari.utils.FileNameUtils;
 import io.github.leonardopinheirolacerda.akari.utils.ThreadUtils;
@@ -76,6 +77,20 @@ public class IngestionService {
     @Inject
     MediaFolderService mediaFolderService;
 
+    /**
+     * Valida as pré-condições síncronas e dispara a reconciliação de um subtree em background.
+     *
+     * <p>Se já houver uma ingestão em andamento pro mesmo {@code (providerId, rootPath)}
+     * (controlado via {@link IngestionRunRegistry}), devolve {@code STARTED} sem iniciar uma
+     * nova thread — evita reconciliações concorrentes sobre o mesmo subtree.
+     *
+     * @param providerId id do storage provider a ingerir
+     * @param ingestSubtreeRequest subtree (rootPath) e tipo de mídia a ingerir
+     * @return status {@code STARTED}
+     * @throws ResourceNotFoundException se o {@code providerId} não existir
+     * @throws BusinessRuleException se o TMDB não estiver configurado (preferência
+     *         {@code tmdb.api-key})
+     */
     public IngestionStartedResponse ingestProviderSubtree(Integer providerId, IngestSubtreeRequest ingestSubtreeRequest) {
         final StorageProvider storageProvider = storageProviderService.findOrThrow(providerId);
 
@@ -100,6 +115,16 @@ public class IngestionService {
         return new IngestionStartedResponse().status(IngestionStartedResponse.StatusEnum.STARTED);
     }
 
+    /**
+     * Remove do catalog tudo que foi ingerido sob um subtree do provider.
+     *
+     * <p>Não checa se o provider existe nem se o subtree tem algo ingerido — delega direto pro
+     * {@link FolderRemovalService}, que não faz nada se não achar nenhuma pasta correspondente.
+     *
+     * @param providerId id do storage provider
+     * @param rootPath subtree a remover; {@code null} vira string vazia (árvore inteira do
+     *                 provider)
+     */
     @Transactional
     public void removeIngestedSubtree(Integer providerId, String rootPath) {
         final String normalizedRootPath = Objects.requireNonNullElse(rootPath, "");
@@ -109,6 +134,19 @@ public class IngestionService {
         folderRemovalService.removeSubtree(providerId, normalizedRootPath);
     }
 
+    /**
+     * Lista a árvore de pastas remotas do provider a partir de {@code rootPath}, marcando quais
+     * já existem no catalog (via {@code MediaFolderService.findSubtree}).
+     *
+     * @param providerId id do storage provider
+     * @param rootPath subtree a listar; {@code null} vira string vazia (árvore inteira do
+     *                 provider) — se não vazio, precisa existir de fato no provider
+     * @return a árvore de pastas remotas, cada nó marcando se já foi ingerido
+     * @throws ResourceNotFoundException se o {@code providerId} não existir
+     * @throws BusinessRuleException se {@code rootPath} não existir no provider
+     * @throws IntegrationException se a listagem no provider remoto falhar (rclone rcd fora do
+     *         ar, credenciais inválidas, timeout)
+     */
     public AvailableFolderNode listAvailableFolders(Integer providerId, String rootPath) {
         final StorageProvider storageProvider = storageProviderService.findOrThrow(providerId);
         final String normalizedRootPath = Objects.requireNonNullElse(rootPath, "");

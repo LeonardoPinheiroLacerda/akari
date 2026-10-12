@@ -6,6 +6,10 @@ import org.mapstruct.Mapper;
 
 import java.util.List;
 
+/**
+ * Converte o item cru da listagem do rclone ({@link RcloneItemResponse}) pro model de domínio
+ * {@link StorageItem}.
+ */
 @Mapper(componentModel = "cdi")
 public interface StorageItemMapper {
 

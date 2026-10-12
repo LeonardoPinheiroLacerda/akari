@@ -18,6 +18,11 @@ import java.util.List;
 import java.util.Optional;
 import org.hibernate.annotations.CreationTimestamp;
 
+/**
+ * Um arquivo de vídeo do catalog, persistido na tabela {@code video_file}, sempre abrigado por
+ * uma {@link MediaFolder}. É sobre essa entidade que os domínios {@code cache} e
+ * {@code mediaprobe} resolvem onde o arquivo está disponível em disco.
+ */
 @Entity
 @Table(name = "video_file")
 public class VideoFile extends PanacheEntityBase {
@@ -32,6 +37,7 @@ public class VideoFile extends PanacheEntityBase {
 
     public String name;
 
+    /** Caminho completo do arquivo dentro do provider (pasta + nome). */
     public String path;
 
     @Column(name = "size_bytes")
@@ -43,6 +49,12 @@ public class VideoFile extends PanacheEntityBase {
     @Column(name = "created_at", updatable = false)
     public OffsetDateTime createdAt;
 
+    /**
+     * Busca um arquivo pelo id.
+     *
+     * @param id id do arquivo
+     * @return o arquivo; vazio se não existir
+     */
     public static Optional<VideoFile> find(Integer id) {
         return VideoFile
                 .find("id = ?1", id)
@@ -62,6 +74,14 @@ public class VideoFile extends PanacheEntityBase {
                 .list();
     }
 
+    /**
+     * Pagina os arquivos de uma pasta.
+     *
+     * @param folderId id da pasta no catalog
+     * @param page página desejada, 0-based
+     * @param size tamanho da página
+     * @return página de arquivos da pasta; vazia se a pasta não existir ou não tiver arquivos
+     */
     public static PageResult<VideoFile> findPage(Integer folderId, Integer page, Integer size) {
         final PanacheQuery<VideoFile> panacheQuery = VideoFile
                 .find("folder.id = ?1", folderId)

@@ -9,17 +9,40 @@ import org.mapstruct.Mapping;
 
 import java.util.List;
 
+/**
+ * Converte a resposta crua da AniList ({@link AnilistMediaResponse}) pro DTO de resposta do
+ * contrato ({@code AnilistMediaSummary}).
+ */
 @Mapper(componentModel = "cdi")
 public interface AnilistMapper {
 
+    /**
+     * Converte um item de mídia da AniList.
+     *
+     * @param media item cru retornado pela query GraphQL
+     * @return o resumo convertido, com {@code format}/{@code season} resolvidos via
+     *         {@link #toFormat}/{@link #toSeason}
+     */
     @Mapping(source = "id", target = "anilistId")
     @Mapping(source = "idMal", target = "malId")
     AnilistMediaSummary toSummary(AnilistMediaResponse media);
 
+    /**
+     * Converte uma lista de itens de mídia da AniList.
+     *
+     * @param media itens crus retornados pela query GraphQL
+     * @return os resumos convertidos, na mesma ordem
+     */
     List<AnilistMediaSummary> toSummaryList(List<AnilistMediaResponse> media);
 
-    // format/season chegam como string crua da AniList; valor fora do enum vira UNKNOWN em vez
-    // de estourar — é exatamente o que o UNKNOWN da whitelist existe pra cobrir.
+    /**
+     * Converte o formato cru da AniList pro enum do contrato.
+     *
+     * @param format valor cru retornado pela AniList (string livre)
+     * @return o enum correspondente; {@code null} se {@code format} for {@code null};
+     *         {@link AnilistFormat#UNKNOWN} se o valor não bater com nenhuma constante
+     *         conhecida — a whitelist existe exatamente pra cobrir esse caso sem estourar
+     */
     default AnilistFormat toFormat(String format) {
         if (format == null) {
             return null;
@@ -31,6 +54,14 @@ public interface AnilistMapper {
         }
     }
 
+    /**
+     * Converte a temporada crua da AniList pro enum do contrato.
+     *
+     * @param season valor cru retornado pela AniList (string livre)
+     * @return o enum correspondente; {@code null} se {@code season} for {@code null};
+     *         {@link AnilistSeason#UNKNOWN} se o valor não bater com nenhuma constante
+     *         conhecida — a whitelist existe exatamente pra cobrir esse caso sem estourar
+     */
     default AnilistSeason toSeason(String season) {
         if (season == null) {
             return null;

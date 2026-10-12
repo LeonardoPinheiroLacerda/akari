@@ -25,6 +25,14 @@ import jakarta.ws.rs.WebApplicationException;
 import java.util.Map;
 import org.eclipse.microprofile.rest.client.inject.RestClient;
 
+/**
+ * Busca de anime na AniList, cache-first via {@link IntegrationCache} (TTL de
+ * {@code anilist.cache.ttl}).
+ *
+ * <p>Os dois métodos públicos são {@code @Transactional} mesmo sendo leitura: o cache-aside
+ * ({@link CacheUtils#resolve}) grava em {@link IntegrationCache} como efeito colateral de um
+ * cache miss.
+ */
 @ApplicationScoped
 public class AnilistSearchService {
 
@@ -41,6 +49,16 @@ public class AnilistSearchService {
     @Inject
     ObjectMapper objectMapper;
 
+    /**
+     * Busca paginada de anime na AniList, cache-first.
+     *
+     * @param query termo de busca
+     * @param page página desejada, 0-based
+     * @param size tamanho da página
+     * @param forceRefresh se {@code true}, ignora o cache e busca de novo na AniList
+     * @return a página de resumos encontrados
+     * @throws IntegrationException se a chamada à AniList falhar
+     */
     @Transactional
     public AnilistMediaSummaryPage search(String query, Integer page, Integer size, Boolean forceRefresh) {
         final String cacheKey = CacheUtils.buildKey(query, String.valueOf(page), String.valueOf(size));
@@ -54,6 +72,15 @@ public class AnilistSearchService {
         );
     }
 
+    /**
+     * Busca um anime na AniList por id, cache-first.
+     *
+     * @param anilistId id do anime na AniList
+     * @param forceRefresh se {@code true}, ignora o cache e busca de novo na AniList
+     * @return a resposta crua da AniList pro id informado
+     * @throws ResourceNotFoundException se o id não existir na AniList
+     * @throws IntegrationException se a chamada à AniList falhar por outro motivo
+     */
     @Transactional
     public AnilistMediaResponse findById(Integer anilistId, Boolean forceRefresh) {
         final String cacheKey = CacheUtils.buildKey("media", String.valueOf(anilistId));

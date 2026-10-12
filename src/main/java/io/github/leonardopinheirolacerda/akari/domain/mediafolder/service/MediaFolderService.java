@@ -22,6 +22,10 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+/**
+ * Pastas do catalog: CRUD administrado pela API e os métodos de suporte usados pela ingestão
+ * (resolução de pai por path, criação em lote, remoção em lote por raízes do subtree).
+ */
 @ApplicationScoped
 public class MediaFolderService {
 
@@ -31,7 +35,14 @@ public class MediaFolderService {
     @Inject
     StorageProviderService storageProviderService;
 
-
+    /**
+     * Cria uma nova pasta, resolvendo o pai automaticamente a partir do {@code path}.
+     *
+     * @param mediaFolderRequest dados da pasta a criar
+     * @return a pasta recém-criada
+     * @throws ResourceNotFoundException se o {@code storageProviderId} informado não existir
+     * @throws BusinessRuleException se já existir uma pasta com o mesmo provider e path
+     */
     @Transactional
     public MediaFolderResponse createFolder(MediaFolderRequest mediaFolderRequest) {
         Log.infof(
@@ -78,6 +89,16 @@ public class MediaFolderService {
 
     }
 
+    /**
+     * Substitui os campos mutáveis de uma pasta existente, redescobrindo o pai a partir do
+     * novo {@code path}.
+     *
+     * @param folderId id da pasta a atualizar
+     * @param mediaFolderRequest novos dados da pasta
+     * @return a pasta atualizada
+     * @throws ResourceNotFoundException se o {@code folderId} não existir
+     * @throws BusinessRuleException se outra pasta já existir com o mesmo provider e novo path
+     */
     @Transactional
     public MediaFolderResponse updateFolder(Integer folderId, MediaFolderRequest mediaFolderRequest) {
         Log.infof("Atualizando pasta %d", folderId);
@@ -118,6 +139,12 @@ public class MediaFolderService {
         return mediaFolderMapper.toResponse(folder);
     }
 
+    /**
+     * Remove uma pasta — descendentes e arquivos abrigados descem pela cascata do DDL.
+     *
+     * @param folderId id da pasta a remover
+     * @throws ResourceNotFoundException se o {@code folderId} não existir
+     */
     @Transactional
     public void deleteFolder(Integer folderId) {
         Log.infof("Removendo pasta %d", folderId);
@@ -129,12 +156,32 @@ public class MediaFolderService {
         Log.infof("Pasta %d removida com sucesso", folderId);
     }
 
+    /**
+     * Busca uma pasta por id.
+     *
+     * @param folderId id da pasta
+     * @return a pasta
+     * @throws ResourceNotFoundException se o {@code folderId} não existir
+     */
     public MediaFolderResponse getFolder(Integer folderId) {
         final MediaFolder folder = findOrThrow(folderId);
 
         return mediaFolderMapper.toResponse(folder);
     }
 
+    /**
+     * Pagina as pastas, aplicando os filtros informados como AND.
+     *
+     * @param page página desejada, 0-based
+     * @param size tamanho da página
+     * @param name substring case-insensitive do nome; {@code null} não filtra
+     * @param mediaType tipo de mídia; {@code null} não filtra
+     * @param storageProviderId id do provider; {@code null} não filtra
+     * @param parentId id da pasta pai; {@code null} não filtra
+     * @param hasFiles filtra por ter ou não arquivos diretos; {@code null} não filtra
+     * @param sort specs {@code campo[:asc|desc]} na whitelist {@code name}/{@code createdAt}
+     * @return página de pastas que atendem aos filtros
+     */
     public MediaFolderPage listFolders(
             Integer page,
             Integer size,
@@ -161,6 +208,13 @@ public class MediaFolderService {
         return mediaFolderMapper.toPage(pageResult);
     }
 
+    /**
+     * Busca uma pasta por id, ou lança se não existir.
+     *
+     * @param folderId id da pasta
+     * @return a pasta
+     * @throws ResourceNotFoundException se o {@code folderId} não existir
+     */
     public MediaFolder findOrThrow(Integer folderId) {
         return MediaFolder.find(folderId)
                 .orElseThrow(() -> {

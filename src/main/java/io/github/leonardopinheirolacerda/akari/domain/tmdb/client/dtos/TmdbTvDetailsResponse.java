@@ -11,6 +11,39 @@ import java.util.List;
  * <p>O array {@code seasons} vem como sumário ({@link TmdbSeasonSummaryResponse}) — para
  * episódios completos é preciso uma chamada adicional a {@code /3/tv/{id}/season/{n}} por
  * temporada.
+ *
+ * @param adult se é conteúdo adulto
+ * @param backdropPath path relativo da imagem de fundo
+ * @param createdBy criadores da série
+ * @param episodeRunTime durações típicas de episódio em minutos
+ * @param firstAirDate data de estreia em ISO-8601
+ * @param genres gêneros da série
+ * @param homepage site oficial
+ * @param id id da série no TMDB
+ * @param inProduction se a série ainda está em produção
+ * @param languages idiomas falados na série (códigos ISO 639-1)
+ * @param lastAirDate data do último episódio exibido em ISO-8601
+ * @param lastEpisodeToAir sumário do último episódio já exibido
+ * @param name nome no idioma solicitado
+ * @param nextEpisodeToAir sumário do próximo episódio a exibir; {@code null} se não há previsão
+ * @param networks redes que exibem a série
+ * @param numberOfEpisodes total de episódios já lançados
+ * @param numberOfSeasons total de temporadas já lançadas
+ * @param originCountry países de origem (códigos ISO 3166-1)
+ * @param originalLanguage idioma original (código ISO 639-1)
+ * @param originalName nome no idioma original
+ * @param overview sinopse
+ * @param popularity métrica de popularidade do TMDB
+ * @param posterPath path relativo do poster
+ * @param productionCompanies produtoras envolvidas
+ * @param productionCountries países de produção
+ * @param seasons sumário de cada temporada (sem os episódios)
+ * @param spokenLanguages idiomas falados na série
+ * @param status status de produção (ex.: {@code "Ended"}, {@code "Returning Series"})
+ * @param tagline frase de efeito da série
+ * @param type tipo de série no TMDB (ex.: {@code "Scripted"})
+ * @param voteAverage nota média dos usuários do TMDB
+ * @param voteCount total de votos
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record TmdbTvDetailsResponse(

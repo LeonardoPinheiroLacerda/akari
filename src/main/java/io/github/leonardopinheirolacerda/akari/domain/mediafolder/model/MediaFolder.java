@@ -27,6 +27,11 @@ import java.util.Map;
 import java.util.Optional;
 import org.hibernate.annotations.CreationTimestamp;
 
+/**
+ * Uma pasta do catalog (física ou lógica) dentro de um {@link StorageProvider}, persistida na
+ * tabela {@code media_folder}. Forma uma árvore via {@code parent} — descendentes e arquivos
+ * abrigados descem em cascata (DDL) quando a pasta é removida.
+ */
 @Entity
 @Table(name = "media_folder")
 public class MediaFolder extends PanacheEntityBase {
@@ -39,6 +44,7 @@ public class MediaFolder extends PanacheEntityBase {
     @JoinColumn(name = "storage_provider_id")
     public StorageProvider storageProvider;
 
+    /** Pasta pai, derivada do {@code path} sem o último segmento; {@code null} se for raiz. */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "parent_id")
     public MediaFolder parent;
@@ -49,6 +55,7 @@ public class MediaFolder extends PanacheEntityBase {
 
     public String name;
 
+    /** Caminho completo da pasta dentro do provider. */
     public String path;
 
     @CreationTimestamp
@@ -59,12 +66,25 @@ public class MediaFolder extends PanacheEntityBase {
     @OneToMany(mappedBy = "folder", fetch = FetchType.LAZY)
     public List<VideoFile> videoFiles = new ArrayList<>();
 
+    /**
+     * Busca uma pasta pelo id.
+     *
+     * @param id id da pasta
+     * @return a pasta; vazio se não existir
+     */
     public static Optional<MediaFolder> find(Integer id) {
         return MediaFolder
                 .find("id = ?1", id)
                 .firstResultOptional();
     }
 
+    /**
+     * Busca a pasta pelo provider e path exato.
+     *
+     * @param storageProviderId id do provider
+     * @param path path completo da pasta
+     * @return a pasta; vazio se não existir
+     */
     public static Optional<MediaFolder> findByProviderAndPath(Integer storageProviderId, String path) {
         return MediaFolder
                 .find("storageProvider.id = ?1 and path = ?2", storageProviderId, path)
@@ -92,6 +112,22 @@ public class MediaFolder extends PanacheEntityBase {
                 .list();
     }
 
+    /**
+     * Pagina as pastas, aplicando os filtros informados como AND (cada parâmetro não-nulo
+     * restringe o resultado) e a ordenação pedida.
+     *
+     * @param page página desejada, 0-based
+     * @param size tamanho da página
+     * @param name substring case-insensitive do nome; {@code null} não filtra
+     * @param mediaType tipo de mídia; {@code null} não filtra
+     * @param storageProviderId id do provider; {@code null} não filtra
+     * @param parentId id da pasta pai; {@code null} não filtra
+     * @param hasFiles {@code true}/{@code false} filtra por ter ou não arquivos diretos;
+     *                 {@code null} não filtra
+     * @param sort specs {@code campo[:asc|desc]} na whitelist {@code name}/{@code createdAt};
+     *             {@code null}/vazio usa a ordenação padrão
+     * @return página de pastas que atendem aos filtros
+     */
     public static PageResult<MediaFolder> findPage(
             Integer page,
             Integer size,

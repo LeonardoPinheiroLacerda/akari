@@ -12,6 +12,9 @@ import jakarta.transaction.Transactional;
 
 import java.util.List;
 
+/**
+ * Notificações exibidas ao usuário: listagem das mais recentes e controle de lido/não-lido.
+ */
 @ApplicationScoped
 public class NotificationService {
 
@@ -20,6 +23,11 @@ public class NotificationService {
     @Inject
     NotificationMapper notificationMapper;
 
+    /**
+     * Lista as notificações mais recentes, lidas ou não.
+     *
+     * @return até 100 notificações, da mais nova para a mais antiga
+     */
     public List<NotificationResponse> listNotifications() {
         final List<Notification> notifications = Notification.listRecent(RECENT_LIMIT);
 
@@ -28,12 +36,25 @@ public class NotificationService {
         return notificationMapper.toResponseList(notifications);
     }
 
+    /**
+     * Conta as notificações ainda não lidas.
+     *
+     * @return a contagem de notificações não-lidas
+     */
     public UnreadCountResponse getUnreadCount() {
         final long count = Notification.countUnread();
 
         return new UnreadCountResponse((int) count);
     }
 
+    /**
+     * Marca uma notificação como lida.
+     *
+     * <p>Idempotente: não faz nada se a notificação já estiver lida, e não lança se o id não
+     * existir — nesse caso a chamada simplesmente não altera nenhuma linha.
+     *
+     * @param notificationId id da notificação a marcar como lida
+     */
     @Transactional
     public void markNotificationRead(Integer notificationId) {
         Notification
@@ -41,6 +62,9 @@ public class NotificationService {
                 .ifPresent(notification -> notification.read = true);
     }
 
+    /**
+     * Marca todas as notificações não lidas como lidas.
+     */
     @Transactional
     public void markAllNotificationsRead() {
         final long updated = Notification.markAllAsRead();

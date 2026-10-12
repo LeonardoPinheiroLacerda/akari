@@ -4,6 +4,18 @@ import io.github.leonardopinheirolacerda.akari.utils.DirectoryUtils;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * Um item (arquivo ou diretório) listado num storage provider, já convertido do shape bruto do
+ * provider (rclone ou filesystem local) pro vocabulário comum do domínio.
+ *
+ * @param path path do item, relativo à raiz do provider
+ * @param name último segmento do path (nome do arquivo/diretório)
+ * @param size tamanho em bytes; {@code null} para diretórios ou quando não foi possível obter
+ * @param mimeType MIME type; {@code null} para diretórios ou quando não foi possível detectar
+ * @param modTime data de última modificação, como string ISO-8601; {@code null} se indisponível
+ * @param isDir {@code true} se o item é um diretório
+ * @param id identificador do item no provider remoto; {@code null} para provider local
+ */
 public record StorageItem(
         String path,
         String name,

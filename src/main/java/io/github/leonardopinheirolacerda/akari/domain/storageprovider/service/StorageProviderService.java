@@ -21,10 +21,18 @@ import io.quarkus.logging.Log;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
+import jakarta.validation.ConstraintViolationException;
 import jakarta.ws.rs.ProcessingException;
 import jakarta.ws.rs.WebApplicationException;
 import org.eclipse.microprofile.rest.client.inject.RestClient;
 
+/**
+ * Cadastro, config e saúde dos storage providers (MEGA via rclone, ou disco local).
+ *
+ * <p>A config de cada provider é um {@code Map<String, String>} cujo shape varia por
+ * {@code type} (ver {@link StorageProviderConfigs}); campos sensíveis são obscurecidos via
+ * {@link ObscureFieldApplier} antes de persistir.
+ */
 @ApplicationScoped
 public class StorageProviderService {
 
@@ -41,6 +49,15 @@ public class StorageProviderService {
     @Inject
     StorageProviderMapper storageProviderMapper;
 
+    /**
+     * Cadastra um novo storage provider, obscurecendo e validando a config de acordo com o
+     * {@code type} informado.
+     *
+     * @param createStorageProviderRequest tipo do provider e config em claro
+     * @return o provider recém-criado
+     * @throws ConstraintViolationException se a config não bater com o shape esperado pro
+     *         {@code type} (ex.: campo obrigatório ausente)
+     */
     @Transactional
     public StorageProviderResponse createStorageProvider(CreateStorageProviderRequest createStorageProviderRequest) {
         Log.infof("Criando storage provider do tipo %s", createStorageProviderRequest.getType());
@@ -61,6 +78,17 @@ public class StorageProviderService {
         return storageProviderMapper.toResponse(storageProvider);
     }
 
+    /**
+     * Substitui a config de um storage provider existente, obscurecendo e validando de acordo
+     * com o {@code type} já cadastrado do provider (o {@code type} em si não muda).
+     *
+     * @param providerId id do provider a atualizar
+     * @param updateStorageProviderConfigRequest nova config em claro
+     * @return o provider com a config atualizada
+     * @throws ResourceNotFoundException se o provider não existir
+     * @throws ConstraintViolationException se a config não bater com o shape esperado pro
+     *         {@code type} já cadastrado
+     */
     @Transactional
     public StorageProviderResponse updateStorageProviderConfig(
             Integer providerId,
@@ -79,6 +107,12 @@ public class StorageProviderService {
         return storageProviderMapper.toResponse(storageProvider);
     }
 
+    /**
+     * Remove um storage provider.
+     *
+     * @param providerId id do provider a remover
+     * @throws ResourceNotFoundException se o provider não existir
+     */
     @Transactional
     public void deleteStorageProvider(Integer providerId) {
         Log.infof("Removendo storage provider %d", providerId);
@@ -90,12 +124,26 @@ public class StorageProviderService {
         Log.infof("Storage provider %d removido com sucesso", providerId);
     }
 
+    /**
+     * Busca um storage provider pelo id.
+     *
+     * @param providerId id do provider
+     * @return o provider encontrado
+     * @throws ResourceNotFoundException se o provider não existir
+     */
     public StorageProviderResponse getStorageProviderById(Integer providerId) {
         final StorageProvider storageProvider = findOrThrow(providerId);
 
         return storageProviderMapper.toResponse(storageProvider);
     }
 
+    /**
+     * Pagina todos os storage providers cadastrados.
+     *
+     * @param page página desejada, 0-based
+     * @param size tamanho da página
+     * @return página de providers
+     */
     public StorageProviderPage listStorageProviders(Integer page, Integer size) {
         final PageResult<StorageProvider> pageResult = StorageProvider.findPage(page, size);
 
@@ -104,6 +152,18 @@ public class StorageProviderService {
         return storageProviderMapper.toPage(pageResult);
     }
 
+    /**
+     * Verifica se um storage provider está acessível.
+     *
+     * <p>Provider inacessível não é erro — devolve {@code healthy=false}. Só lança quando o
+     * próprio rclone rcd está fora do ar, o que impede a checagem de acontecer (e só se aplica
+     * a provider remoto; o rcd não entra na checagem de um provider {@code LOCAL}).
+     *
+     * @param providerId id do provider
+     * @return {@code healthy=true} se a conexão/listagem funcionar; {@code false} caso contrário
+     * @throws ResourceNotFoundException se o provider não existir
+     * @throws IntegrationException se o provider for remoto e o rclone rcd não estiver acessível
+     */
     public StorageProviderHealth checkStorageProviderHealth(Integer providerId) {
         Log.infof("Verificando saúde do storage provider %d", providerId);
 
@@ -144,6 +204,13 @@ public class StorageProviderService {
                 .anyMatch(item -> item.path().equals(path));
     }
 
+    /**
+     * Busca o model de um storage provider pelo id, ou lança se não existir.
+     *
+     * @param providerId id do provider
+     * @return o provider encontrado
+     * @throws ResourceNotFoundException se o provider não existir
+     */
     public StorageProvider findOrThrow(Integer providerId) {
         return StorageProvider.find(providerId)
                 .orElseThrow(() -> {

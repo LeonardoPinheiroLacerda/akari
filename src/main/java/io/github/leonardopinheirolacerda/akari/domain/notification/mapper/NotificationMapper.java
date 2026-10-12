@@ -6,6 +6,10 @@ import org.mapstruct.Mapper;
 
 import java.util.List;
 
+/**
+ * Converte {@link Notification} (model) para o DTO gerado do contrato ({@code
+ * NotificationResponse}). Cópia direta de campos, sem conversão não-trivial.
+ */
 @Mapper(componentModel = "cdi")
 public interface NotificationMapper {
 

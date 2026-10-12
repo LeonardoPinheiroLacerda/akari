@@ -11,6 +11,10 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.rest.client.inject.RestClient;
 
+/**
+ * Resolve, a partir do {@code type} de um {@link StorageProvider}, a implementação concreta de
+ * {@link StorageProviderClient} capaz de operar sobre ele (MEGA via rclone, ou disco local).
+ */
 @ApplicationScoped
 public class StorageProviderClientFactory {
 
@@ -21,6 +25,14 @@ public class StorageProviderClientFactory {
     @Inject
     StorageItemMapper storageItemMapper;
 
+    /**
+     * Resolve o client pro provider informado.
+     *
+     * @param storageProvider provider cujo client será resolvido
+     * @return {@link MegaStorageProviderClient} para {@code MEGA}, ou
+     *         {@link LocalStorageProviderClient} para {@code LOCAL} — uma instância nova a
+     *         cada chamada, não cacheada
+     */
     public StorageProviderClient getClient(StorageProvider storageProvider) {
         Log.infof("Resolvendo client pro storage provider %d (%s)", storageProvider.id, storageProvider.type);
 

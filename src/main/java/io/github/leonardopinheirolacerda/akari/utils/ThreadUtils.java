@@ -1,5 +1,9 @@
 package io.github.leonardopinheirolacerda.akari.utils;
 
+/**
+ * Espera bloqueante que não propaga {@link InterruptedException} — usada como throttle
+ * proativo entre chamadas (ex.: a ingestão espaçando requests pra AniList/TMDB).
+ */
 public final class ThreadUtils {
 
     private ThreadUtils() {

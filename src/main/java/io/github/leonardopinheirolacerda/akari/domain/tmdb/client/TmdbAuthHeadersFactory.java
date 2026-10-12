@@ -21,6 +21,16 @@ public class TmdbAuthHeadersFactory implements ClientHeadersFactory {
     @Inject
     SettingService settingService;
 
+    /**
+     * Monta o header {@code Authorization} com o token da preferência {@code tmdb.api-key}.
+     *
+     * @param incomingHeaders headers da request original; não usados aqui
+     * @param clientOutgoingHeaders headers já montados pelo client antes desta factory agir;
+     *                              não usados aqui
+     * @return um mapa só com o header {@code Authorization: Bearer <token>}
+     * @throws IntegrationNotConfiguredException se a preferência {@code tmdb.api-key} estiver
+     *         vazia
+     */
     @Override
     public MultivaluedMap<String, String> update(
             MultivaluedMap<String, String> incomingHeaders,

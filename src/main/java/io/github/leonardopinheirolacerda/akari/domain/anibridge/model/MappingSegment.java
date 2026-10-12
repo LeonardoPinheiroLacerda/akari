@@ -19,7 +19,7 @@ import java.util.List;
  *
  * <p>{@code animeEpisodeEnd}/{@code tmdbEpisodeEnd} ficam {@code null} quando o range é aberto
  * no dataset de origem (ex.: {@code "1089-"}, sem episódio final conhecido). {@code seasonNumber}
- * fica {@code null} pra {@link io.github.leonardopinheirolacerda.akari.api.dto.TmdbMediaType#MOVIE}
+ * fica {@code null} pra {@link TmdbMediaType#MOVIE}
  * (filme não tem temporada). {@code ratio}, quando presente, descreve quantos episódios de um
  * lado correspondem a um episódio do outro — a conversão em si é responsabilidade de quem
  * consome o segment, não é aplicada aqui.

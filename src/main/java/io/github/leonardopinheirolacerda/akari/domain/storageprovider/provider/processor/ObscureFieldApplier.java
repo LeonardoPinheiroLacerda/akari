@@ -19,6 +19,10 @@ import java.lang.reflect.Field;
 import java.util.Map;
 import java.util.Set;
 
+/**
+ * Obscurece os campos sensíveis de uma config bruta de storage provider antes de persistir, e
+ * valida o resultado contra o shape esperado do provider.
+ */
 @ApplicationScoped
 public class ObscureFieldApplier {
 
@@ -32,6 +36,22 @@ public class ObscureFieldApplier {
     @Inject
     ObjectMapper objectMapper;
 
+    /**
+     * Obscurece, via {@code /core/obscure} do rclone, todo campo de {@code configType} anotado
+     * com {@link Obscure} que vier presente e não-branco em {@code config}, e então valida o
+     * config inteiro (Bean Validation) contra o shape de {@code configType}.
+     *
+     * @param config config bruta, como recebida da API (campos sensíveis ainda em claro)
+     * @param configType tipo esperado da config pro {@code type} do provider (ex.:
+     *                   {@code MegaConfig}, {@code LocalConfig}), usado tanto pra achar os
+     *                   campos {@link Obscure} via reflection quanto pra validar o shape
+     * @param <T> tipo da config do provider
+     * @return o mesmo mapa recebido, com os campos sensíveis já obscurecidos
+     * @throws ConstraintViolationException se o config, convertido pro {@code configType}, não
+     *         passar nas constraints de Bean Validation (ex.: campo obrigatório ausente)
+     * @throws ProcessingException se a chamada ao rclone pra obscurecer falhar no transporte
+     * @throws WebApplicationException se o rclone responder com status de erro
+     */
     public <T> Map<String, String> obscureRequiredFields(Map<String, String> config, Class<T> configType) {
         for (Field field : configType.getDeclaredFields()) {
             if (!field.isAnnotationPresent(Obscure.class)) {

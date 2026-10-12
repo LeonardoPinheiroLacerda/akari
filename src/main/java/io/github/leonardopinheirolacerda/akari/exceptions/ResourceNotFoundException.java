@@ -1,7 +1,6 @@
 package io.github.leonardopinheirolacerda.akari.exceptions;
 
 import io.github.leonardopinheirolacerda.akari.api.dto.ApiErrorCode;
-import io.github.leonardopinheirolacerda.akari.domain.mediafolder.model.MediaFolder;
 
 /**
  * Recurso procurado não existe — vira {@code 404} com {@code RESOURCE_NOT_FOUND}.
@@ -15,8 +14,8 @@ public class ResourceNotFoundException extends AkariException {
     /**
      * Cria a exceção para um recurso inexistente.
      *
-     * @param message tipo do recurso e identificador buscado (ex.: "MediaFolder not found with
-     *                id: 42")
+     * @param message tipo do recurso e identificador buscado (ex.: "Não foi possível localizar
+     *                uma pasta com o id informado")
      */
     public ResourceNotFoundException(String message) {
         super(404, ApiErrorCode.RESOURCE_NOT_FOUND, message, null);
