@@ -50,6 +50,24 @@ public class CacheService {
     @Inject
     CacheEventBroadcaster cacheEventBroadcaster;
 
+    /**
+     * Enfileira o download de um arquivo de vídeo remoto pro cache local.
+     *
+     * <p>Cria uma linha {@code QUEUED} nova, ou reaproveita (mesmo {@code id}) uma linha
+     * {@code FAILED} existente. O download em si acontece depois, dirigido pelo
+     * {@code CacheScheduler}/{@link CacheQueueProcessorService}. Publica o evento SSE
+     * {@code QUEUED} ao final.
+     *
+     * @param cacheQueueRequest id do arquivo de vídeo no catalog a enfileirar
+     * @return a linha recém-criada ou reaproveitada, com status {@code QUEUED}
+     * @throws ResourceNotFoundException se o {@code fileId} não existir no catalog
+     * @throws BusinessRuleException se o arquivo já tiver uma linha {@code QUEUED},
+     *         {@code DOWNLOADING} ou {@code COMPLETED} (uma {@code FAILED} pode ser
+     *         reenfileirada), ou se pertencer a um provider {@code LOCAL} (lido direto do
+     *         disco, sem cache)
+     * @throws IntegrationNotConfiguredException se a preferência {@code cache.dir} não estiver
+     *         configurada
+     */
     @Transactional
     public CacheItem queueCacheDownload(CacheQueueRequest cacheQueueRequest) {
         final VideoFile videoFile = VideoFile.find(cacheQueueRequest.getFileId())
@@ -96,16 +114,36 @@ public class CacheService {
         return cacheMapper.toItem(row, videoFileMapper);
     }
 
+    /**
+     * Pagina todas as linhas do cache, na ordem em que entraram na fila.
+     *
+     * @param page página desejada, 0-based
+     * @param size tamanho da página
+     * @return página de linhas, com o arquivo de vídeo resolvido em cada uma
+     */
     public CacheItemPage listCaches(Integer page, Integer size) {
         final PageResult<VideoFileCache> data = VideoFileCache.findPage(page, size);
         return cacheMapper.toPage(data, videoFileMapper);
     }
 
+    /**
+     * Pagina as linhas ainda não concluídas, na ordem em que entraram na fila.
+     *
+     * @param page página desejada, 0-based
+     * @param size tamanho da página
+     * @return página de linhas com status diferente de {@code COMPLETED} (inclui
+     *         {@code FAILED}, já que pode ser reenfileirada)
+     */
     public CacheItemPage listPendingCaches(Integer page, Integer size) {
         final PageResult<VideoFileCache> data = VideoFileCache.findPendingPage(page, size);
         return cacheMapper.toPage(data, videoFileMapper);
     }
 
+    /**
+     * Lista as linhas ainda não resolvidas, pro snapshot inicial de um cliente SSE.
+     *
+     * @return as linhas {@code QUEUED} ou {@code DOWNLOADING}, com o arquivo de vídeo resolvido
+     */
     public List<CacheItem> listActiveCaches() {
         return VideoFileCache.findActive()
                 .stream()

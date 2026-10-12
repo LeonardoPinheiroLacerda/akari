@@ -29,6 +29,16 @@ public class CacheEventResource {
     @Inject
     CacheEventBroadcaster cacheEventBroadcaster;
 
+    /**
+     * {@code GET /v1/cache/events} — inscreve o cliente no stream de progresso do cache.
+     *
+     * <p>Monta o snapshot das linhas ainda não resolvidas e delega o ciclo de vida da conexão
+     * pro {@link CacheEventBroadcaster} — sem {@code IDLE} nem {@code SNAPSHOT} ativo, a
+     * conexão é fechada na hora (ver Javadoc de {@link CacheEventBroadcaster#subscribe}).
+     *
+     * @param sseEventSink sink da conexão recém-aberta, injetado pelo JAX-RS
+     * @param sse contexto SSE pra montar os eventos futuros, injetado pelo JAX-RS
+     */
     @GET
     @Produces(MediaType.SERVER_SENT_EVENTS)
     public void subscribe(@Context SseEventSink sseEventSink, @Context Sse sse) {

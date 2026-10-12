@@ -6,6 +6,13 @@ import io.quarkus.scheduler.Scheduled;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
+/**
+ * Dispara o motor da fila de cache de vídeo ({@link CacheQueueProcessorService}) em dois
+ * ritmos: processamento da fila a cada 5s, progresso do download ativo a cada 1s.
+ *
+ * <p>Cada execução é isolada por {@code ConcurrentExecution.SKIP} e protegida por try/catch —
+ * uma falha num ciclo não derruba o agendamento nem propaga como exceção não tratada.
+ */
 @ApplicationScoped
 public class CacheScheduler {
 
