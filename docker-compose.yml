@@ -31,5 +31,10 @@ services:
 
     volumes:
       - ./data/rclone-logs:/var/log/rclone
+      # Monta no mesmo path absoluto do host: o rclone roda no container, mas o
+      # Quarkus (cache.dir) roda direto no host — os dois precisam enxergar o
+      # arquivo baixado pelo mesmo caminho, já que a app lê o arquivo (ffprobe,
+      # playback) fora do container.
+      - ./data/cache-dir:/Users/leonardopinheirolacerda/akari/data/cache-dir
 
     restart: unless-stopped
