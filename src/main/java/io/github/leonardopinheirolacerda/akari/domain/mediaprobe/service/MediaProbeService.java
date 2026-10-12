@@ -75,7 +75,17 @@ public class MediaProbeService {
             throw new IntegrationException(e.getMessage(), e);
         }
 
-        return mediaProbeMapper.toResponse(output);
+        final MediaInfoResponse response = mediaProbeMapper.toResponse(output);
+
+        Log.infof(
+                "Probe do arquivo %d extraído: %d faixa(s) de vídeo, %d de áudio, %d de legenda",
+                fileId,
+                response.getVideo().size(),
+                response.getAudio().size(),
+                response.getSubtitles().size()
+        );
+
+        return response;
     }
 
 }

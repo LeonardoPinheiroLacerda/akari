@@ -7,6 +7,7 @@ import io.github.leonardopinheirolacerda.akari.domain.storageprovider.provider.S
 import io.github.leonardopinheirolacerda.akari.domain.videofile.model.VideoFile;
 import io.github.leonardopinheirolacerda.akari.exceptions.IntegrationNotConfiguredException;
 import io.github.leonardopinheirolacerda.akari.exceptions.ResourceNotFoundException;
+import io.quarkus.logging.Log;
 
 import java.nio.file.Path;
 
@@ -46,10 +47,14 @@ public final class VideoFileLocationUtils {
             return storageProviderClientFactory
                     .getClient(videoFile.folder.storageProvider)
                     .resolveLocalPath(videoFile.path)
-                    .orElseThrow(() -> new ResourceNotFoundException("Arquivo não encontrado em disco para o provider local"));
+                    .orElseThrow(() -> {
+                        Log.warnf("Arquivo %d não encontrado em disco no provider local (path %s)", videoFile.id, videoFile.path);
+                        return new ResourceNotFoundException("Arquivo não encontrado em disco para o provider local");
+                    });
         }
 
         if (cacheDir == null || cacheDir.isBlank()) {
+            Log.warnf("cache.dir não configurado — não foi possível resolver o arquivo %d", videoFile.id);
             throw new IntegrationNotConfiguredException(
                     "Cache local não configurado. Cadastre o diretório na preferência 'cache.dir' pra habilitar o acesso ao arquivo.");
         }
@@ -57,7 +62,10 @@ public final class VideoFileLocationUtils {
         return VideoFileCache.findByVideoFileId(videoFile.id)
                 .filter(cache -> cache.status == CacheStatus.COMPLETED)
                 .map(cache -> Path.of(cacheDir, cache.id.toString()))
-                .orElseThrow(() -> new ResourceNotFoundException("Arquivo de provider remoto ainda não terminou de baixar no cache"));
+                .orElseThrow(() -> {
+                    Log.warnf("Arquivo %d (provider remoto) ainda não terminou de baixar no cache", videoFile.id);
+                    return new ResourceNotFoundException("Arquivo de provider remoto ainda não terminou de baixar no cache");
+                });
     }
 
 }

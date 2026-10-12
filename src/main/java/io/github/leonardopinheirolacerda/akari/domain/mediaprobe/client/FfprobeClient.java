@@ -81,6 +81,8 @@ public class FfprobeClient {
                 .redirectOutput(ProcessBuilder.Redirect.to(outputFile.toFile()))
                 .redirectError(ProcessBuilder.Redirect.DISCARD);
 
+        Log.infof("Executando ffprobe sobre %s", file);
+
         final Process process = start(processBuilder);
 
         awaitCompletion(process);
