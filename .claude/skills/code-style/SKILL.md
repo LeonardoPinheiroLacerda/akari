@@ -308,14 +308,17 @@ assinatura (ex.: `ResponseExceptionMapper#handles(int status, ...)`).
 ### Método: quebras de linha
 
 - Linha com no máximo ~100 colunas.
-- Assinatura em uma linha se couber. Caso contrário, cada param numa linha:
+- Assinatura em uma linha se couber. Caso contrário, alinha os parâmetros com a coluna logo
+  após o parêntese de abertura — o primeiro parâmetro fica na mesma linha do nome do método,
+  não quebra pra uma indentação em bloco. Quando a assinatura quebra assim, uma linha em
+  branco separa ela do corpo do método:
 
 ```java
-public List<Pedido> list(
-        Integer page,
-        Integer size,
-        String status,
-        Integer clienteId) {
+private void runReconciliation(Integer providerId,
+                               String rootPath,
+                               StorageProviderClient client,
+                               MediaType mediaType) {
+
     ...
 }
 ```
@@ -394,6 +397,19 @@ if (folderPath.endsWith("/")) {
     return folderPath + fileName;
 }
 return folderPath + "/" + fileName;
+```
+
+Ternário que não duplica tokens mas não cabe numa linha curta: quebra com `?`/`:` em linhas
+próprias, não força numa linha só porque tecnicamente caberia nas ~100 colunas:
+
+```java
+// certo
+final String rootPathName = rootPath.isEmpty()
+        ? ""
+        : DirectoryUtils.lastSegmentOf(rootPath);
+
+// errado — espremido numa linha só
+final String rootPathName = rootPath.isEmpty() ? "" : DirectoryUtils.lastSegmentOf(rootPath);
 ```
 
 ### Métodos privados no fim da classe
