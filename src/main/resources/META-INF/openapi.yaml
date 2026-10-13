@@ -679,6 +679,33 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /v1/playback/sessions/{sessionId}/tracks:
+    parameters:
+      - $ref: '#/components/parameters/SessionIdPathParam'
+    post:
+      tags: [Playback]
+      operationId: switchPlaybackSessionTracks
+      summary: Troca as faixas de áudio/legenda de uma sessão
+      description: |
+        Troca a faixa de áudio e, opcionalmente, a de legenda de uma sessão já iniciada,
+        reiniciando o transcode a partir do instante informado. Ao contrário do `seek`, esta
+        operação sempre reinicia o processo de transcode — não há posição que evite o
+        reinício, já que trocar `-map`/filtro de legenda exige um novo processo `ffmpeg`.
+        Responde `404` se a sessão não existe ou já expirou.
+      requestBody:
+        $ref: '#/components/requestBodies/SwitchTracksRequestBody'
+      responses:
+        '200':
+          $ref: '#/components/responses/SessionOk'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /v1/playback/sessions/{sessionId}/playlist.m3u8:
     parameters:
       - $ref: '#/components/parameters/SessionIdPathParam'
@@ -1550,6 +1577,13 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/SeekRequest'
+    SwitchTracksRequestBody:
+      description: Nova posição e faixas de áudio/legenda da sessão
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/SwitchTracksRequest'
 
     # ---------- animemetadata ----------
     AnimeBindingRequestBody:
@@ -1755,13 +1789,13 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/PlaybackSession'
+            $ref: '#/components/schemas/PlaybackSessionResponse'
     SessionOk:
       description: Sessão atualizada
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/PlaybackSession'
+            $ref: '#/components/schemas/PlaybackSessionResponse'
     MediaFileOk:
       description: |
         Arquivo HLS — segmento MPEG-TS/fMP4, init segment fMP4, variant playlist (`.m3u8`) ou
@@ -2657,7 +2691,34 @@ components:
           minimum: 0
           description: Instante alvo, em segundos a partir do início da mídia
 
-    PlaybackSession:
+    SwitchTracksRequest:
+      type: object
+      description: Nova posição e faixas de áudio/legenda do transcode
+      required: [positionSeconds, audioTrackIndex]
+      properties:
+        positionSeconds:
+          type: number
+          format: double
+          minimum: 0
+          description: Instante alvo, em segundos a partir do início da mídia
+        audioTrackIndex:
+          type: integer
+          format: int32
+          minimum: 0
+          description: |
+            Posição (0-based) da faixa no array `audio` do `GET /v1/mediaprobe/files/{fileId}` —
+            **não** o campo `index` da faixa. Mesma semântica de `StartPlaybackSessionRequest`.
+        subtitleTrackIndex:
+          type: integer
+          format: int32
+          minimum: 0
+          nullable: true
+          description: |
+            Posição (0-based) da faixa no array `subtitles` do `GET /v1/mediaprobe/files/{fileId}`
+            — **não** o campo `index` da faixa. Ausente/`null` reproduz sem legenda. Mesma
+            semântica de `StartPlaybackSessionRequest`.
+
+    PlaybackSessionResponse:
       type: object
       description: Sessão de playback recém-iniciada ou reposicionada
       required: [sessionId, playlistUrl, startOffsetSeconds]

@@ -4,6 +4,7 @@ import io.github.leonardopinheirolacerda.akari.api.dto.ApiError;
 import io.github.leonardopinheirolacerda.akari.api.dto.ApiErrorCode;
 import io.github.leonardopinheirolacerda.akari.api.dto.ErrorDetail;
 import io.quarkus.logging.Log;
+import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
 import java.util.List;
@@ -59,6 +60,7 @@ final class ApiErrorResponses {
         }
 
         return Response.status(status)
+                .type(MediaType.APPLICATION_JSON)
                 .entity(new ApiError()
                         .status(status)
                         .code(code)
