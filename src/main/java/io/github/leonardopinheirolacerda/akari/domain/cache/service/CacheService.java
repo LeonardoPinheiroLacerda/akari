@@ -115,27 +115,20 @@ public class CacheService {
     }
 
     /**
-     * Pagina todas as linhas do cache, na ordem em que entraram na fila.
+     * Pagina as linhas do cache, na ordem em que entraram na fila.
      *
      * @param page página desejada, 0-based
      * @param size tamanho da página
+     * @param pendingOnly {@code true} restringe às linhas com status diferente de
+     *                    {@code COMPLETED} (inclui {@code FAILED}, já que pode ser
+     *                    reenfileirada); {@code null}/{@code false} não filtra
      * @return página de linhas, com o arquivo de vídeo resolvido em cada uma
      */
-    public CacheItemPage listCaches(Integer page, Integer size) {
-        final PageResult<VideoFileCache> data = VideoFileCache.findPage(page, size);
-        return cacheMapper.toPage(data, videoFileMapper);
-    }
+    public CacheItemPage listCaches(Integer page, Integer size, Boolean pendingOnly) {
+        final PageResult<VideoFileCache> data = Boolean.TRUE.equals(pendingOnly)
+                ? VideoFileCache.findPendingPage(page, size)
+                : VideoFileCache.findPage(page, size);
 
-    /**
-     * Pagina as linhas ainda não concluídas, na ordem em que entraram na fila.
-     *
-     * @param page página desejada, 0-based
-     * @param size tamanho da página
-     * @return página de linhas com status diferente de {@code COMPLETED} (inclui
-     *         {@code FAILED}, já que pode ser reenfileirada)
-     */
-    public CacheItemPage listPendingCaches(Integer page, Integer size) {
-        final PageResult<VideoFileCache> data = VideoFileCache.findPendingPage(page, size);
         return cacheMapper.toPage(data, videoFileMapper);
     }
 

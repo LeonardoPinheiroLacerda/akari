@@ -2,15 +2,12 @@ package io.github.leonardopinheirolacerda.akari.domain.anime.resource;
 
 import io.github.leonardopinheirolacerda.akari.api.AnimeApi;
 import io.github.leonardopinheirolacerda.akari.api.dto.AnimeBindingRequest;
-import io.github.leonardopinheirolacerda.akari.api.dto.AnimeBindingSummary;
 import io.github.leonardopinheirolacerda.akari.api.dto.AnimeFranchiseRootRequest;
 import io.github.leonardopinheirolacerda.akari.api.dto.AnimeResponse;
 import io.github.leonardopinheirolacerda.akari.domain.anime.service.AnimeService;
 import io.github.leonardopinheirolacerda.akari.exceptions.BusinessRuleException;
 import io.github.leonardopinheirolacerda.akari.exceptions.ResourceNotFoundException;
 import jakarta.inject.Inject;
-
-import java.util.List;
 
 /**
  * Implementa {@link AnimeApi} — binding anime↔pasta, fetch/sync na AniList e curadoria manual
@@ -64,19 +61,6 @@ public class AnimeResource implements AnimeApi {
     @Override
     public AnimeResponse getAnime(Integer anilistId) {
         return animeService.getAnime(anilistId);
-    }
-
-    /**
-     * {@code GET /v1/metadata/anime-bindings} — resume o binding de várias pastas numa chamada
-     * só.
-     *
-     * @param folderIds ids das pastas no catalog
-     * @return os resumos das pastas que têm anime vinculado, com {@code 200 OK}; pastas sem
-     *         binding simplesmente não aparecem no resultado
-     */
-    @Override
-    public List<AnimeBindingSummary> getAnimeBindings(List<Integer> folderIds) {
-        return animeService.getAnimeBindings(folderIds);
     }
 
     /**

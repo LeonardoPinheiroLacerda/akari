@@ -3,6 +3,7 @@ package io.github.leonardopinheirolacerda.akari.domain.anime.mapper;
 import io.github.leonardopinheirolacerda.akari.api.dto.TmdbAnimeStateResponse;
 import io.github.leonardopinheirolacerda.akari.api.dto.TmdbOverrides;
 import io.github.leonardopinheirolacerda.akari.domain.anime.model.Anime;
+import io.github.leonardopinheirolacerda.akari.utils.TmdbImageUtils;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
 
@@ -38,8 +39,11 @@ public interface AnimeTmdbMapper {
                 .title(anime.overrideTitle)
                 .synopsis(anime.overrideSynopsis)
                 .posterPath(anime.overridePosterPath)
+                .posterPreviewUrl(TmdbImageUtils.posterMedium(anime.overridePosterPath))
                 .backdropPath(anime.overrideBackdropPath)
-                .logoPath(anime.overrideLogoPath);
+                .backdropPreviewUrl(TmdbImageUtils.backdrop(anime.overrideBackdropPath))
+                .logoPath(anime.overrideLogoPath)
+                .logoPreviewUrl(TmdbImageUtils.logo(anime.overrideLogoPath));
     }
 
 }

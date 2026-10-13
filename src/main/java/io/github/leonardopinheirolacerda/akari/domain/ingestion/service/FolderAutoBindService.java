@@ -327,7 +327,7 @@ public class FolderAutoBindService {
                 continue;
             }
 
-            final String thumbnailPath = stillPathOf(
+            final Optional<TmdbEpisodeResponse> episode = resolveEpisode(
                     anime.tmdbId,
                     resolved.get(),
                     episodesBySeason,
@@ -335,12 +335,19 @@ public class FolderAutoBindService {
                     folderName
             );
 
-            animeTmdbFilePairingService.updateTmdbFilePairing(
-                    videoFile.id,
-                    new TmdbFilePairingRequest()
-                            .seasonNumber(resolved.get().seasonNumber())
-                            .episodeNumber(resolved.get().tmdbEpisode())
-                            .thumbnailPath(thumbnailPath));
+            final TmdbFilePairingRequest tmdbFilePairingRequest = new TmdbFilePairingRequest()
+                    .seasonNumber(resolved.get().seasonNumber())
+                    .episodeNumber(resolved.get().tmdbEpisode())
+                    .thumbnailPath(episode.map(TmdbEpisodeResponse::stillPath).orElse(null))
+                    .episodeName(episode.map(TmdbEpisodeResponse::name).orElse(null))
+                    .episodeOverview(episode.map(TmdbEpisodeResponse::overview).orElse(null))
+                    .episodeAirDate(episode.map(TmdbEpisodeResponse::airDate).orElse(null))
+                    .episodeRuntime(episode.map(TmdbEpisodeResponse::runtime).orElse(null))
+                    .episodeVoteAverage(episode.map(TmdbEpisodeResponse::voteAverage).orElse(null))
+                    .episodeVoteCount(episode.map(TmdbEpisodeResponse::voteCount).orElse(null))
+                    .episodeType(episode.map(TmdbEpisodeResponse::episodeType).orElse(null));
+
+            animeTmdbFilePairingService.updateTmdbFilePairing(videoFile.id, tmdbFilePairingRequest);
 
             paired++;
         }
@@ -378,14 +385,14 @@ public class FolderAutoBindService {
      * na mesma temporada. Falha aqui nunca aborta o pairing — sem thumbnail, o arquivo ainda é
      * pareado, só sem imagem (igual um pairing manual que não preencheu esse campo).
      */
-    private String stillPathOf(Integer tmdbId,
-                               ResolvedEpisode resolved,
-                               Map<Integer, List<TmdbEpisodeResponse>> episodesBySeason,
-                               Integer folderId,
-                               String folderName) {
+    private Optional<TmdbEpisodeResponse> resolveEpisode(Integer tmdbId,
+                                                         ResolvedEpisode resolved,
+                                                         Map<Integer, List<TmdbEpisodeResponse>> episodesBySeason,
+                                                         Integer folderId,
+                                                         String folderName) {
 
         if (resolved.seasonNumber() == null) {
-            return null;
+            return Optional.empty();
         }
 
         final List<TmdbEpisodeResponse> episodes = episodesBySeason.computeIfAbsent(resolved.seasonNumber(), seasonNumber -> {
@@ -405,9 +412,7 @@ public class FolderAutoBindService {
 
         return episodes.stream()
                 .filter(episode -> episode.episodeNumber().equals(resolved.tmdbEpisode()))
-                .findFirst()
-                .map(TmdbEpisodeResponse::stillPath)
-                .orElse(null);
+                .findFirst();
     }
 
 }

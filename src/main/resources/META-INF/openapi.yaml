@@ -371,7 +371,9 @@ paths:
       summary: Lista paginada de pastas com filtros AND
       description: |
         Filtros são AND — cada query param não-nulo restringe o resultado. `sort` aceita
-        specs `field[:asc|desc]` na whitelist `name`, `createdAt`.
+        specs `field[:asc|desc]` na whitelist `name`, `createdAt`. Cada pasta já vem com
+        `animeBinding` preenchido quando vinculada — não é preciso uma segunda chamada pra
+        buscar os bindings da página.
       parameters:
         - $ref: '#/components/parameters/PageParam'
         - $ref: '#/components/parameters/SizeParam'
@@ -463,7 +465,8 @@ paths:
       description: |
         Não há listagem de várias pastas ao mesmo tempo — o cliente sempre olha os arquivos de
         uma pasta por vez. Se a pasta não existir ou não tiver arquivos, devolve página vazia
-        (não 404).
+        (não 404). Cada arquivo já vem com `tmdbPairing` preenchido quando pareado — não é
+        preciso uma segunda chamada pra buscar os pairings da página.
       parameters:
         - $ref: '#/components/parameters/FolderIdRequiredParam'
         - $ref: '#/components/parameters/PageParam'
@@ -574,27 +577,14 @@ paths:
       tags: [Cache]
       operationId: listCaches
       summary: Lista todas as linhas do cache
-      description: Página de todas as linhas, ordenadas por ordem de enfileiramento.
+      description: |
+        Página de todas as linhas, ordenadas por ordem de enfileiramento. `pendingOnly=true`
+        restringe às linhas com status diferente de `COMPLETED` (inclui `FAILED`, já que pode
+        ser reenfileirada).
       parameters:
         - $ref: '#/components/parameters/PageParam'
         - $ref: '#/components/parameters/SizeParam'
-      responses:
-        '200':
-          $ref: '#/components/responses/CacheItemPageOk'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
-
-  /v1/cache/items/pending:
-    get:
-      tags: [Cache]
-      operationId: listPendingCaches
-      summary: Lista as linhas pendentes do cache
-      description: Página das linhas com status diferente de `COMPLETED`.
-      parameters:
-        - $ref: '#/components/parameters/PageParam'
-        - $ref: '#/components/parameters/SizeParam'
+        - $ref: '#/components/parameters/PendingOnlyFilterParam'
       responses:
         '200':
           $ref: '#/components/responses/CacheItemPageOk'
@@ -983,24 +973,6 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /v1/metadata/anime-bindings:
-    get:
-      tags: [Anime]
-      operationId: getAnimeBindings
-      summary: Resumos de binding de várias pastas (só as vinculadas)
-      description: >-
-        Enriquece uma página do catálogo com os bindings de várias pastas numa chamada só — evita um
-        GET por card.
-      parameters:
-        - $ref: '#/components/parameters/FolderIdsQueryParam'
-      responses:
-        '200':
-          $ref: '#/components/responses/AnimeBindingsOk'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
-
   /v1/metadata/anime-relations:
     get:
       tags: [AnimeRelations]
@@ -1148,24 +1120,6 @@ paths:
           $ref: '#/components/responses/BadGateway'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
-
-  /v1/metadata/files/tmdb-pairings:
-    get:
-      tags: [AnimeTmdbFilePairing]
-      operationId: getTmdbFilePairings
-      summary: Pairings de vários arquivos (só os que já têm pairing)
-      description: >-
-        Enriquece a página de arquivos com os pairings de vários arquivos numa chamada só — evita um
-        GET por arquivo.
-      parameters:
-        - $ref: '#/components/parameters/FileIdsQueryParam'
-      responses:
-        '200':
-          $ref: '#/components/responses/TmdbFilePairingsOk'
-        '400':
-          $ref: '#/components/responses/BadRequest'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -1429,6 +1383,15 @@ components:
       schema:
         $ref: '#/components/schemas/FolderId'
 
+    # ---------- cache ----------
+    PendingOnlyFilterParam:
+      name: pendingOnly
+      in: query
+      required: false
+      description: Restringe às linhas com status diferente de `COMPLETED`; `null`/ausente não filtra
+      schema:
+        $ref: '#/components/schemas/PendingOnlyFilter'
+
     # ---------- playback ----------
     SessionIdPathParam:
       name: sessionId
@@ -1466,24 +1429,6 @@ components:
       description: ID do anime na AniList
       schema:
         $ref: '#/components/schemas/AnilistId'
-    FolderIdsQueryParam:
-      name: folderIds
-      in: query
-      required: true
-      description: Ids das pastas a consultar (repetido — `folderIds=1&folderIds=2`)
-      schema:
-        type: array
-        items:
-          $ref: '#/components/schemas/FolderId'
-    FileIdsQueryParam:
-      name: fileIds
-      in: query
-      required: true
-      description: Ids dos arquivos a consultar (repetido — `fileIds=1&fileIds=2`)
-      schema:
-        type: array
-        items:
-          $ref: '#/components/schemas/FileId'
     DepthParam:
       name: depth
       in: query
@@ -1870,14 +1815,6 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/AnimePage'
-    AnimeBindingsOk:
-      description: Resumos de binding das pastas consultadas (só as vinculadas)
-      content:
-        application/json:
-          schema:
-            type: array
-            items:
-              $ref: '#/components/schemas/AnimeBindingSummary'
     AnimeCreated:
       description: Metadata do anime criada
       content:
@@ -1924,14 +1861,6 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/TmdbFilePairingResponse'
-    TmdbFilePairingsOk:
-      description: Pairings dos arquivos consultados (só os que já têm pairing)
-      content:
-        application/json:
-          schema:
-            type: array
-            items:
-              $ref: '#/components/schemas/TmdbFilePairingResponse'
     TmdbFilePairingDeleted:
       description: Pairing removido
 
@@ -2314,6 +2243,12 @@ components:
           description: >-
             `true` se a pasta tem ao menos um arquivo de vídeo direto. Enriquecido só na listagem
             (`GET /folders`); `null` nas leituras que não computam esse campo.
+        animeBinding:
+          allOf: [{ $ref: '#/components/schemas/AnimeBindingSummary' }]
+          nullable: true
+          description: >-
+            Binding de anime da pasta, quando houver. Enriquecido só na listagem
+            (`GET /folders`); `null` nas leituras que não computam esse campo.
 
     MediaFolderPage:
       description: Envelope paginado de pastas
@@ -2371,6 +2306,12 @@ components:
         createdAt:
           type: string
           format: date-time
+        tmdbPairing:
+          allOf: [{ $ref: '#/components/schemas/TmdbFilePairingResponse' }]
+          nullable: true
+          description: >-
+            Pairing TMDB do arquivo, quando houver. Enriquecido só na listagem
+            (`GET /video-files`); `null` nas leituras que não computam esse campo.
 
     VideoFilePage:
       description: Envelope paginado de arquivos
@@ -2402,6 +2343,10 @@ components:
         - DOWNLOADING
         - COMPLETED
         - FAILED
+
+    PendingOnlyFilter:
+      type: boolean
+      description: Restringe às linhas com status diferente de `COMPLETED`
 
     CacheQueueRequest:
       type: object
@@ -3420,7 +3365,8 @@ components:
       type: object
       description: |
         Overrides TMDB — todos os campos opcionais; `null` significa "não sobrepõe".
-        Também usado como body de PUT (body com todos `null` apaga a linha).
+        Também usado como body de PUT (body com todos `null` apaga a linha); os campos
+        `*PreviewUrl` são só de leitura, ignorados num PUT.
       properties:
         title:
           type: string
@@ -3432,12 +3378,24 @@ components:
           type: string
           nullable: true
           description: Caminho relativo do poster (`filePath` cru do TMDB)
+        posterPreviewUrl:
+          type: string
+          nullable: true
+          description: URL completa do CDN do TMDB, já pronta pra exibir (derivada de `posterPath`)
         backdropPath:
           type: string
           nullable: true
+        backdropPreviewUrl:
+          type: string
+          nullable: true
+          description: URL completa do CDN do TMDB, já pronta pra exibir (derivada de `backdropPath`)
         logoPath:
           type: string
           nullable: true
+        logoPreviewUrl:
+          type: string
+          nullable: true
+          description: URL completa do CDN do TMDB, já pronta pra exibir (derivada de `logoPath`)
 
     TmdbAnimeStateResponse:
       type: object
@@ -3539,10 +3497,33 @@ components:
         name:
           type: string
           nullable: true
+        overview:
+          type: string
+          nullable: true
+          description: Sinopse curta do episódio
         airDate:
           type: string
           nullable: true
           description: Data de estreia ISO-8601 (`null` para episódios futuros)
+        runtime:
+          type: integer
+          format: int32
+          nullable: true
+          description: Duração em minutos
+        voteAverage:
+          type: number
+          format: double
+          nullable: true
+          description: Nota média do TMDB
+        voteCount:
+          type: integer
+          format: int32
+          nullable: true
+          description: Total de votos que compõem a nota média
+        episodeType:
+          type: string
+          nullable: true
+          description: 'Classificação do TMDB (ex.: `standard`, `finale`)'
         defaultStillPath:
           type: string
           nullable: true
@@ -3586,7 +3567,9 @@ components:
       type: object
       description: |
         Payload de PUT — descreve o estado completo do pairing. Todos campos opcionais;
-        `null` zera aquela dimensão. Para remover a linha inteira use DELETE.
+        `null` zera aquela dimensão. Para remover a linha inteira use DELETE. Os campos
+        `episode*` vêm prontos do `TmdbFilePairingSchemaEpisode` escolhido no modal — o
+        servidor não rebusca no TMDB, só persiste o que o cliente mandar.
       properties:
         seasonNumber:
           type: integer
@@ -3600,6 +3583,33 @@ components:
           type: string
           nullable: true
           description: '`filePath` relativo do CDN do TMDB'
+        episodeName:
+          type: string
+          nullable: true
+        episodeOverview:
+          type: string
+          nullable: true
+        episodeAirDate:
+          type: string
+          nullable: true
+          description: Data de estreia ISO-8601
+        episodeRuntime:
+          type: integer
+          format: int32
+          nullable: true
+          description: Duração em minutos
+        episodeVoteAverage:
+          type: number
+          format: double
+          nullable: true
+        episodeVoteCount:
+          type: integer
+          format: int32
+          nullable: true
+        episodeType:
+          type: string
+          nullable: true
+          description: 'Classificação do TMDB (ex.: `standard`, `finale`)'
 
     TmdbFilePairingResponse:
       type: object
@@ -3619,6 +3629,37 @@ components:
         thumbnailPath:
           type: string
           nullable: true
+        thumbnailPreviewUrl:
+          type: string
+          nullable: true
+          description: URL completa do CDN do TMDB, já pronta pra exibir (derivada de `thumbnailPath`)
+        episodeName:
+          type: string
+          nullable: true
+        episodeOverview:
+          type: string
+          nullable: true
+        episodeAirDate:
+          type: string
+          nullable: true
+          description: Data de estreia ISO-8601
+        episodeRuntime:
+          type: integer
+          format: int32
+          nullable: true
+          description: Duração em minutos
+        episodeVoteAverage:
+          type: number
+          format: double
+          nullable: true
+        episodeVoteCount:
+          type: integer
+          format: int32
+          nullable: true
+        episodeType:
+          type: string
+          nullable: true
+          description: 'Classificação do TMDB (ex.: `standard`, `finale`)'
 
     # ---------- settings ----------
     SettingKey:

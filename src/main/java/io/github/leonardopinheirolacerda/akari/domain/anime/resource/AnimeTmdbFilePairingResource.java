@@ -9,8 +9,6 @@ import io.github.leonardopinheirolacerda.akari.exceptions.BusinessRuleException;
 import io.github.leonardopinheirolacerda.akari.exceptions.ResourceNotFoundException;
 import jakarta.inject.Inject;
 
-import java.util.List;
-
 /**
  * Implementa {@link AnimeTmdbFilePairingApi} — pairing TMDB (temporada/episódio/thumbnail) dos
  * arquivos de vídeo, em {@code /v1/metadata/files/{fileId}/tmdb-pairing} e correlatos.
@@ -64,19 +62,6 @@ public class AnimeTmdbFilePairingResource implements AnimeTmdbFilePairingApi {
     @Override
     public TmdbFilePairingSchema getTmdbFilePairingSchema(Integer anilistId) {
         return animeTmdbFilePairingService.getTmdbFilePairingSchema(anilistId);
-    }
-
-    /**
-     * {@code GET /v1/metadata/files/tmdb-pairings} — resume os pairings de vários arquivos numa
-     * chamada só.
-     *
-     * @param fileIds ids dos arquivos no catalog
-     * @return os pairings existentes, com {@code 200 OK}; arquivos sem pairing gravado não
-     *         aparecem no resultado
-     */
-    @Override
-    public List<TmdbFilePairingResponse> getTmdbFilePairings(List<Integer> fileIds) {
-        return animeTmdbFilePairingService.getTmdbFilePairings(fileIds);
     }
 
     /**

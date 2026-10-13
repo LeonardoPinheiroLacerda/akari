@@ -10,14 +10,16 @@ import io.github.leonardopinheirolacerda.akari.domain.tmdb.client.dtos.TmdbSeaso
 import io.github.leonardopinheirolacerda.akari.utils.TmdbImageUtils;
 import java.util.List;
 import org.mapstruct.Mapper;
+import org.mapstruct.Mapping;
 
 /**
  * Converte entre o model {@link TmdbFilePairing}, as temporadas/episódios do TMDB, e os DTOs
  * gerados do contrato.
  */
-@Mapper(componentModel = "cdi")
+@Mapper(componentModel = "cdi", imports = TmdbImageUtils.class)
 public interface AnimeTmdbFilePairingMapper {
 
+    @Mapping(target = "thumbnailPreviewUrl", expression = "java(TmdbImageUtils.thumbnail(pairing.thumbnailPath))")
     TmdbFilePairingResponse toResponse(TmdbFilePairing pairing);
 
     default TmdbFilePairingSchema toSchema(List<TmdbSeasonResponse> seasons) {
@@ -48,7 +50,12 @@ public interface AnimeTmdbFilePairingMapper {
         return new TmdbFilePairingSchemaEpisode()
                 .episodeNumber(episode.episodeNumber())
                 .name(episode.name())
+                .overview(episode.overview())
                 .airDate(episode.airDate())
+                .runtime(episode.runtime())
+                .voteAverage(episode.voteAverage())
+                .voteCount(episode.voteCount())
+                .episodeType(episode.episodeType())
                 .defaultStillPath(episode.stillPath())
                 .defaultStillPreviewUrl(TmdbImageUtils.thumbnail(episode.stillPath()));
     }

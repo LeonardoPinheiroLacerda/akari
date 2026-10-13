@@ -1,5 +1,6 @@
 package io.github.leonardopinheirolacerda.akari.domain.mediafolder.service;
 
+import io.github.leonardopinheirolacerda.akari.api.dto.AnimeBindingSummary;
 import io.github.leonardopinheirolacerda.akari.api.dto.MediaFolderPage;
 import io.github.leonardopinheirolacerda.akari.api.dto.MediaFolderRequest;
 import io.github.leonardopinheirolacerda.akari.api.dto.MediaFolderResponse;
@@ -7,6 +8,7 @@ import io.github.leonardopinheirolacerda.akari.api.dto.MediaType;
 import io.github.leonardopinheirolacerda.akari.model.PageResult;
 import io.github.leonardopinheirolacerda.akari.exceptions.BusinessRuleException;
 import io.github.leonardopinheirolacerda.akari.exceptions.ResourceNotFoundException;
+import io.github.leonardopinheirolacerda.akari.domain.anime.service.AnimeService;
 import io.github.leonardopinheirolacerda.akari.domain.mediafolder.mapper.MediaFolderMapper;
 import io.github.leonardopinheirolacerda.akari.domain.mediafolder.model.MediaFolder;
 import io.github.leonardopinheirolacerda.akari.domain.storageprovider.model.StorageProvider;
@@ -18,8 +20,10 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
@@ -34,6 +38,9 @@ public class MediaFolderService {
 
     @Inject
     StorageProviderService storageProviderService;
+
+    @Inject
+    AnimeService animeService;
 
     /**
      * Cria uma nova pasta, resolvendo o pai automaticamente a partir do {@code path}.
@@ -170,7 +177,9 @@ public class MediaFolderService {
     }
 
     /**
-     * Pagina as pastas, aplicando os filtros informados como AND.
+     * Pagina as pastas, aplicando os filtros informados como AND, já com o binding de anime de
+     * cada uma embutido — evita o cliente paginar e depois buscar os bindings em lote numa
+     * segunda chamada.
      *
      * @param page página desejada, 0-based
      * @param size tamanho da página
@@ -180,7 +189,8 @@ public class MediaFolderService {
      * @param parentId id da pasta pai; {@code null} não filtra
      * @param hasFiles filtra por ter ou não arquivos diretos; {@code null} não filtra
      * @param sort specs {@code campo[:asc|desc]} na whitelist {@code name}/{@code createdAt}
-     * @return página de pastas que atendem aos filtros
+     * @return página de pastas que atendem aos filtros, cada uma com {@code animeBinding}
+     *         preenchido quando vinculada
      */
     public MediaFolderPage listFolders(
             Integer page,
@@ -205,7 +215,21 @@ public class MediaFolderService {
 
         Log.infof("Listadas %d pastas (página %d, tamanho %d)", pageResult.data().size(), page, size);
 
-        return mediaFolderMapper.toPage(pageResult);
+        final MediaFolderPage folderPage = mediaFolderMapper.toPage(pageResult);
+
+        final List<Integer> folderIds = folderPage.getData()
+                .stream()
+                .map(MediaFolderResponse::getId)
+                .toList();
+
+        final Map<Integer, AnimeBindingSummary> bindingsByFolderId = animeService.getAnimeBindings(folderIds)
+                .stream()
+                .collect(Collectors.toMap(AnimeBindingSummary::getFolderId, Function.identity()));
+
+        folderPage.getData()
+                .forEach(folder -> folder.animeBinding(bindingsByFolderId.get(folder.getId())));
+
+        return folderPage;
     }
 
     /**

@@ -24,27 +24,17 @@ public class CacheResource implements CacheApi {
     CacheService cacheService;
 
     /**
-     * {@code GET /v1/cache/items} — lista todas as linhas do cache.
+     * {@code GET /v1/cache/items} — lista as linhas do cache.
      *
      * @param page página desejada, 0-based
      * @param size tamanho da página
+     * @param pendingOnly {@code true} restringe às linhas com status diferente de
+     *                    {@code COMPLETED}; {@code null}/{@code false} não filtra
      * @return página de linhas ordenadas por ordem de enfileiramento, com {@code 200 OK}
      */
     @Override
-    public CacheItemPage listCaches(Integer page, Integer size) {
-        return cacheService.listCaches(page, size);
-    }
-
-    /**
-     * {@code GET /v1/cache/items/pending} — lista as linhas ainda não concluídas.
-     *
-     * @param page página desejada, 0-based
-     * @param size tamanho da página
-     * @return página de linhas com status diferente de {@code COMPLETED}, com {@code 200 OK}
-     */
-    @Override
-    public CacheItemPage listPendingCaches(Integer page, Integer size) {
-        return cacheService.listPendingCaches(page, size);
+    public CacheItemPage listCaches(Integer page, Integer size, Boolean pendingOnly) {
+        return cacheService.listCaches(page, size, pendingOnly);
     }
 
     /**

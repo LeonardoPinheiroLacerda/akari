@@ -154,7 +154,8 @@ public class AnimeService {
 
     /**
      * Resume o binding de várias pastas numa chamada só. Pastas sem anime vinculado simplesmente
-     * não aparecem no resultado.
+     * não aparecem no resultado. Usado por {@link MediaFolderService#listFolders} pra embutir
+     * {@code animeBinding} na listagem, sem o cliente precisar de uma segunda chamada.
      *
      * @param folderIds ids das pastas no catalog
      * @return os resumos das pastas que têm anime vinculado

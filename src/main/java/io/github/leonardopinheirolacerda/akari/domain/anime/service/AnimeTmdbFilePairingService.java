@@ -85,20 +85,6 @@ public class AnimeTmdbFilePairingService {
     }
 
     /**
-     * Resume os pairings de vários arquivos numa chamada só. Arquivos sem pairing gravado
-     * simplesmente não aparecem no resultado.
-     *
-     * @param fileIds ids dos arquivos no catalog
-     * @return os pairings existentes
-     */
-    public List<TmdbFilePairingResponse> getTmdbFilePairings(List<Integer> fileIds) {
-        return TmdbFilePairing.findByFileIds(fileIds)
-                .stream()
-                .map(animeTmdbFilePairingMapper::toResponse)
-                .toList();
-    }
-
-    /**
      * Cria ou substitui o pairing do arquivo. Campos {@code null} no payload zeram aquela
      * dimensão, mas a linha continua existindo — pra remover a linha inteira use
      * {@link #deleteTmdbFilePairing(Integer)}.
@@ -124,6 +110,13 @@ public class AnimeTmdbFilePairingService {
         pairing.seasonNumber = tmdbFilePairingRequest.getSeasonNumber();
         pairing.episodeNumber = tmdbFilePairingRequest.getEpisodeNumber();
         pairing.thumbnailPath = tmdbFilePairingRequest.getThumbnailPath();
+        pairing.episodeName = tmdbFilePairingRequest.getEpisodeName();
+        pairing.episodeOverview = tmdbFilePairingRequest.getEpisodeOverview();
+        pairing.episodeAirDate = tmdbFilePairingRequest.getEpisodeAirDate();
+        pairing.episodeRuntime = tmdbFilePairingRequest.getEpisodeRuntime();
+        pairing.episodeVoteAverage = tmdbFilePairingRequest.getEpisodeVoteAverage();
+        pairing.episodeVoteCount = tmdbFilePairingRequest.getEpisodeVoteCount();
+        pairing.episodeType = tmdbFilePairingRequest.getEpisodeType();
 
         pairing.persist();
 
@@ -152,6 +145,21 @@ public class AnimeTmdbFilePairingService {
         pairing.delete();
 
         Log.infof("Pairing TMDB do arquivo %d removido com sucesso", fileId);
+    }
+
+    /**
+     * Resume os pairings de vários arquivos numa chamada só. Arquivos sem pairing gravado
+     * simplesmente não aparecem no resultado. Usado por {@link VideoFileService#listVideoFiles}
+     * pra embutir {@code tmdbPairing} na listagem, sem o cliente precisar de uma segunda chamada.
+     *
+     * @param fileIds ids dos arquivos no catalog
+     * @return os pairings existentes
+     */
+    public List<TmdbFilePairingResponse> getTmdbFilePairings(List<Integer> fileIds) {
+        return TmdbFilePairing.findByFileIds(fileIds)
+                .stream()
+                .map(animeTmdbFilePairingMapper::toResponse)
+                .toList();
     }
 
 }

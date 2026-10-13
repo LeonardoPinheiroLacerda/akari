@@ -29,6 +29,27 @@ public class TmdbFilePairing extends PanacheEntityBase {
     @Column(name = "thumbnail_path")
     public String thumbnailPath;
 
+    @Column(name = "episode_name")
+    public String episodeName;
+
+    @Column(name = "episode_overview")
+    public String episodeOverview;
+
+    @Column(name = "episode_air_date")
+    public String episodeAirDate;
+
+    @Column(name = "episode_runtime")
+    public Integer episodeRuntime;
+
+    @Column(name = "episode_vote_average")
+    public Double episodeVoteAverage;
+
+    @Column(name = "episode_vote_count")
+    public Integer episodeVoteCount;
+
+    @Column(name = "episode_type")
+    public String episodeType;
+
     /**
      * Busca pelo {@code fileId}, a própria chave primária.
      *

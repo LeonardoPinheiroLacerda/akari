@@ -1,10 +1,12 @@
 package io.github.leonardopinheirolacerda.akari.domain.videofile.service;
 
+import io.github.leonardopinheirolacerda.akari.api.dto.TmdbFilePairingResponse;
 import io.github.leonardopinheirolacerda.akari.api.dto.VideoFilePage;
 import io.github.leonardopinheirolacerda.akari.api.dto.VideoFileRequest;
 import io.github.leonardopinheirolacerda.akari.api.dto.VideoFileResponse;
 import io.github.leonardopinheirolacerda.akari.model.PageResult;
 import io.github.leonardopinheirolacerda.akari.exceptions.ResourceNotFoundException;
+import io.github.leonardopinheirolacerda.akari.domain.anime.service.AnimeTmdbFilePairingService;
 import io.github.leonardopinheirolacerda.akari.domain.mediafolder.model.MediaFolder;
 import io.github.leonardopinheirolacerda.akari.domain.mediafolder.service.MediaFolderService;
 import io.github.leonardopinheirolacerda.akari.utils.DirectoryUtils;
@@ -15,6 +17,9 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
 import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * Arquivos de vídeo do catalog: CRUD administrado pela API e os métodos de suporte usados pela
@@ -28,6 +33,9 @@ public class VideoFileService {
 
     @Inject
     MediaFolderService mediaFolderService;
+
+    @Inject
+    AnimeTmdbFilePairingService animeTmdbFilePairingService;
 
     /**
      * Cria um novo arquivo na pasta informada, derivando o {@code path} a partir da pasta +
@@ -117,12 +125,14 @@ public class VideoFileService {
     }
 
     /**
-     * Pagina os arquivos de uma pasta.
+     * Pagina os arquivos de uma pasta, já com o pairing TMDB de cada um embutido — evita o
+     * cliente paginar e depois buscar os pairings em lote numa segunda chamada.
      *
      * @param folderId id da pasta a listar
      * @param page página desejada, 0-based
      * @param size tamanho da página
-     * @return página de arquivos da pasta; vazia se a pasta não existir ou não tiver arquivos
+     * @return página de arquivos da pasta; vazia se a pasta não existir ou não tiver arquivos;
+     *         cada arquivo com {@code tmdbPairing} preenchido quando pareado
      */
     public VideoFilePage listVideoFiles(Integer folderId, Integer page, Integer size) {
         final PageResult<VideoFile> pageResult = VideoFile.findPage(folderId, page, size);
@@ -135,7 +145,21 @@ public class VideoFileService {
                 size
         );
 
-        return videoFileMapper.toPage(pageResult);
+        final VideoFilePage filePage = videoFileMapper.toPage(pageResult);
+
+        final List<Integer> fileIds = filePage.getData()
+                .stream()
+                .map(VideoFileResponse::getId)
+                .toList();
+
+        final Map<Integer, TmdbFilePairingResponse> pairingsByFileId = animeTmdbFilePairingService
+                .getTmdbFilePairings(fileIds)
+                .stream()
+                .collect(Collectors.toMap(TmdbFilePairingResponse::getFileId, Function.identity()));
+
+        filePage.getData().forEach(file -> file.tmdbPairing(pairingsByFileId.get(file.getId())));
+
+        return filePage;
     }
 
     /**

@@ -60,14 +60,16 @@ public class VideoFileResource implements VideoFileApi {
     }
 
     /**
-     * {@code GET /v1/catalog/video-files} — lista paginada dos arquivos de uma pasta.
+     * {@code GET /v1/catalog/video-files} — lista paginada dos arquivos de uma pasta, já com o
+     * pairing TMDB de cada um embutido.
      *
      * <p>Se a pasta não existir ou não tiver arquivos, devolve página vazia (não 404).
      *
      * @param folderId id da pasta a listar
      * @param page página desejada, 0-based
      * @param size tamanho da página
-     * @return página de arquivos da pasta, com {@code 200 OK}
+     * @return página de arquivos da pasta, com {@code 200 OK}; {@code tmdbPairing} {@code null}
+     *         nos arquivos sem pairing gravado
      */
     @Override
     public VideoFilePage listVideoFiles(Integer folderId, Integer page, Integer size) {

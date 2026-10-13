@@ -69,7 +69,8 @@ public class MediaFolderResource implements MediaFolderApi {
     }
 
     /**
-     * {@code GET /v1/catalog/folders} — lista paginada de pastas com filtros AND.
+     * {@code GET /v1/catalog/folders} — lista paginada de pastas com filtros AND, já com o
+     * binding de anime de cada uma embutido.
      *
      * @param page página desejada, 0-based
      * @param size tamanho da página
@@ -79,7 +80,8 @@ public class MediaFolderResource implements MediaFolderApi {
      * @param parentId id da pasta pai; {@code null} não filtra
      * @param hasFiles filtra por ter ou não arquivos diretos; {@code null} não filtra
      * @param sort specs {@code campo[:asc|desc]} na whitelist {@code name}/{@code createdAt}
-     * @return página de pastas, com {@code 200 OK}
+     * @return página de pastas, com {@code 200 OK}; {@code animeBinding} {@code null} nas pastas
+     *         sem anime vinculado
      */
     @Override
     public MediaFolderPage listFolders(
