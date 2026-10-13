@@ -66,6 +66,9 @@ public class MediaFolder extends PanacheEntityBase {
     @OneToMany(mappedBy = "folder", fetch = FetchType.LAZY)
     public List<VideoFile> videoFiles = new ArrayList<>();
 
+    public Boolean hasFiles() {
+        return !videoFiles.isEmpty();
+    }
     /**
      * Busca uma pasta pelo id.
      *

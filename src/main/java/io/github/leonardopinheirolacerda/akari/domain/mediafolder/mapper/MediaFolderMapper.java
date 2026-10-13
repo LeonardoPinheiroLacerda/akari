@@ -17,6 +17,7 @@ public interface MediaFolderMapper {
 
     @Mapping(source = "storageProvider.id", target = "storageProviderId")
     @Mapping(source = "parent.id", target = "parentId")
+    @Mapping(target = "hasFiles", expression = "java(mediaFolder.hasFiles())")
     MediaFolderResponse toResponse(MediaFolder mediaFolder);
 
     MediaFolderPage toPage(PageResult<MediaFolder> pageResult);
