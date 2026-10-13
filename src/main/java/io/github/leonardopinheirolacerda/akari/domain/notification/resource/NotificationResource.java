@@ -1,13 +1,11 @@
 package io.github.leonardopinheirolacerda.akari.domain.notification.resource;
 
 import io.github.leonardopinheirolacerda.akari.api.NotificationApi;
-import io.github.leonardopinheirolacerda.akari.api.dto.NotificationResponse;
+import io.github.leonardopinheirolacerda.akari.api.dto.NotificationPage;
 import io.github.leonardopinheirolacerda.akari.api.dto.UnreadCountResponse;
 import io.github.leonardopinheirolacerda.akari.domain.notification.service.NotificationService;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-
-import java.util.List;
 
 /**
  * Implementa {@link NotificationApi} — notificações em {@code /v1/notifications}.
@@ -32,13 +30,15 @@ public class NotificationResource implements NotificationApi {
     }
 
     /**
-     * {@code GET /v1/notifications} — lista as 100 notificações mais recentes, lidas ou não.
+     * {@code GET /v1/notifications} — pagina as notificações, da mais nova para a mais antiga.
      *
-     * @return as notificações, da mais nova para a mais antiga, com {@code 200 OK}
+     * @param page página desejada, 0-based
+     * @param size tamanho da página
+     * @return a página de notificações, com {@code 200 OK}
      */
     @Override
-    public List<NotificationResponse> listNotifications() {
-        return notificationService.listNotifications();
+    public NotificationPage listNotifications(Integer page, Integer size) {
+        return notificationService.listNotifications(page, size);
     }
 
     /**

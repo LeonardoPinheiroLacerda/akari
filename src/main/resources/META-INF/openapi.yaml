@@ -156,15 +156,15 @@ tags:
     description: |
       Notificações de observabilidade.
 
-      Lista notificações de observabilidade, conta as não-lidas (badge) e marca como lidas
-      (individual/todas). Hoje, todas as notificações são emitidas pelo domínio `ingestion`
+      Lista paginada de notificações de observabilidade, conta as não-lidas (badge) e marca como
+      lidas (individual/todas). Hoje, todas as notificações são emitidas pelo domínio `ingestion`
       (falhas de integração com storage provider/AniList/TMDB e problemas de qualidade do
       auto-bind/pairing); nenhum outro domínio emite notificação ainda.
 
-      O push em tempo real é planejado como um stream SSE em `/v1/notifications/events` —
-      **ainda não implementado** (só existe hoje o SSE de `/v1/cache/events`, de outro domínio) e,
-      quando existir, não será modelado neste contrato (o gerador `jaxrs-spec` não descreve
-      Server-Sent Events); será servido por um resource code-first, como o de `cache`.
+      O push em tempo real é um stream SSE em `/v1/notifications/events`, no mesmo molde do
+      `/v1/cache/events`: **não é modelado neste contrato** (o gerador `jaxrs-spec` não descreve
+      Server-Sent Events) e é servido por um resource code-first. Emite um evento sempre que uma
+      notificação nova é criada.
 
 paths:
 
@@ -1215,14 +1215,18 @@ paths:
     get:
       tags: [Notification]
       operationId: listNotifications
-      summary: Lista as notificações mais recentes
+      summary: Lista paginada das notificações, da mais nova para a mais antiga
       description: |
-        Devolve as **100** notificações mais recentes, lidas ou não, da mais nova para a mais
-        antiga. Não há paginação — notificações mais antigas que as 100 primeiras não são
-        acessíveis pela API.
+        Página de notificações, lidas ou não, ordenadas da mais nova para a mais antiga —
+        pensada para um botão "ver mais" no cliente (cada clique pede a próxima `page`).
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/SizeParam'
       responses:
         '200':
-          $ref: '#/components/responses/NotificationListOk'
+          $ref: '#/components/responses/NotificationPageOk'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -1882,14 +1886,12 @@ components:
             $ref: '#/components/schemas/SettingResponse'
 
     # ---------- notification ----------
-    NotificationListOk:
-      description: Lista (possivelmente vazia) das notificações mais recentes
+    NotificationPageOk:
+      description: Página (possivelmente vazia) de notificações
       content:
         application/json:
           schema:
-            type: array
-            items:
-              $ref: '#/components/schemas/NotificationResponse'
+            $ref: '#/components/schemas/NotificationPage'
     UnreadCountOk:
       description: Contagem de não-lidas
       content:
@@ -3763,6 +3765,18 @@ components:
           type: string
           format: date-time
           description: Momento em que a notificação foi gerada
+
+    NotificationPage:
+      description: Envelope paginado de notificações
+      allOf:
+        - $ref: '#/components/schemas/Page'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/NotificationResponse'
 
     UnreadCountResponse:
       type: object

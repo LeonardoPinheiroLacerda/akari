@@ -73,13 +73,14 @@ anibridge, franquias/relações entre animes).
    configuráveis pelo admin; preferências obrigatórias sem valor fazem os fluxos que dependem
    delas responderem `503` (`INTEGRATION_NOT_CONFIGURED`).
 8. **Observabilidade** (`Notification`) → eventos relevantes do sistema ficam disponíveis como
-   lista consultável e contador de não lidas. Hoje, todas as notificações são emitidas pelo
-   domínio `ingestion` (`IngestionService` e `FolderAutoBindService`): falha ao listar o storage
-   provider, falha de integração com AniList/TMDB durante o auto-bind, ausência de candidato
-   AniList/mapeamento TMDB utilizável, segmentos de numeração ambíguos (`anibridge`) e pareamento
-   incompleto de arquivos↔episódio; nenhum outro domínio emite notificação ainda. O push em tempo
-   real via SSE em `/v1/notifications/events` é **funcionalidade planejada, ainda não
-   implementada** (o único SSE real hoje é o de `cache`, em `/v1/cache/events`).
+   lista paginada (0-based, pensada para um botão "ver mais" no cliente) e contador de não lidas.
+   Hoje, todas as notificações são emitidas pelo domínio `ingestion` (`IngestionService` e
+   `FolderAutoBindService`): falha ao listar o storage provider, falha de integração com
+   AniList/TMDB durante o auto-bind, ausência de candidato AniList/mapeamento TMDB utilizável,
+   segmentos de numeração ambíguos (`anibridge`) e pareamento incompleto de arquivos↔episódio;
+   nenhum outro domínio emite notificação ainda. O push em tempo real via SSE em
+   `/v1/notifications/events` emite um evento a cada notificação nova, no mesmo molde code-first
+   do SSE de `cache` (`/v1/cache/events`).
 
 ## Atores envolvidos
 

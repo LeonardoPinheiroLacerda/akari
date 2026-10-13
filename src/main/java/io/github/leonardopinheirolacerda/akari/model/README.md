@@ -16,7 +16,7 @@ Fornecer formas de dados reutilizáveis entre domínios: um envelope de página 
 - Nenhum dos dois importa `exceptions/`, `config/` ou qualquer `domain/`.
 
 ## Módulos relacionados
-- `PageResult` é usado por 5 domínios distintos: `anime`, `cache`, `mediafolder`, `storageprovider` e `videofile` (nos respectivos `model`/`mapper`/`service` de listagem paginada). Isso está de acordo com a convenção de 2+ domínios.
+- `PageResult` é usado por 6 domínios distintos: `anime`, `cache`, `mediafolder`, `notification`, `storageprovider` e `videofile` (nos respectivos `model`/`mapper`/`service` de listagem paginada). Isso está de acordo com a convenção de 2+ domínios.
 - `CacheEntry` é usado, fora deste pacote e de `utils/CacheUtils`, **apenas** por `domain/cache/model/IntegrationCache.java` (método `readEntry`).
 
 ## Pontos de entrada
@@ -32,4 +32,4 @@ Não há pontos de entrada no sentido de endpoint/scheduler — são tipos de da
 
 ## Observações técnicas e débitos identificados
 - **Violação confirmada da convenção**: `CacheEntry` é usado por um único domínio (`cache`, via `IntegrationCache.readEntry`) — não há um segundo domínio consumindo esse tipo hoje. A convenção do projeto diz que `model/` raiz só deveria receber um tipo novo quando usado por 2+ domínios; `CacheEntry` não atende esse critério. **Backlog real** (confirmado pelo mantenedor, mesmo item já listado em `ARQUITETURA_DO_SISTEMA.md`): candidato a mover para `domain/cache/model/`.
-- `PageResult`, em contraste, cumpre a convenção com folga (5 domínios).
+- `PageResult`, em contraste, cumpre a convenção com folga (6 domínios).

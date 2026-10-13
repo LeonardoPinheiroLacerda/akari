@@ -1,8 +1,9 @@
 package io.github.leonardopinheirolacerda.akari.domain.notification.model;
 
 import io.github.leonardopinheirolacerda.akari.api.dto.NotificationLevel;
+import io.github.leonardopinheirolacerda.akari.model.PageResult;
 import io.quarkus.hibernate.orm.panache.PanacheEntityBase;
-import io.quarkus.panache.common.Sort;
+import io.quarkus.hibernate.orm.panache.PanacheQuery;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -14,15 +15,13 @@ import jakarta.persistence.Table;
 import org.hibernate.annotations.CreationTimestamp;
 
 import java.time.OffsetDateTime;
-import java.util.List;
 import java.util.Optional;
 
 /**
  * Uma notificação exibida ao usuário, persistida na tabela {@code notification}.
  *
  * <p>Produzida hoje só pela ingestão (conclusão, falha geral e falhas parciais do binding
- * automático de cada pasta, ver {@code NotificationService#notify}). Sem paginação na API —
- * só as 100 mais recentes são consultáveis.
+ * automático de cada pasta, ver {@code NotificationService#notify}).
  */
 @Entity
 @Table(name = "notification")
@@ -70,16 +69,24 @@ public class Notification extends PanacheEntityBase {
     }
 
     /**
-     * Busca as notificações mais recentes, lidas ou não.
+     * Pagina as notificações, da mais nova para a mais antiga.
      *
-     * @param limit quantidade máxima de notificações a devolver
-     * @return as notificações, da mais nova para a mais antiga
+     * @param page página desejada, 0-based
+     * @param size tamanho da página
+     * @return página de notificações, lidas ou não
      */
-    public static List<Notification> listRecent(int limit) {
-        return Notification
-                .findAll(Sort.descending("createdAt"))
-                .page(0, limit)
-                .list();
+    public static PageResult<Notification> findPage(Integer page, Integer size) {
+        final PanacheQuery<Notification> query = Notification
+                .find("order by createdAt desc")
+                .page(page, size);
+
+        return new PageResult<>(
+                query.list(),
+                page,
+                size,
+                query.count(),
+                query.pageCount()
+        );
     }
 
     /**

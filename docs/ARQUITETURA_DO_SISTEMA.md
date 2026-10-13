@@ -205,10 +205,13 @@ indicado o contrário.
      de equívoco; `TmdbService` usa `PAGE_SIZE = 20` fixo (ignora o `size` do cliente nesses
      dois endpoints) e repassa `page + 1` direto ao TMDB, sem buscar múltiplas páginas upstream.
      Contrato corrigido.
-   - A tag `Notification` descreve um SSE em `/v1/notifications/events` que **não existe** no
-     código hoje — confirmado pelo mantenedor que **não é divergência, é feature planejada** ainda
-     não implementada; o único SSE real implementado atualmente é `CacheEventResource`
-     (`/v1/cache/events`). Descrição do contrato ajustada para deixar isso explícito.
+   - A tag `Notification` descrevia um SSE em `/v1/notifications/events` que, à época desta
+     curadoria, ainda não existia no código — foi implementado depois, no mesmo molde code-first
+     de `CacheEventResource`/`CacheEventBroadcaster` (`NotificationEventResource`/
+     `NotificationEventBroadcaster`, em `domain/notification/sse/`): emite um evento `NEW` a cada
+     notificação criada. A listagem `GET /v1/notifications` também deixou de ser top-100 fixo e
+     ganhou paginação real (`PageParam`/`SizeParam`, envelope `NotificationPage`), pensada para um
+     botão "ver mais" no cliente.
 4. **`playback` tem débitos de ciclo de vida de processo**: processos `ffmpeg` e diretórios de
    workspace HLS órfãos em caso de crash da aplicação (sem reconciliação na inicialização); sem
    lock explícito por sessão (corrida possível em seek/troca de faixa concorrente); sem limite de
@@ -263,7 +266,7 @@ indicado o contrário.
   client,scheduler}` do skill `code-style` sem introduzir camadas paralelas (`UseCase`, `Port`,
   `Adapter`, `Repository`).
 - Antes de adicionar um tipo em `model/` (raiz, fora de `domain/`), confirmar que será consumido
-  por **2 ou mais domínios** — hoje `PageResult` cumpre esse critério (5 domínios); `CacheEntry` não
+  por **2 ou mais domínios** — hoje `PageResult` cumpre esse critério (6 domínios); `CacheEntry` não
   cumpre e é candidato a correção (mover para `domain/cache/model/`) antes de ganhar um segundo
   consumidor.
 - Qualquer novo client de integração externa deve embrulhar falhas em `IntegrationException` no

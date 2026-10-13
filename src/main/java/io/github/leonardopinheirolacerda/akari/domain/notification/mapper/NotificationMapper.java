@@ -1,20 +1,21 @@
 package io.github.leonardopinheirolacerda.akari.domain.notification.mapper;
 
+import io.github.leonardopinheirolacerda.akari.api.dto.NotificationPage;
 import io.github.leonardopinheirolacerda.akari.api.dto.NotificationResponse;
 import io.github.leonardopinheirolacerda.akari.domain.notification.model.Notification;
+import io.github.leonardopinheirolacerda.akari.model.PageResult;
 import org.mapstruct.Mapper;
 
-import java.util.List;
-
 /**
- * Converte {@link Notification} (model) para o DTO gerado do contrato ({@code
- * NotificationResponse}). Cópia direta de campos, sem conversão não-trivial.
+ * Converte {@link Notification} (model) para os DTOs gerados do contrato ({@code
+ * NotificationResponse}, {@code NotificationPage}). Cópia direta de campos, sem conversão
+ * não-trivial.
  */
 @Mapper(componentModel = "cdi")
 public interface NotificationMapper {
 
     NotificationResponse toResponse(Notification notification);
 
-    List<NotificationResponse> toResponseList(List<Notification> notifications);
+    NotificationPage toPage(PageResult<Notification> pageResult);
 
 }

@@ -1,39 +1,42 @@
 package io.github.leonardopinheirolacerda.akari.domain.notification.service;
 
 import io.github.leonardopinheirolacerda.akari.api.dto.NotificationLevel;
+import io.github.leonardopinheirolacerda.akari.api.dto.NotificationPage;
 import io.github.leonardopinheirolacerda.akari.api.dto.NotificationResponse;
 import io.github.leonardopinheirolacerda.akari.api.dto.UnreadCountResponse;
 import io.github.leonardopinheirolacerda.akari.domain.notification.mapper.NotificationMapper;
 import io.github.leonardopinheirolacerda.akari.domain.notification.model.Notification;
+import io.github.leonardopinheirolacerda.akari.domain.notification.sse.NotificationEvent;
+import io.github.leonardopinheirolacerda.akari.domain.notification.sse.NotificationEventBroadcaster;
+import io.github.leonardopinheirolacerda.akari.model.PageResult;
 import io.quarkus.logging.Log;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
 
-import java.util.List;
-
 /**
- * Notificações exibidas ao usuário: listagem das mais recentes e controle de lido/não-lido.
+ * Notificações exibidas ao usuário: listagem paginada e controle de lido/não-lido.
  */
 @ApplicationScoped
 public class NotificationService {
 
-    private static final int RECENT_LIMIT = 100;
-
     @Inject
     NotificationMapper notificationMapper;
 
+    @Inject
+    NotificationEventBroadcaster notificationEventBroadcaster;
+
     /**
-     * Lista as notificações mais recentes, lidas ou não.
+     * Pagina as notificações, da mais nova para a mais antiga.
      *
-     * @return até 100 notificações, da mais nova para a mais antiga
+     * @param page página desejada, 0-based
+     * @param size tamanho da página
+     * @return página de notificações, lidas ou não
      */
-    public List<NotificationResponse> listNotifications() {
-        final List<Notification> notifications = Notification.listRecent(RECENT_LIMIT);
+    public NotificationPage listNotifications(Integer page, Integer size) {
+        final PageResult<Notification> notifications = Notification.findPage(page, size);
 
-        Log.infof("Listadas %d notificações", notifications.size());
-
-        return notificationMapper.toResponseList(notifications);
+        return notificationMapper.toPage(notifications);
     }
 
     /**
@@ -63,6 +66,21 @@ public class NotificationService {
     }
 
     /**
+     * Remove os sinks SSE de {@code /v1/notifications/events} já fechados pelo cliente.
+     *
+     * <p>Rotina periódica (ver {@code NotificationScheduler}), não ligada a nenhuma notificação
+     * nova — sem ela, um sink morto só seria limpo na próxima chamada de {@code notify()}, que
+     * pode demorar.
+     */
+    public void pruneClosedSseConnections() {
+        final int removed = notificationEventBroadcaster.pruneClosedSinks();
+
+        if (removed > 0) {
+            Log.infof("%d conexões SSE de notificação encerradas removidas", removed);
+        }
+    }
+
+    /**
      * Marca todas as notificações não lidas como lidas.
      */
     @Transactional
@@ -73,8 +91,9 @@ public class NotificationService {
     }
 
     /**
-     * Cria uma notificação. Primeiro produtor do projeto — hoje só a ingestão gera notificação
-     * (conclusão, falha geral e falhas parciais do binding automático de cada pasta).
+     * Cria uma notificação e publica no stream SSE de {@code /v1/notifications/events}. Primeiro
+     * produtor do projeto — hoje só a ingestão gera notificação (conclusão, falha geral e falhas
+     * parciais do binding automático de cada pasta).
      *
      * @param level severidade
      * @param title título, ou {@code null}
@@ -93,6 +112,11 @@ public class NotificationService {
         notification.read = false;
 
         notification.persist();
+
+        final NotificationResponse notificationResponse = notificationMapper.toResponse(notification);
+
+        final NotificationEvent created = NotificationEvent.created(notificationResponse);
+        notificationEventBroadcaster.publish(created);
 
         Log.infof("Notificação %s criada: %s", level, message);
     }
