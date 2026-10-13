@@ -184,81 +184,58 @@ nesse service tem raio de impacto em 3 domínios além do seu próprio resource.
 
 ## Riscos técnicos e acoplamentos importantes
 
-Consolidado dos achados confirmados em código pelos agentes que analisaram cada domínio (ver
-`README.md` de cada pasta para o detalhe completo). Confirmado com o mantenedor: os itens abaixo
-são backlog real (a corrigir aos poucos), não apenas observações passivas sem prazo — exceto onde
-indicado o contrário.
+Consolidado dos achados por domínio (ver `README.md` de cada pasta para o detalhe completo). Os
+itens abaixo são backlog real (a corrigir aos poucos), exceto onde indicado "Aceito".
 
-1. **`model/CacheEntry` viola a convenção de `model/` raiz.** É usado por um único domínio
-   (`domain/cache/model/IntegrationCache`), não por 2+ como a convenção exige. Candidato real a
-   mover para `domain/cache/model/`.
-2. **`domain/cache` mistura dois domínios funcionalmente independentes no mesmo pacote**:
+1. **`domain/cache` mistura dois domínios funcionalmente independentes no mesmo pacote**:
    `VideoFileCache` (fila de download remoto→local com eviction LRU) e `IntegrationCache` (cache
    key/value genérico de respostas AniList/TMDB). Não há relação funcional entre os dois além de
    compartilharem o nome do pacote.
-3. **Divergências factuais entre o contrato (`openapi.yaml`) e a implementação real — já
-   corrigidas no contrato:**
-   - As descrições das tags `AnilistSearch`/`TmdbSearch` diziam "cache-first com SQLite interno" —
-     equívoco confirmado pelo mantenedor; a implementação real usa `IntegrationCache` em
-     **PostgreSQL** (coluna JSON), sem nenhum SQLite no projeto. Contrato corrigido.
-   - A tag `TmdbSearch` descrevia "busca várias páginas upstream e recorta a pedida" — mesmo tipo
-     de equívoco; `TmdbService` usa `PAGE_SIZE = 20` fixo (ignora o `size` do cliente nesses
-     dois endpoints) e repassa `page + 1` direto ao TMDB, sem buscar múltiplas páginas upstream.
-     Contrato corrigido.
-   - A tag `Notification` descrevia um SSE em `/v1/notifications/events` que, à época desta
-     curadoria, ainda não existia no código — foi implementado depois, no mesmo molde code-first
-     de `CacheEventResource`/`CacheEventBroadcaster` (`NotificationEventResource`/
-     `NotificationEventBroadcaster`, em `domain/notification/sse/`): emite um evento `NEW` a cada
-     notificação criada. A listagem `GET /v1/notifications` também deixou de ser top-100 fixo e
-     ganhou paginação real (`PageParam`/`SizeParam`, envelope `NotificationPage`), pensada para um
-     botão "ver mais" no cliente.
-4. **`playback` tem débitos de ciclo de vida de processo**: processos `ffmpeg` e diretórios de
+2. **`playback` tem débitos de ciclo de vida de processo**: processos `ffmpeg` e diretórios de
    workspace HLS órfãos em caso de crash da aplicação (sem reconciliação na inicialização); sem
    lock explícito por sessão (corrida possível em seek/troca de faixa concorrente); sem limite de
    sessões concorrentes para o mesmo arquivo. Mitigação real existente: `ProcessTerminationService`
    confirma posse do pid por timestamp antes de matar, com SIGTERM→grace period→SIGKILL.
-5. **Trade-off aceito e já documentado no código**: `RemoteStorageProviderClient.checkConnection()`
-   pode reportar `healthy=true` com sessão MEGA cacheada stale no rclone; só reiniciar o `rcd`
-   resolve (`fscache/clear` não é suficiente). Afeta diretamente `GET /v1/storage/providers/{id}/
-   health` para providers MEGA. Não reabrir essa investigação — é um trade-off aceito.
-6. **Retry de rate-limit ad hoc, não centralizado**: `RetryUtils.withRateLimitRetry` é aplicado em
+3. **Aceito**: `RemoteStorageProviderClient.checkConnection()` pode reportar `healthy=true` com
+   sessão MEGA cacheada stale no rclone; só reiniciar o `rcd` resolve (`fscache/clear` não é
+   suficiente). Afeta diretamente `GET /v1/storage/providers/{id}/health` para providers MEGA.
+4. **Retry de rate-limit ad hoc, não centralizado**: `RetryUtils.withRateLimitRetry` é aplicado em
    alguns call sites específicos (`anime.prefillImageOverrides`, `ingestion.FolderAutoBindService`),
    não dentro dos services `anilist`/`tmdb` — quem chama e esquece de envolver a chamada corre risco
    de falha dura sob rate limit do upstream.
-7. **`anime`**: recursão não limitada em `syncRelations` dentro de uma única `@Transactional`, com
+5. **`anime`**: recursão não limitada em `syncRelations` dentro de uma única `@Transactional`, com
    uma chamada de rede por vizinho novo — risco de transação longa em franquias grandes;
    `getTmdbFilePairingSchema` faz N chamadas sequenciais ao TMDB (uma por temporada); ausência de
    paginação em lookups em lote (`getAnimeBindings`/`getTmdbFilePairings`); possível corrida no
    bind (check-then-persist sem lock explícito, mitigada só pela PK do banco).
-8. **`ingestion`**: `EpisodeNumberExtractor` usa regex calibrada empiricamente — risco de regressão
+6. **`ingestion`**: `EpisodeNumberExtractor` usa regex calibrada empiricamente — risco de regressão
    silenciosa se alterada sem reteste; throttle de 1500ms entre pastas no auto-bind é hardcoded, não
    configurável via `setting`; `IngestionResource` não tem `@ApplicationScoped` (inconsistência
    pontual com o padrão dos demais resources).
-9. **`mediafolder`/`videofile`**: `MediaFolderService.create()` e `VideoFileService` não validam
+7. **`mediafolder`/`videofile`**: `MediaFolderService.create()` e `VideoFileService` não validam
    duplicidade de path/nome na escrita (assumem que o chamador — tipicamente `ingestion` — já
    garantiu); `deleteRoots()` de `mediafolder` é documentado no próprio código como workaround para
    um falso positivo do Hibernate (`TransientPropertyValueException`) e só funciona corretamente se
    todas as pastas do subtree vierem da mesma consulta `findSubtree`; `listVideoFiles` devolve
    página vazia (não 404) para `folderId` inexistente, podendo mascarar um id inválido do chamador.
-10. **`setting`**: escrita (`PUT /v1/settings/{key}`) não valida formato/tipo — falha só no próximo
-    uso do getter tipado, em runtime; preferência nova sem seed/migração só quebra no primeiro uso,
-    não no boot. A flag `secret` não ser gerenciável via API é **intencional** (confirmado pelo
-    mantenedor) — decisão de segurança, não lacuna de backlog.
-11. **`anibridge`**: lógica densa de resolução de candidato TMDB (critério de "suspeito", merge de
-    ranges sobrepostos) em `AnibridgeResolutionService`, sem evidência de testes de unidade nos
-    arquivos analisados — candidato a dívida de cobertura; substituição total da tabela
-    `MappingSegment` a cada refresh (`deleteAll` + `persist`) é correta mas sensível a crescimento
-    de volume.
-12. **`anime` acoplado ao schema exato da AniList**: consome DTOs crus do client GraphQL
-    (`AnilistMediaResponse`, `AnilistRelationEdgeResponse`) diretamente, em vez de um DTO de domínio
-    próprio — qualquer mudança no schema da AniList propaga direto para dentro de `anime`.
-    **Aceito** (confirmado pelo mantenedor, ver `domain/anilist/README.md`): o shape da AniList é
-    rico e um DTO intermediário duplicaria praticamente o mesmo shape sem ganho real — não é item
-    de backlog, ao contrário da regra geral desta seção.
-13. **`utils/VideoFileLocationUtils` é o único utilitário "impuro"** do pacote `utils/`: conhece
-    3 domínios diretamente (`cache`, `storageprovider`, `videofile`), diferente dos demais 8
-    arquivos do pacote, que são puros. Documentado no próprio Javadoc como lógica compartilhada
-    entre `mediaprobe` e `playback` — intencional, não acidental.
+8. **`setting`**: escrita (`PUT /v1/settings/{key}`) não valida formato/tipo — falha só no próximo
+   uso do getter tipado, em runtime; preferência nova sem seed/migração só quebra no primeiro uso,
+   não no boot. A flag `secret` não ser gerenciável via API é **intencional** (confirmado pelo
+   mantenedor) — decisão de segurança, não lacuna.
+9. **`anibridge`**: lógica densa de resolução de candidato TMDB (critério de "suspeito", merge de
+   ranges sobrepostos) em `AnibridgeResolutionService`, sem evidência de testes de unidade nos
+   arquivos analisados — candidato a dívida de cobertura; substituição total da tabela
+   `MappingSegment` a cada refresh (`deleteAll` + `persist`) é correta mas sensível a crescimento
+   de volume.
+10. **Aceito** (confirmado pelo mantenedor, ver `domain/anilist/README.md`): `anime` consome DTOs
+    crus do client GraphQL da AniList (`AnilistMediaResponse`, `AnilistRelationEdgeResponse`)
+    diretamente, em vez de um DTO de domínio próprio — qualquer mudança no schema da AniList
+    propaga direto para dentro de `anime`. O shape da AniList é rico; um DTO intermediário
+    duplicaria praticamente o mesmo shape sem ganho real.
+11. **`utils/VideoFileLocationUtils` é o único utilitário "impuro"** do pacote `utils/`: conhece
+    3 domínios diretamente (`cache`, `storageprovider`, `videofile`), diferente dos demais arquivos
+    do pacote, que são puros. Documentado no próprio Javadoc como lógica compartilhada entre
+    `mediaprobe` e `playback` — intencional, não acidental.
 
 ## Diretrizes para futuras implementações
 
@@ -266,9 +243,10 @@ indicado o contrário.
   client,scheduler}` do skill `code-style` sem introduzir camadas paralelas (`UseCase`, `Port`,
   `Adapter`, `Repository`).
 - Antes de adicionar um tipo em `model/` (raiz, fora de `domain/`), confirmar que será consumido
-  por **2 ou mais domínios** — hoje `PageResult` cumpre esse critério (6 domínios); `CacheEntry` não
-  cumpre e é candidato a correção (mover para `domain/cache/model/`) antes de ganhar um segundo
-  consumidor.
+  por **2 ou mais domínios** — hoje só `PageResult` cumpre esse critério (6 domínios). Um tipo
+  usado por um único domínio, mas também por um helper transversal de `utils/`, vai em
+  `utils/model/` (ex.: `CacheEntry`), não em `domain/<x>/model/` — assim o helper continua sem
+  depender de tipos de domínio.
 - Qualquer novo client de integração externa deve embrulhar falhas em `IntegrationException` no
   `*Service` chamador — nunca deixar exceção de REST client/processo externo escapar crua até o
   `*Resource`.

@@ -2,7 +2,7 @@ package io.github.leonardopinheirolacerda.akari.domain.cache.model;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.github.leonardopinheirolacerda.akari.model.CacheEntry;
+import io.github.leonardopinheirolacerda.akari.utils.model.CacheEntry;
 import io.github.leonardopinheirolacerda.akari.utils.CacheUtils;
 import io.quarkus.hibernate.orm.panache.PanacheEntityBase;
 import jakarta.persistence.Column;

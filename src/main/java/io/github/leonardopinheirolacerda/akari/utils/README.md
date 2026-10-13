@@ -4,10 +4,11 @@
 Reunir helpers puros, sem estado, de uso geral entre domínios — lógica pequena e reutilizável que não justifica um service ou não pertence a um domínio específico.
 
 ## Responsabilidade principal
-Oferecer funções estáticas, sem injeção CDI (todas as classes são `final` com construtor privado), para: cache-first genérico, manipulação de paths/nomes de arquivo, classificação de erro HTTP, ordenação paginada via Panache, retry com backoff, espera bloqueante sem propagar interrupção, montagem de URLs de imagem do TMDB e resolução de localização em disco de um `VideoFile`.
+Oferecer funções estáticas, sem injeção CDI (todas as classes são `final` com construtor privado), para: cache-first genérico, manipulação de paths/nomes de arquivo, classificação de erro HTTP, ordenação paginada via Panache, retry com backoff, espera bloqueante sem propagar interrupção, montagem de URLs de imagem do TMDB e resolução de localização em disco de um `VideoFile`. O subpacote `utils/model/` abriga `CacheEntry`, o único tipo de dado puro consumido por um desses helpers (as 9 classes do pacote raiz são só helpers estáticos, sem estado próprio).
 
 ## Funcionalidades existentes
-- **`CacheUtils`** — `buildKey(String...)` monta chave de cache normalizada (trim+lowercase, unida por `:`); `resolve(forceRefresh, ttl, cacheReader, loader, writer)` implementa o fluxo cache-first (serve do cache se fresco, senão busca no upstream e grava). Usa `model.CacheEntry`.
+- **`CacheUtils`** — `buildKey(String...)` monta chave de cache normalizada (trim+lowercase, unida por `:`); `resolve(forceRefresh, ttl, cacheReader, loader, writer)` implementa o fluxo cache-first (serve do cache se fresco, senão busca no upstream e grava). Usa `model.CacheEntry` (subpacote deste `utils/`, não o `model/` raiz do projeto).
+- **`model.CacheEntry<T>`** — `record(payload, fetchedAt)`: par payload/timestamp lido do cache do chamador de `CacheUtils.resolve`, agnóstico da entidade concreta.
 - **`DirectoryUtils`** — `parentOf`, `join`, `lastSegmentOf`, `depthOf` para paths relativos lógicos (sempre `/`, nunca `File.separator`) do catalog/storage provider.
 - **`FileNameUtils`** — `extensionOf(name)` e `isVideoFile(name)` (checa extensão contra whitelist: mkv, mp4, avi, mov, wmv, webm, ts, m2ts, flv), usado pela ingestão.
 - **`HttpErrorUtils`** — `isNotFound(Exception)` identifica se uma falha de REST client é um `404` upstream.
@@ -18,12 +19,12 @@ Oferecer funções estáticas, sem injeção CDI (todas as classes são `final` 
 - **`VideoFileLocationUtils`** — `resolvePath(videoFile, storageProviderClientFactory, cacheDir)` resolve o caminho em disco de um `VideoFile`: direto se o provider for `LOCAL`, via cache local se for remoto e já tiver terminado de baixar.
 
 ## Dependências internas e externas
-- Internas: `model.CacheEntry` (via `CacheUtils`), `exceptions.{RequestValidationException, IntegrationException, ResourceNotFoundException, IntegrationNotConfiguredException}`, e — só em `VideoFileLocationUtils` — tipos de domínio: `domain.cache.model.VideoFileCache`, `domain.storageprovider.provider.StorageProviderClientFactory`, `domain.videofile.model.VideoFile`, além dos DTOs gerados `api.dto.{CacheStatus, StorageProviderType}`.
+- Internas: `exceptions.{RequestValidationException, IntegrationException, ResourceNotFoundException, IntegrationNotConfiguredException}`, e — só em `VideoFileLocationUtils` — tipos de domínio: `domain.cache.model.VideoFileCache`, `domain.storageprovider.provider.StorageProviderClientFactory`, `domain.videofile.model.VideoFile`, além dos DTOs gerados `api.dto.{CacheStatus, StorageProviderType}`. `CacheUtils` depende de `model.CacheEntry`, mas esse é o subpacote `utils/model/`, não `domain/` nem o `model/` raiz — não quebra a regra de pureza.
 - Externas: `io.quarkus.panache.common.Sort`, `io.quarkus.logging.Log`, `jakarta.ws.rs.WebApplicationException`.
 - Dependências entre os próprios utils: `RetryUtils` usa `ThreadUtils.sleepUninterruptibly` para a espera entre tentativas.
 
 ## Módulos relacionados
-Consumido por quase todo `domain/`: `anibridge`, `anilist`, `anime`, `cache`, `ingestion`, `mediafolder`, `mediaprobe`, `playback`, `storageprovider`, `tmdb`, `videofile` (o domínio `notification` não usa nenhum utilitário deste pacote hoje). Hoje `PaginationUtils.toSort` só é efetivamente chamado por `mediafolder`, apesar de ser desenhado como reutilizável por qualquer entidade paginada.
+Consumido por quase todo `domain/`: `anibridge`, `anilist`, `anime`, `cache`, `ingestion`, `mediafolder`, `mediaprobe`, `playback`, `storageprovider`, `tmdb`, `videofile` (o domínio `notification` não usa nenhum utilitário deste pacote hoje). Hoje `PaginationUtils.toSort` só é efetivamente chamado por `mediafolder`, apesar de ser desenhado como reutilizável por qualquer entidade paginada. `domain/cache/model/IntegrationCache` importa `utils/model/CacheEntry` diretamente (não só via `CacheUtils`) — relação normal, já que domínio pode depender de `utils/` livremente.
 
 ## Pontos de entrada
 Todos os métodos são estáticos e chamados diretamente pelo código de domínio; não há scheduler, resource ou listener neste pacote.
@@ -41,3 +42,4 @@ Todos os métodos são estáticos e chamados diretamente pelo código de domíni
 ## Observações técnicas e débitos identificados
 - `PaginationUtils` e `VideoFileLocationUtils` lançam `AkariException` (subclasses de `exceptions/`) diretamente, fora de `domain/` — o próprio Javadoc de `VideoFileLocationUtils` registra isso como precedente intencional ("um helper de `utils/` pode lançar as exceções da aplicação diretamente quando a regra de erro é a mesma pra todo chamador"), não é acidental.
 - `VideoFileLocationUtils` é o único arquivo do pacote que importa classes de `domain/` (`VideoFileCache`, `VideoFile`, `StorageProviderClientFactory`) em vez de só tipos primitivos/genéricos — ele próprio justifica isso no Javadoc como lógica compartilhada entre `mediaprobe` e `playback`, mas é uma exceção notável à ideia de "helper puro e geral, sem estado" que descreve o restante do pacote: ele conhece modelos concretos de 3 domínios.
+- **`model.CacheEntry` fica em `utils/model/`, não em `domain/cache/model/`** (confirmado pelo mantenedor): mover pra dentro de um domínio faria `CacheUtils` — hoje puro — importar um tipo de domínio, criando uma segunda exceção à regra "só `VideoFileLocationUtils` conhece domínio" (item acima).

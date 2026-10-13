@@ -1,6 +1,5 @@
-package io.github.leonardopinheirolacerda.akari.model;
+package io.github.leonardopinheirolacerda.akari.utils.model;
 
-import io.github.leonardopinheirolacerda.akari.utils.CacheUtils;
 import java.time.OffsetDateTime;
 
 /**
