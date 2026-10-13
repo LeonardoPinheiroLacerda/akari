@@ -16,7 +16,7 @@ import io.github.leonardopinheirolacerda.akari.domain.tmdb.client.dtos.TmdbMovie
 import io.github.leonardopinheirolacerda.akari.domain.tmdb.client.dtos.TmdbTranslationDataResponse;
 import io.github.leonardopinheirolacerda.akari.domain.tmdb.client.dtos.TmdbTranslationEntryResponse;
 import io.github.leonardopinheirolacerda.akari.domain.tmdb.client.dtos.TmdbTvDetailsResponse;
-import io.github.leonardopinheirolacerda.akari.domain.tmdb.service.TmdbSearchService;
+import io.github.leonardopinheirolacerda.akari.domain.tmdb.service.TmdbService;
 import io.github.leonardopinheirolacerda.akari.exceptions.BusinessRuleException;
 import io.github.leonardopinheirolacerda.akari.exceptions.IntegrationException;
 import io.github.leonardopinheirolacerda.akari.exceptions.ResourceNotFoundException;
@@ -46,7 +46,7 @@ public class AnimeTmdbService {
     AnimeService animeService;
 
     @Inject
-    TmdbSearchService tmdbSearchService;
+    TmdbService tmdbService;
 
     @Inject
     SettingService settingService;
@@ -84,9 +84,9 @@ public class AnimeTmdbService {
 
         // Valida existência de ID no tmdb
         if (mediaType == TmdbMediaType.TV) {
-            tmdbSearchService.getTvDetails(tmdbId, false);
+            tmdbService.getTvDetails(tmdbId, false);
         } else {
-            tmdbSearchService.getMovieDetails(tmdbId, false);
+            tmdbService.getMovieDetails(tmdbId, false);
         }
 
         anime.tmdbId = tmdbId;
@@ -181,24 +181,24 @@ public class AnimeTmdbService {
         final String defaultLanguage;
 
         if (isTv) {
-            final TmdbTvDetailsResponse tv = tmdbSearchService.getTvDetails(tmdbId, forceRefresh);
+            final TmdbTvDetailsResponse tv = tmdbService.getTvDetails(tmdbId, forceRefresh);
             defaultTitle = tv.name();
             defaultOverview = tv.overview();
             defaultLanguage = tv.originalLanguage();
         } else {
-            final TmdbMovieDetailsResponse movie = tmdbSearchService.getMovieDetails(tmdbId, forceRefresh);
+            final TmdbMovieDetailsResponse movie = tmdbService.getMovieDetails(tmdbId, forceRefresh);
             defaultTitle = movie.title();
             defaultOverview = movie.overview();
             defaultLanguage = movie.originalLanguage();
         }
 
         final List<TmdbTranslationEntryResponse> translations = isTv
-                ? tmdbSearchService.getTvTranslations(tmdbId, forceRefresh).translations()
-                : tmdbSearchService.getMovieTranslations(tmdbId, forceRefresh).translations();
+                ? tmdbService.getTvTranslations(tmdbId, forceRefresh).translations()
+                : tmdbService.getMovieTranslations(tmdbId, forceRefresh).translations();
 
         final TmdbImagesResponse images = isTv
-                ? tmdbSearchService.getTvImages(tmdbId, forceRefresh)
-                : tmdbSearchService.getMovieImages(tmdbId, forceRefresh);
+                ? tmdbService.getTvImages(tmdbId, forceRefresh)
+                : tmdbService.getMovieImages(tmdbId, forceRefresh);
 
         return new TmdbOverridesSchema()
                 .title(collectTexts(defaultTitle, defaultLanguage, translations, TmdbTranslationDataResponse::localizedName))
@@ -240,8 +240,8 @@ public class AnimeTmdbService {
 
         try {
             images = RetryUtils.withRateLimitRetry(() -> mediaType == TmdbMediaType.TV
-                    ? tmdbSearchService.getTvImages(tmdbId, false)
-                    : tmdbSearchService.getMovieImages(tmdbId, false));
+                    ? tmdbService.getTvImages(tmdbId, false)
+                    : tmdbService.getMovieImages(tmdbId, false));
 
         } catch (IntegrationException | ResourceNotFoundException e) {
             Log.warnf(e, "Busca de imagens no TMDB %d falhou, binding segue sem backdrop/logo", tmdbId);

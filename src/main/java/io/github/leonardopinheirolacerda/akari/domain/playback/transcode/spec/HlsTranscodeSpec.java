@@ -1,7 +1,6 @@
 package io.github.leonardopinheirolacerda.akari.domain.playback.transcode.spec;
 
 import io.github.leonardopinheirolacerda.akari.domain.playback.transcode.HlsTranscodeStrategy;
-import lombok.Builder;
 
 /**
  * Intenção estruturada de transcode HLS produzida por uma {@link HlsTranscodeStrategy} — o

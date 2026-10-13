@@ -1,8 +1,41 @@
 # akari
 
-This project uses Quarkus, the Supersonic Subatomic Java Framework.
+Backend de catálogo e reprodução de vídeo com foco em anime: ingere o conteúdo de storage
+providers (disco local ou MEGA via rclone), organiza em um catálogo de pastas/arquivos, enriquece
+com metadata de anime (AniList + TMDB) e serve a reprodução via transcode HLS sob demanda, com
+cache local de arquivos remotos.
 
-If you want to learn more about Quarkus, please visit its website: <https://quarkus.io/>.
+Módulo único Quarkus, contract-first: `src/main/resources/META-INF/openapi.yaml` gera as
+interfaces JAX-RS e os DTOs da API (nunca escritos à mão). Veja a documentação completa:
+
+- [`docs/OBJETIVO_DO_SISTEMA.md`](docs/OBJETIVO_DO_SISTEMA.md) — propósito, problemas resolvidos,
+  fluxos de negócio, atores.
+- [`docs/ARQUITETURA_DO_SISTEMA.md`](docs/ARQUITETURA_DO_SISTEMA.md) — padrões, convenções,
+  dependências entre domínios, riscos técnicos conhecidos.
+- `README.md` dentro de cada pacote em
+  `src/main/java/io/github/leonardopinheirolacerda/akari/` (um por domínio em `domain/`, e um em
+  cada pacote transversal — `config/`, `exceptions/`, `model/`, `utils/`) e em
+  `src/main/resources/db/` (migrations Flyway).
+- `.claude/skills/code-style/SKILL.md` — convenções de código Java do projeto.
+
+Este projeto usa Quarkus, o Supersonic Subatomic Java Framework. Para aprender mais sobre o
+Quarkus, visite <https://quarkus.io/>.
+
+## Dependências externas para rodar localmente
+
+- **PostgreSQL** — `docker-compose up -d` sobe só o banco (porta `5432`, credenciais padrão
+  `akari`/`akari`, sobrescrevíveis com `DB_USERNAME`/`DB_PASSWORD`). Migrations Flyway em
+  `src/main/resources/db/` aplicam no boot da aplicação.
+- **rclone rcd** — necessário só para usar um storage provider `MEGA` (obscurecimento de
+  credenciais e acesso remoto). Suba com `./rclone-rcd.sh`: ele roda **fora** de container, de
+  propósito, para enxergar o mesmo filesystem do host que a aplicação (relevante para `cache.dir`).
+  Escuta em `127.0.0.1:5572`, o endereço padrão esperado por `quarkus.rest-client.rclone.url`.
+- **ffprobe / ffmpeg** — binários resolvidos via `PATH` por padrão; configuráveis por caminho
+  absoluto via `akari.mediaprobe.ffprobe.binary` e `akari.playback.ffmpeg.binary`.
+- Nenhuma credencial de integração externa (AniList é público; TMDB exige token) é configurada por
+  variável de ambiente ou arquivo — tudo é feito em runtime via `PUT /v1/settings/{key}`
+  (ex.: `tmdb.api-key`). Preferência obrigatória sem valor faz os fluxos que dependem dela responder
+  `503`.
 
 ## Running the application in dev mode
 

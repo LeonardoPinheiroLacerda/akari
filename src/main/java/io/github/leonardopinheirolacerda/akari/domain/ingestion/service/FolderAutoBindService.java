@@ -20,7 +20,7 @@ import io.github.leonardopinheirolacerda.akari.domain.anime.service.AnimeTmdbSer
 import io.github.leonardopinheirolacerda.akari.domain.ingestion.extractor.EpisodeNumberExtractor;
 import io.github.leonardopinheirolacerda.akari.domain.notification.service.NotificationService;
 import io.github.leonardopinheirolacerda.akari.domain.tmdb.client.dtos.TmdbEpisodeResponse;
-import io.github.leonardopinheirolacerda.akari.domain.tmdb.service.TmdbSearchService;
+import io.github.leonardopinheirolacerda.akari.domain.tmdb.service.TmdbService;
 import io.github.leonardopinheirolacerda.akari.domain.videofile.model.VideoFile;
 import io.github.leonardopinheirolacerda.akari.domain.videofile.service.VideoFileService;
 import io.github.leonardopinheirolacerda.akari.exceptions.IntegrationException;
@@ -79,7 +79,7 @@ public class FolderAutoBindService {
     AbsoluteEpisodeOffsetService absoluteEpisodeOffsetService;
 
     @Inject
-    TmdbSearchService tmdbSearchService;
+    TmdbService tmdbService;
 
     @Inject
     NotificationService notificationService;
@@ -398,7 +398,7 @@ public class FolderAutoBindService {
         final List<TmdbEpisodeResponse> episodes = episodesBySeason.computeIfAbsent(resolved.seasonNumber(), seasonNumber -> {
             try {
                 return RetryUtils.withRateLimitRetry(
-                        () -> tmdbSearchService.getSeason(
+                        () -> tmdbService.getSeason(
                                 tmdbId,
                                 seasonNumber,
                                 false

@@ -22,7 +22,7 @@ import java.util.Optional;
  * <p>Não tem relação com o cache local de arquivo de vídeo ({@code VideoFileCache}) — este aqui
  * guarda só o payload JSON de uma resposta upstream já buscada, sem baixar nem persistir arquivo
  * nenhum. O shape do payload varia por {@code cacheKey} (decidido por quem grava/lê, ex.:
- * {@code AnilistSearchService}/{@code TmdbSearchService}), não é fixo pra entidade.
+ * {@code AnilistSearchService}/{@code TmdbService}), não é fixo pra entidade.
  */
 @Entity
 @Table(name = "integration_cache")

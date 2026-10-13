@@ -9,7 +9,7 @@ import io.github.leonardopinheirolacerda.akari.domain.anime.model.Anime;
 import io.github.leonardopinheirolacerda.akari.domain.anime.model.TmdbFilePairing;
 import io.github.leonardopinheirolacerda.akari.domain.tmdb.client.dtos.TmdbSeasonResponse;
 import io.github.leonardopinheirolacerda.akari.domain.tmdb.client.dtos.TmdbSeasonSummaryResponse;
-import io.github.leonardopinheirolacerda.akari.domain.tmdb.service.TmdbSearchService;
+import io.github.leonardopinheirolacerda.akari.domain.tmdb.service.TmdbService;
 import io.github.leonardopinheirolacerda.akari.domain.videofile.model.VideoFile;
 import io.github.leonardopinheirolacerda.akari.domain.videofile.service.VideoFileService;
 import io.github.leonardopinheirolacerda.akari.exceptions.BusinessRuleException;
@@ -37,7 +37,7 @@ public class AnimeTmdbFilePairingService {
     VideoFileService videoFileService;
 
     @Inject
-    TmdbSearchService tmdbSearchService;
+    TmdbService tmdbService;
 
     /**
      * Estrutura da série TMDB vinculada ao anime — temporadas com episódios completos, pro
@@ -56,12 +56,12 @@ public class AnimeTmdbFilePairingService {
             throw new BusinessRuleException("Esse anime é um filme — não tem temporadas nem episódios pra parear");
         }
 
-        final List<TmdbSeasonSummaryResponse> seasonSummaries = tmdbSearchService
+        final List<TmdbSeasonSummaryResponse> seasonSummaries = tmdbService
                 .getTvDetails(anime.tmdbId, false)
                 .seasons();
 
         final List<TmdbSeasonResponse> seasons = seasonSummaries.stream()
-                .map(summary -> tmdbSearchService.getSeason(anime.tmdbId, summary.seasonNumber(), false))
+                .map(summary -> tmdbService.getSeason(anime.tmdbId, summary.seasonNumber(), false))
                 .toList();
 
         return animeTmdbFilePairingMapper.toSchema(seasons);

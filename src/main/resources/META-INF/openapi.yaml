@@ -95,8 +95,8 @@ tags:
       Busca paginada de anime na AniList.
 
       Expõe busca paginada de anime diretamente na AniList (query GraphQL `Page(page,
-      perPage).media(search, type: ANIME)`). Fluxo cache-first com SQLite interno; chamadas
-      upstream só quando o cache é frio ou `forceRefresh=true`.
+      perPage).media(search, type: ANIME)`). Fluxo cache-first com cache interno em PostgreSQL
+      (`IntegrationCache`); chamadas upstream só quando o cache é frio ou `forceRefresh=true`.
 
       Shape devolvido é o subset de `Media` sem `relations` — mantém o payload do search enxuto.
       Consumidores que precisam da ficha completa (com relations) chamam o módulo
@@ -109,8 +109,8 @@ tags:
       Busca paginada de filmes e séries no TMDB.
 
       Expõe busca paginada no TMDB v3 — um endpoint por tipo de conteúdo (filme e série). Fluxo
-      cache-first com SQLite interno; chamadas upstream só quando o cache é frio ou
-      `forceRefresh=true`.
+      cache-first com cache interno em PostgreSQL (`IntegrationCache`); chamadas upstream só
+      quando o cache é frio ou `forceRefresh=true`.
 
       Cada item carrega os campos do resultado TMDB correspondente (`/3/search/movie` e
       `/3/search/tv`), normalizados pelo módulo:
@@ -118,10 +118,10 @@ tags:
       - nomes em camelCase (`original_title` → `originalTitle`) e `id` → `tmdbId`;
       - `poster_path`/`backdrop_path` relativos viram URLs absolutas do CDN
         (`posterUrl` em `w185`, `backdropUrl` em `original`);
-      - a paginação segue o padrão do akari — **0-based**, com `size` escolhido pelo cliente
-        (padrão `12`) e envelope `data`/`page`/`size`/`totalElements`/`totalPages`. O TMDB
-        pagina em blocos fixos de 20 e 1-based; o módulo busca as páginas upstream necessárias
-        e recorta a página pedida.
+      - a paginação segue o padrão do akari — **0-based** — mas sem `size`: o TMDB pagina em
+        blocos fixos de 20, sem suporte a tamanho configurável, e a conversão real é só
+        `page + 1` (0-based → 1-based) repassado direto ao TMDB, sem busca de múltiplas páginas
+        upstream.
 
       Consumidores que precisam da ficha completa (com temporadas, imagens, traduções) usam o
       `animemetadata`.
@@ -157,11 +157,14 @@ tags:
       Notificações de observabilidade.
 
       Lista notificações de observabilidade, conta as não-lidas (badge) e marca como lidas
-      (individual/todas).
+      (individual/todas). Hoje, todas as notificações são emitidas pelo domínio `ingestion`
+      (falhas de integração com storage provider/AniList/TMDB e problemas de qualidade do
+      auto-bind/pairing); nenhum outro domínio emite notificação ainda.
 
-      O push em tempo real é um stream SSE em `/v1/notifications/events` — **não modelado neste
-      contrato** (o gerador `jaxrs-spec` não descreve Server-Sent Events); servido por um resource
-      code-first.
+      O push em tempo real é planejado como um stream SSE em `/v1/notifications/events` —
+      **ainda não implementado** (só existe hoje o SSE de `/v1/cache/events`, de outro domínio) e,
+      quando existir, não será modelado neste contrato (o gerador `jaxrs-spec` não descreve
+      Server-Sent Events); será servido por um resource code-first, como o de `cache`.
 
 paths:
 

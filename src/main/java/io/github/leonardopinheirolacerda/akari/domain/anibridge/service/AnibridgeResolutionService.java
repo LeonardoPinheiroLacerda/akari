@@ -6,7 +6,7 @@ import io.github.leonardopinheirolacerda.akari.domain.anibridge.model.MappingSeg
 import io.github.leonardopinheirolacerda.akari.domain.anibridge.model.ResolvedEpisode;
 import io.github.leonardopinheirolacerda.akari.domain.anibridge.model.TmdbMappingCandidate;
 import io.github.leonardopinheirolacerda.akari.domain.tmdb.client.dtos.TmdbSeasonSummaryResponse;
-import io.github.leonardopinheirolacerda.akari.domain.tmdb.service.TmdbSearchService;
+import io.github.leonardopinheirolacerda.akari.domain.tmdb.service.TmdbService;
 import io.github.leonardopinheirolacerda.akari.exceptions.IntegrationException;
 import io.github.leonardopinheirolacerda.akari.utils.RetryUtils;
 import io.quarkus.logging.Log;
@@ -36,7 +36,7 @@ public class AnibridgeResolutionService {
     AnibridgeMappingService anibridgeMappingService;
 
     @Inject
-    TmdbSearchService tmdbSearchService;
+    TmdbService tmdbService;
 
     /**
      * Escolhe o candidato TMDB pro anime — primeiro tenta pelo {@code anilistId}, cai pro
@@ -214,7 +214,7 @@ public class AnibridgeResolutionService {
         final Set<Integer> existingSeasonNumbers;
 
         try {
-            existingSeasonNumbers = RetryUtils.withRateLimitRetry(() -> tmdbSearchService
+            existingSeasonNumbers = RetryUtils.withRateLimitRetry(() -> tmdbService
                     .getTvDetails(candidate.tmdbId(), false)
                     .seasons()
                     .stream()

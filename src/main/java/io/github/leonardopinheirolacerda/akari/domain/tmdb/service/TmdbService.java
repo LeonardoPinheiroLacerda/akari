@@ -36,7 +36,7 @@ import org.eclipse.microprofile.rest.client.inject.RestClient;
  * {@code tmdb.include-adult} pra decidir se inclui conteúdo adulto.
  */
 @ApplicationScoped
-public class TmdbSearchService {
+public class TmdbService {
 
     private static final int PAGE_SIZE = 20;
 
