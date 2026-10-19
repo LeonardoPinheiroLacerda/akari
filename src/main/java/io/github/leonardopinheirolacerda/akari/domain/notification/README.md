@@ -92,12 +92,11 @@ criação (`notify()`), usado internamente — não há endpoint de criação na
   gera evento. Badge de não-lidas em múltiplas abas sincroniza só via `GET /unread-count`, não via
   SSE. Não era parte do pedido original (só "notificação nova em tempo real"); considerar se vale
   a pena no futuro, caso o multi-aba/multi-cliente vire requisito real.
-- **Risco de sink SSE morto acumulando, resolvido:** diferente do `cache`, este domínio não tem
-  fila/scheduler própria que force a limpeza de sinks fechados como efeito colateral — sem
-  atividade, um sink morto ficaria preso na lista até a próxima notificação (que pode ser rara).
-  Resolvido com `NotificationScheduler` (a cada 60s, `ConcurrentExecution.SKIP`, try/catch — mesmo
-  padrão do `CacheScheduler`), chamando `NotificationEventBroadcaster.pruneClosedSinks()`
-  independente de qualquer `notify()` acontecer.
+- **`NotificationScheduler` existe porque este domínio não tem fila/scheduler própria** (diferente
+  do `cache`) que force a limpeza de sinks SSE fechados como efeito colateral de atividade — sem
+  ele, um sink morto ficaria preso na lista até a próxima notificação (que pode ser rara). Roda a
+  cada 60s (`ConcurrentExecution.SKIP`, try/catch — mesmo padrão do `CacheScheduler`), chamando
+  `NotificationEventBroadcaster.pruneClosedSinks()` independente de qualquer `notify()` acontecer.
 - O scheduler só confia em `SseEventSink.isClosed()` — não há heartbeat/ping enviado ao cliente,
   então uma conexão "meio-aberta" (cliente caiu sem fechar limpo, firewall engoliu o FIN) pode não
   ser detectada como fechada até a camada de transporte (Vert.x/Netty) perceber a queda. Não há

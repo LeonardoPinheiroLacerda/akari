@@ -40,9 +40,8 @@ anibridge, franquias/relações entre animes).
   transcodificando sob demanda para HLS, com seleção de perfil conforme características do arquivo
   de origem (via `mediaprobe`/ffprobe).
 - **Custo de chamadas repetidas a APIs externas (AniList/TMDB).** Os domínios de busca mantêm cache
-  local ("cache-first com SQLite interno", conforme descrição do contrato) para evitar round-trips
-  redundantes ao upstream, com escape hatch (`forceRefresh=true`) quando o cliente precisa de dados
-  atualizados.
+  local (`IntegrationCache`, PostgreSQL) para evitar round-trips redundantes ao upstream, com
+  escape hatch (`forceRefresh=true`) quando o cliente precisa de dados atualizados.
 - **Vazamento de credenciais de storage providers.** Campos sensíveis de configuração (ex.: senha
   do MEGA) são obscurecidos via rclone antes de persistir, e nunca são devolvidos pela API de
   leitura.

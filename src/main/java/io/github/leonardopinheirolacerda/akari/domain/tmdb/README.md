@@ -130,16 +130,12 @@ responsabilidade do domínio `anime` é só decidir *quando* buscar e *como* usa
 
 ## Observações técnicas e débitos identificados
 
-- **"SQLite interno" do contrato não corresponde à implementação.** O cache cache-first é a
-  entidade JPA/Panache `IntegrationCache` (tabela `integration_cache`), persistida no PostgreSQL
-  do próprio akari (`@Entity`, coluna `payload` tipada `JSON` via `@JdbcTypeCode(SqlTypes.JSON)`),
-  não em um banco SQLite separado. É um cache genérico de key/value compartilhado com o domínio
-  `anilist` (mesma entidade, chaves diferentes) — não há nada específico de SQLite no código.
-- **A paginação não "busca várias páginas upstream e recorta a pedida".** O tamanho de página do
-  akari (`PAGE_SIZE = 20`) é igual ao bloco fixo do TMDB (20), então a conversão é 1:1
-  (`page + 1`, sem agregação de múltiplas páginas nem corte/slice). Não existe no código nenhuma
-  lógica de buscar mais de uma página upstream por chamada — se o contrato descrever esse
-  comportamento, ele não está implementado aqui.
+- **Cache-first é `IntegrationCache` em PostgreSQL** (tabela `integration_cache`, `@Entity`,
+  coluna `payload` tipada `JSON` via `@JdbcTypeCode(SqlTypes.JSON)`) — cache genérico de key/value
+  compartilhado com o domínio `anilist` (mesma entidade, chaves diferentes).
+- **A paginação é `page + 1` direto** (0-based → 1-based): o tamanho de página do akari
+  (`PAGE_SIZE = 20`) é igual ao bloco fixo do TMDB (20), então a conversão é 1:1, sem agregação de
+  múltiplas páginas nem corte/slice.
 - **Normalização camelCase é dupla, por camadas diferentes.** Os DTOs de `client/dtos` já
   convertem `snake_case`→camelCase na própria desserialização Jackson (via `@JsonProperty`), e é
   isso que o restante do sistema consome (incluindo `anime`/`anibridge`/`ingestion`). O
@@ -156,11 +152,9 @@ responsabilidade do domínio `anime` é só decidir *quando* buscar e *como* usa
   `TmdbEpisodeSummaryResponse`) é porque eles só aparecem como campo de
   `TmdbMovieDetailsResponse`/`TmdbTvDetailsResponse`/`TmdbEpisodeResponse`, nunca importados
   soltos fora deste pacote.
-- **Classe renomeada de `TmdbSearchService` para `TmdbService`** (confirmado pelo mantenedor): o
-  nome antigo remetia só a "busca", mas a classe sempre foi o client interno de
-  detalhes/imagens/traduções/temporada usado por `anime`/`anibridge`/`ingestion` — `TmdbService`
-  descreve melhor o escopo real. O resource HTTP continua `TmdbSearchResource` (esse, sim, só
-  cobre os dois endpoints de busca).
+- **`TmdbService` não é só "busca".** É o client interno de detalhes/imagens/traduções/temporada
+  usado por `anime`/`anibridge`/`ingestion`, não só os dois endpoints de busca HTTP. O resource
+  HTTP continua `TmdbSearchResource` (esse, sim, cobre só a busca).
 - **Acoplamento direto service→service entre domínios.** `anime`, `anibridge` e `ingestion`
   injetam `TmdbService` diretamente, sem passar por `TmdbSearchResource`/contrato HTTP —
   consistente com a convenção do projeto (sem camada comum/hexagonal), mas significa que

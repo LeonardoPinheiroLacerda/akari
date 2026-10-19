@@ -257,16 +257,15 @@ itens abaixo são backlog real (a corrigir aos poucos), exceto onde indicado "Ac
 - Se o domínio `cache` for revisado, considerar separar explicitamente a responsabilidade de fila
   de download de vídeo (`VideoFileCache`) da responsabilidade de cache de resposta de integração
   (`IntegrationCache`) — hoje convivem no mesmo pacote sem relação funcional.
-- Ao alterar a assinatura de qualquer método de `TmdbService` (renomeado de `TmdbSearchService`
-  nesta curadoria, exatamente por ser consumido service-a-service bem além da busca) usado fora do
-  seu próprio `resource/`, avaliar o impacto em `anime`, `anibridge` e `ingestion`.
+- Ao alterar a assinatura de qualquer método de `TmdbService` (consumido service-a-service bem além
+  da busca) usado fora do seu próprio `resource/`, avaliar o impacto em `anime`, `anibridge` e
+  `ingestion`.
 - Ao alterar `EpisodeNumberExtractor` (regex calibrada empiricamente) ou
   `AnibridgeResolutionService` (critério de candidato "suspeito"), tratar como código de alto risco
   de regressão silenciosa — testar manualmente contra casos reais antes de assumir correção.
-- Manter o contrato (`openapi.yaml`) como fonte da verdade das descrições de tag; ao corrigir as
-  divergências já identificadas aqui (menção a SQLite, SSE de notificação inexistente, "múltiplas
-  páginas" do TMDB), atualizar a descrição da tag junto com a correção/confirmação do código, para
-  este documento e o contrato não voltarem a divergir.
+- Manter o contrato (`openapi.yaml`) como fonte da verdade das descrições de tag — ao mudar um
+  comportamento, atualizar a descrição da tag junto, pra este documento e o contrato não divergirem
+  da implementação real.
 - Não reabrir a investigação do trade-off conhecido do `checkConnection()` do MEGA/rclone — é
   aceito; qualquer necessidade de health-check mais preciso para MEGA deve vir de requisito de
   produto novo, não de "corrigir" esse comportamento.
