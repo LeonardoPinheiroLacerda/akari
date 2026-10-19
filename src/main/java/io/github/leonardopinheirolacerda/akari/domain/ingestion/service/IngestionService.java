@@ -176,12 +176,12 @@ public class IngestionService {
         final Map<String, List<StorageItem>> childrenByParentPath = remoteDirs.stream()
                 .collect(Collectors.groupingBy(item -> DirectoryUtils.parentOf(item.path())));
 
-        final String rootPathName = rootPath.isEmpty()
+        final String rootPathName = normalizedRootPath.isEmpty()
                 ? ""
-                : DirectoryUtils.lastSegmentOf(rootPath);
+                : DirectoryUtils.lastSegmentOf(normalizedRootPath);
 
         return buildNode(
-                rootPath,
+                normalizedRootPath,
                 rootPathName,
                 childrenByParentPath,
                 ingestedPaths
