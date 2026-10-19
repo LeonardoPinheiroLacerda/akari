@@ -109,6 +109,12 @@ chat). Vocabulário padrão a usar inline, em negrito:
   renomeia a classe"), não documente só a intenção — execute a mudança de verdade (ver seção
   abaixo) e documente o resultado, não a promessa.
 
+Essas marcas (`Aceito`/`Backlog real`/`Confirmado`/`(confirmado pelo mantenedor)`) são o produto
+da entrevista — nunca remova nem resuma. O que não entra no texto é a jornada de como chegamos à
+resolução (onde algo morava antes, que alternativa foi cogitada e rejeitada, "à época desta
+curadoria isso não existia ainda"): ver skill `docs-style` pro critério exato do que cortar e do
+que manter antes de escrever a resolução no arquivo.
+
 Se a resolução de um item também afeta um arquivo de um domínio **já fechado** nesta sessão (ex.:
 uma decisão de roadmap que vale para rclone, ffprobe e ffmpeg ao mesmo tempo, espalhados em três
 READMEs diferentes), volte e atualize os outros arquivos também — não force o usuário a repetir a
