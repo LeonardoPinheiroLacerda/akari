@@ -6,6 +6,7 @@ import io.github.leonardopinheirolacerda.akari.domain.storageprovider.provider.c
 import io.github.leonardopinheirolacerda.akari.domain.storageprovider.provider.client.dtos.RcloneCopyJobStatusResponse;
 import io.github.leonardopinheirolacerda.akari.domain.storageprovider.provider.client.dtos.RcloneDownloadStatsRequest;
 import io.github.leonardopinheirolacerda.akari.domain.storageprovider.provider.client.dtos.RcloneDownloadStatsResponse;
+import io.github.leonardopinheirolacerda.akari.domain.storageprovider.provider.client.dtos.RcloneJobStopRequest;
 import io.github.leonardopinheirolacerda.akari.domain.storageprovider.provider.client.dtos.RcloneListRequest;
 import io.github.leonardopinheirolacerda.akari.domain.storageprovider.provider.client.dtos.RcloneListResponse;
 import io.github.leonardopinheirolacerda.akari.domain.storageprovider.provider.client.dtos.RcloneObscureRequest;
@@ -66,6 +67,15 @@ public interface RcloneClient {
     @POST
     @Path("/job/status")
     RcloneCopyJobStatusResponse getJobStatus(RcloneCopyJobStatusRequest request);
+
+    /**
+     * Interrompe um job assíncrono em andamento.
+     *
+     * @param request contém o {@code jobid} a interromper
+     */
+    @POST
+    @Path("/job/stop")
+    void stopJob(RcloneJobStopRequest request);
 
     /**
      * Consulta o progresso de transferência (bytes movidos, velocidade, ETA) agrupado por

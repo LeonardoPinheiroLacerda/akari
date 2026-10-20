@@ -27,6 +27,9 @@ public enum CacheEventType {
     FAILED,
 
     /** Uma linha foi removida pela eviction LRU pra abrir espaço a um novo download. */
-    EVICTED
+    EVICTED,
+
+    /** Uma linha {@code QUEUED} ou {@code DOWNLOADING} foi cancelada e removida do cache. */
+    CANCELLED
 
 }

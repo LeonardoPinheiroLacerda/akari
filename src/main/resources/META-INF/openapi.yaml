@@ -62,11 +62,12 @@ tags:
     description: Arquivos de vídeo dentro de uma pasta
   - name: Cache
     description: |
-      Fila e listagem do cache local de vídeo.
+      Fila, listagem e cancelamento do cache local de vídeo.
 
       Gerencia o cache local de arquivos de vídeo: enfileira downloads de arquivos remotos
       (resolvidos via storage provider) para o disco local, numa fila serial de 1 slot com
-      eviction LRU por espaço.
+      eviction LRU por espaço. Uma linha `QUEUED` ou `DOWNLOADING` pode ser cancelada antes
+      de concluir.
 
       O acompanhamento de progresso em tempo real é feito por um stream SSE em
       `/v1/cache/events` — **não modelado neste contrato** (o gerador `jaxrs-spec` não
@@ -593,6 +594,33 @@ paths:
           $ref: '#/components/responses/CacheItemPageOk'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/cache/items/{itemId}:
+    parameters:
+      - $ref: '#/components/parameters/CacheItemIdPathParam'
+    delete:
+      tags: [Cache]
+      operationId: cancelCacheDownload
+      summary: Cancela o download de uma linha QUEUED ou DOWNLOADING
+      description: |
+        Cancela a linha e a remove do cache. Se estiver `DOWNLOADING`, o job rclone em
+        andamento é interrompido antes da remoção.
+
+        Responde `400` (`BUSINESS_RULE_VIOLATION`) se a linha já estiver `COMPLETED` ou
+        `FAILED` — essas não estão mais em andamento pra cancelar.
+
+        Responde `404` se o `itemId` não existir.
+      responses:
+        '204':
+          $ref: '#/components/responses/CacheItemCancelled'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '502':
+          $ref: '#/components/responses/BadGateway'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -1398,6 +1426,13 @@ components:
       description: Restringe às linhas com status diferente de `COMPLETED`; `null`/ausente não filtra
       schema:
         $ref: '#/components/schemas/PendingOnlyFilter'
+    CacheItemIdPathParam:
+      name: itemId
+      in: path
+      required: true
+      description: Id da linha do cache
+      schema:
+        $ref: '#/components/schemas/CacheItemId'
 
     # ---------- playback ----------
     SessionIdPathParam:
@@ -1726,6 +1761,8 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/CacheItemPage'
+    CacheItemCancelled:
+      description: Linha cancelada e removida do cache
 
     # ---------- mediaprobe ----------
     MediaProbeOk:
@@ -2361,17 +2398,20 @@ components:
         fileId:
           $ref: '#/components/schemas/FileId'
 
+    CacheItemId:
+      type: string
+      format: uuid
+      description: |
+        Id da linha do cache, gerado ao enfileirar — também é o nome do arquivo em disco.
+        Reenfileirar um item `FAILED` reaproveita o mesmo id.
+
     CacheItem:
       type: object
       description: Linha do cache com o arquivo resolvido
       required: [id, status, queuedAt]
       properties:
         id:
-          type: string
-          format: uuid
-          description: |
-            Id da linha, gerado ao enfileirar — também é o nome do arquivo em disco. Reenfileirar
-            um item `FAILED` reaproveita o mesmo id.
+          $ref: '#/components/schemas/CacheItemId'
         status:
           $ref: '#/components/schemas/CacheStatus'
         jobId:

@@ -24,7 +24,8 @@ precisa saber desses detalhes.
 - **Obscurecimento de campos sensíveis** — `ObscureFieldApplier.obscureRequiredFields` +
   `@Obscure`.
 - **Transporte REST com o rclone rcd** — `RcloneClient` (listagem, cópia de arquivo
-  assíncrona, status de job, progresso de transferência, obscure, health check).
+  assíncrona, status de job, interrupção de job, progresso de transferência, obscure, health
+  check).
 - **Client remoto genérico via rclone** — `RemoteStorageProviderClient` (base abstrata;
   `MegaStorageProviderClient` é a única subclasse hoje).
 - **Client local puro Java NIO** — `LocalStorageProviderClient.impl` (sem rclone, sem rede).
@@ -62,7 +63,7 @@ precisa saber desses detalhes.
   obscurecer+validar uma config bruta.
 - `RcloneClient` — ponto de entrada de baixo nível, injetado diretamente onde a chamada ao rcd
   não passa por um `StorageProviderClient` (ex.: health check do rcd em si,
-  `StorageProviderService`).
+  `StorageProviderService`, e o cancelamento de download no `CacheService` de `domain/cache`).
 
 ## Fluxos importantes
 
@@ -116,8 +117,8 @@ return switch (storageProvider.type) {
 
 - `RcloneClient` é um REST client MicroProfile (`@RegisterRestClient(configKey = "rclone")`),
   JSON sobre HTTP, mapeando 1:1 os endpoints do rclone remote control daemon (rcd):
-  `/operations/list`, `/operations/copyfile`, `/job/status`, `/core/stats`, `/core/obscure`,
-  `/rc/noop`.
+  `/operations/list`, `/operations/copyfile`, `/job/status`, `/job/stop`, `/core/stats`,
+  `/core/obscure`, `/rc/noop`.
 - A URL base vem de `quarkus.rest-client.rclone.url` em `application.properties`, default
   `http://localhost:5572` (sobrescrevível por `RCLONE_HOST`).
 - O rcd roda como processo local (script `rclone-rcd.sh` na raiz do projeto), não
@@ -132,9 +133,9 @@ return switch (storageProvider.type) {
   `ProcessingException`/`WebApplicationException` e embrulha em `IntegrationException` quando
   aplicável.
 - Downloads (`downloadFile`) são sempre assíncronos (`_async=true`): a resposta devolve um
-  `jobid`, usado depois para consultar `/job/status` (estado finalizado/sucesso) e
-  `/core/stats?group=job/<jobid>` (progresso) — esse acompanhamento mora em `domain/cache`, não
-  aqui.
+  `jobid`, usado depois para consultar `/job/status` (estado finalizado/sucesso),
+  `/core/stats?group=job/<jobid>` (progresso) e, se o usuário cancelar, `/job/stop`
+  (interrupção) — esse acompanhamento e o cancelamento moram em `domain/cache`, não aqui.
 
 ## Arquivos críticos
 

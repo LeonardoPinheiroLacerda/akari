@@ -6,10 +6,13 @@ import io.github.leonardopinheirolacerda.akari.api.dto.CacheItemPage;
 import io.github.leonardopinheirolacerda.akari.api.dto.CacheQueueRequest;
 import io.github.leonardopinheirolacerda.akari.domain.cache.service.CacheService;
 import io.github.leonardopinheirolacerda.akari.exceptions.BusinessRuleException;
+import io.github.leonardopinheirolacerda.akari.exceptions.IntegrationException;
 import io.github.leonardopinheirolacerda.akari.exceptions.IntegrationNotConfiguredException;
 import io.github.leonardopinheirolacerda.akari.exceptions.ResourceNotFoundException;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+
+import java.util.UUID;
 
 /**
  * Implementa {@link CacheApi} — fila de download local de vídeo em {@code /v1/cache/items}.
@@ -53,5 +56,20 @@ public class CacheResource implements CacheApi {
     @Override
     public CacheItem queueCacheDownload(CacheQueueRequest cacheQueueRequest) {
         return cacheService.queueCacheDownload(cacheQueueRequest);
+    }
+
+    /**
+     * {@code DELETE /v1/cache/items/{itemId}} — cancela uma linha {@code QUEUED} ou
+     * {@code DOWNLOADING}.
+     *
+     * @param itemId id da linha a cancelar
+     * @throws ResourceNotFoundException (traduzida em 404) se o {@code itemId} não existir
+     * @throws BusinessRuleException (traduzida em 400) se a linha já estiver {@code COMPLETED}
+     *         ou {@code FAILED}
+     * @throws IntegrationException (traduzida em 502) se o rclone falhar ao interromper o job
+     */
+    @Override
+    public void cancelCacheDownload(UUID itemId) {
+        cacheService.cancelCacheDownload(itemId);
     }
 }

@@ -10,9 +10,12 @@ import io.github.leonardopinheirolacerda.akari.domain.cache.model.VideoFileCache
 import io.github.leonardopinheirolacerda.akari.domain.cache.sse.CacheEvent;
 import io.github.leonardopinheirolacerda.akari.domain.cache.sse.CacheEventBroadcaster;
 import io.github.leonardopinheirolacerda.akari.domain.setting.service.SettingService;
+import io.github.leonardopinheirolacerda.akari.domain.storageprovider.provider.client.RcloneClient;
+import io.github.leonardopinheirolacerda.akari.domain.storageprovider.provider.client.dtos.RcloneJobStopRequest;
 import io.github.leonardopinheirolacerda.akari.domain.videofile.mapper.VideoFileMapper;
 import io.github.leonardopinheirolacerda.akari.domain.videofile.model.VideoFile;
 import io.github.leonardopinheirolacerda.akari.exceptions.BusinessRuleException;
+import io.github.leonardopinheirolacerda.akari.exceptions.IntegrationException;
 import io.github.leonardopinheirolacerda.akari.exceptions.IntegrationNotConfiguredException;
 import io.github.leonardopinheirolacerda.akari.exceptions.ResourceNotFoundException;
 import io.github.leonardopinheirolacerda.akari.model.PageResult;
@@ -20,7 +23,13 @@ import io.quarkus.logging.Log;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
+import jakarta.ws.rs.ProcessingException;
+import jakarta.ws.rs.WebApplicationException;
+import org.eclipse.microprofile.rest.client.inject.RestClient;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -49,6 +58,10 @@ public class CacheService {
 
     @Inject
     CacheEventBroadcaster cacheEventBroadcaster;
+
+    @Inject
+    @RestClient
+    RcloneClient rcloneClient;
 
     /**
      * Enfileira o download de um arquivo de vídeo remoto pro cache local.
@@ -142,6 +155,61 @@ public class CacheService {
                 .stream()
                 .map(row -> cacheMapper.toItem(row, videoFileMapper))
                 .toList();
+    }
+
+    /**
+     * Cancela uma linha {@code QUEUED} ou {@code DOWNLOADING}, removendo-a do cache.
+     *
+     * <p>Se a linha estiver {@code DOWNLOADING}, interrompe o job rclone em andamento e apaga
+     * o arquivo parcial do disco antes de remover a linha. Publica o evento SSE
+     * {@code CANCELLED} ao final.
+     *
+     * @param itemId id da linha a cancelar
+     * @throws ResourceNotFoundException se o {@code itemId} não existir
+     * @throws BusinessRuleException se a linha já estiver {@code COMPLETED} ou {@code FAILED}
+     *         (não estão mais em andamento pra cancelar)
+     * @throws IntegrationException se o rclone falhar ao interromper o job
+     */
+    @Transactional
+    public void cancelCacheDownload(UUID itemId) {
+        final VideoFileCache row = VideoFileCache.find(itemId)
+                .orElseThrow(() -> new ResourceNotFoundException("Não foi possível localizar uma linha de cache com o id informado"));
+
+        if (row.status == CacheStatus.COMPLETED || row.status == CacheStatus.FAILED) {
+            throw new BusinessRuleException("Esta linha já está " + row.status + " e não está mais em andamento pra cancelar");
+        }
+
+        if (row.status == CacheStatus.DOWNLOADING && row.jobId != null) {
+            try {
+                rcloneClient.stopJob(new RcloneJobStopRequest(row.jobId));
+            } catch (ProcessingException | WebApplicationException e) {
+                Log.errorf(e, "Falha ao interromper o job rclone %d (linha %s)", row.jobId, row.id);
+                throw new IntegrationException("Falha ao interromper o download no rclone", e);
+            }
+
+            deleteOnDisk(row.id);
+        }
+
+        final UUID id = row.id;
+        row.delete();
+
+        Log.infof("Linha %s cancelada", id);
+
+        cacheEventBroadcaster.publish(CacheEvent.cancelled(id));
+    }
+
+    private void deleteOnDisk(UUID id) {
+        final String cacheDir = settingService.getCacheDir();
+
+        if (cacheDir == null || cacheDir.isBlank()) {
+            return;
+        }
+
+        try {
+            Files.deleteIfExists(Path.of(cacheDir, id.toString()));
+        } catch (IOException e) {
+            Log.warnf(e, "Falha ao apagar arquivo parcial do cache %s — linha cancelada mesmo assim", id);
+        }
     }
 
 }

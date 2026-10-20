@@ -2,7 +2,7 @@
 
 ## Objetivo do módulo
 
-Fila serial (1 slot) de download de arquivos de vídeo remotos para um diretório local, com eviction LRU por orçamento de espaço, e acompanhamento de progresso em tempo real via SSE.
+Fila serial (1 slot) de download de arquivos de vídeo remotos para um diretório local, com eviction LRU por orçamento de espaço, cancelamento de linhas em andamento e acompanhamento de progresso em tempo real via SSE.
 
 ## Responsabilidade principal
 
@@ -14,6 +14,7 @@ Este pacote também hospeda `IntegrationCache` (`model/IntegrationCache.java`), 
 
 - `POST /v1/cache/items` — enfileira o download de um `VideoFile` remoto (`CacheResource.queueCacheDownload` → `CacheService.queueCacheDownload`).
 - `GET /v1/cache/items` — pagina as linhas do cache, com filtro opcional `pendingOnly` (`CacheResource.listCaches` → `CacheService.listCaches`).
+- `DELETE /v1/cache/items/{itemId}` — cancela uma linha `QUEUED` ou `DOWNLOADING` (`CacheResource.cancelCacheDownload` → `CacheService.cancelCacheDownload`).
 - `GET /v1/cache/events` — stream SSE de progresso (`CacheEventResource.subscribe` → `CacheEventBroadcaster.subscribe`), code-first (não gerado do contrato — o gerador jaxrs-spec não descreve SSE).
 - Motor de processamento da fila, disparado por scheduler (`CacheScheduler` a cada 5s) — reconcilia downloads em andamento, inicia o próximo da fila, aplica eviction LRU (`CacheQueueProcessorService.processQueue`).
 - Polling de progresso do download ativo, disparado por scheduler (`CacheScheduler` a cada 1s), só quando há inscritos SSE (`CacheQueueProcessorService.pollProgress`).
@@ -24,7 +25,7 @@ Este pacote também hospeda `IntegrationCache` (`model/IntegrationCache.java`), 
 - `domain/setting` (`SettingService`) — lê `cache.dir` e o orçamento máximo de espaço.
 - `domain/storageprovider` (`StorageProvider`, `StorageProviderClientFactory`, `StorageProviderClient`, `RcloneClient` e DTOs do rclone) — resolve o client do provider remoto e dispara/consulta o job de download.
 - `domain/videofile` (`VideoFile`, `VideoFileMapper`) — a entidade cacheada e o mapper usado para resolver `videoFile` no DTO de resposta.
-- `exceptions/` (`BusinessRuleException`, `IntegrationNotConfiguredException`, `ResourceNotFoundException`) — erros de negócio traduzidos em HTTP pelo `ExceptionMapper` do projeto (fora deste domínio).
+- `exceptions/` (`BusinessRuleException`, `IntegrationException`, `IntegrationNotConfiguredException`, `ResourceNotFoundException`) — erros de negócio traduzidos em HTTP pelo `ExceptionMapper` do projeto (fora deste domínio).
 - Jakarta: `@Entity`/Panache (`VideoFileCache`, `IntegrationCache`), `jakarta.ws.rs.sse` (SSE), `@Scheduled` (Quarkus scheduler).
 
 ## Módulos relacionados
@@ -49,6 +50,8 @@ Este pacote também hospeda `IntegrationCache` (`model/IntegrationCache.java`), 
 3. Se a fila transicionou de "tinha algo ativo" para "nada ativo", publica `IDLE` e fecha todos os sinks SSE.
 
 **Progresso** (`CacheQueueProcessorService.pollProgress`, a cada 1s): só executa se há sinks SSE abertos; consulta `RcloneClient.getTransferProgress` da linha `DOWNLOADING` e publica `PROGRESS`.
+
+**Cancelamento** (`CacheService.cancelCacheDownload`): bloqueia linhas `COMPLETED`/`FAILED` (já resolvidas, não há o que cancelar). Para uma linha `DOWNLOADING`, interrompe o job via `RcloneClient.stopJob` e apaga o arquivo parcial em `cache.dir` antes de remover a linha; para `QUEUED`, só remove a linha (nunca chegou a escrever no disco). Publica o evento SSE `CANCELLED` ao final — não aguarda o próximo ciclo do `CacheScheduler`.
 
 **SSE** (`CacheEventBroadcaster`): a instância de `Sse` chega só via `@Context` no primeiro `subscribe` (não é injetável direto num bean `@ApplicationScoped`) e é capturada ali. Inscrição sem nada ativo recebe `IDLE` e é fechada na hora — nunca mantém conexão aberta sem nada a observar.
 
