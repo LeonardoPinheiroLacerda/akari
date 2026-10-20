@@ -379,6 +379,11 @@ paths:
         specs `field[:asc|desc]` na whitelist `name`, `createdAt`. Cada pasta já vem com
         `animeBinding` preenchido quando vinculada — não é preciso uma segunda chamada pra
         buscar os bindings da página.
+
+        `reviewStatus`, `hasAnilist`, `hasTmdb` e `allEpisodesPaired` filtram pelo anime
+        vinculado à pasta (quando houver); pastas sem nenhum anime vinculado só batem com
+        `hasAnilist=false` — qualquer um dos outros três junto de uma pasta sem binding
+        não traz resultado.
       parameters:
         - $ref: '#/components/parameters/PageParam'
         - $ref: '#/components/parameters/SizeParam'
@@ -387,6 +392,10 @@ paths:
         - $ref: '#/components/parameters/StorageProviderIdFilterParam'
         - $ref: '#/components/parameters/ParentIdFilterParam'
         - $ref: '#/components/parameters/HasFilesFilterParam'
+        - $ref: '#/components/parameters/ReviewStatusFilterParam'
+        - $ref: '#/components/parameters/HasAnilistFilterParam'
+        - $ref: '#/components/parameters/HasTmdbFilterParam'
+        - $ref: '#/components/parameters/AllEpisodesPairedFilterParam'
         - $ref: '#/components/parameters/SortParam'
       responses:
         '200':
@@ -1403,6 +1412,36 @@ components:
       description: Filtra por existência de arquivos; `null`/ausente não filtra
       schema:
         $ref: '#/components/schemas/HasFilesFilter'
+    ReviewStatusFilterParam:
+      name: reviewStatus
+      in: query
+      required: false
+      description: Status de revisão do anime vinculado; `null`/ausente não filtra
+      schema:
+        $ref: '#/components/schemas/AnimeReviewStatus'
+    HasAnilistFilterParam:
+      name: hasAnilist
+      in: query
+      required: false
+      description: Filtra por ter ou não anime vinculado à AniList; `null`/ausente não filtra
+      schema:
+        $ref: '#/components/schemas/HasAnilistFilter'
+    HasTmdbFilterParam:
+      name: hasTmdb
+      in: query
+      required: false
+      description: Filtra por ter ou não binding TMDB; `null`/ausente não filtra
+      schema:
+        $ref: '#/components/schemas/HasTmdbFilter'
+    AllEpisodesPairedFilterParam:
+      name: allEpisodesPaired
+      in: query
+      required: false
+      description: >-
+        Filtra por ter todo arquivo pareado ao TMDB; pastas sem nenhum arquivo não batem com
+        nenhum dos dois valores; `null`/ausente não filtra
+      schema:
+        $ref: '#/components/schemas/AllEpisodesPairedFilter'
     SortParam:
       name: sort
       in: query
@@ -2226,6 +2265,22 @@ components:
     HasFilesFilter:
       type: boolean
       description: Restringe por existência de arquivos
+
+    HasAnilistFilter:
+      type: boolean
+      description: Restringe por ter ou não anime vinculado à AniList
+
+    HasTmdbFilter:
+      type: boolean
+      description: >-
+        Restringe por ter ou não binding TMDB; independe de `hasAnilist` — combine os dois
+        pra achar só pastas com AniList vinculada mas sem TMDB
+
+    AllEpisodesPairedFilter:
+      type: boolean
+      description: >-
+        Restringe por ter todo arquivo de vídeo pareado ao TMDB; pastas sem nenhum arquivo
+        não batem nem com `true` nem com `false`
 
     SortSpecs:
       type: array

@@ -18,7 +18,8 @@ conjunto de pastas.
 
 - `POST/GET/PUT/DELETE /v1/catalog/folders` (CRUD completo).
 - Listagem paginada com filtros em AND (`name` substring case-insensitive, `mediaType`,
-  `storageProviderId`, `parentId`, `hasFiles`) e `sort` com whitelist `name`/`createdAt`.
+  `storageProviderId`, `parentId`, `hasFiles`, `reviewStatus`, `hasAnilist`, `hasTmdb`,
+  `allEpisodesPaired`) e `sort` com whitelist `name`/`createdAt`.
 - Resolução automática do pai a partir do `path` no create/update — se o pai não estiver
   registrado, a pasta vira raiz (`parentId` nulo), não é erro.
 - Enriquecimento cross-domain na listagem: cada pasta da página recebe `animeBinding` (via
@@ -33,6 +34,11 @@ conjunto de pastas.
 - `videofile` (model `VideoFile`) — associação `@OneToMany` só para contagem/filtro
   `hasFiles` (`size(videoFiles)`), sem leitura via cascata.
 - `anime` (service `AnimeService`) — `getAnimeBindings` para enriquecer a listagem.
+- `anime`/`videofile` por **nome de entidade em HQL**, não por import Java — os filtros
+  `reviewStatus`/`hasAnilist`/`hasTmdb`/`allEpisodesPaired` de `findPage` usam subquery
+  correlacionada (`EXISTS`/`IN`) referenciando `Anime`, `TmdbFilePairing` e `VideoFile` só
+  como texto na query; `MediaFolder.java` não importa nada desses domínios, preservando o
+  sentido único da dependência de pacote (`anime` → `mediafolder`, nunca o contrário).
 - `utils.DirectoryUtils` (`parentOf`) — deriva o path do pai a partir do path da pasta.
 - `utils.PaginationUtils` — monta o `Sort` do Panache a partir das specs de `sort`.
 - `exceptions.ResourceNotFoundException`, `exceptions.BusinessRuleException`.
@@ -92,6 +98,17 @@ conjunto de pastas.
   custoso em pastas com muitos arquivos; não há índice dedicado visível no código para essa
   contagem. **Aceito** (confirmado pelo mantenedor): escala de uso pessoal/doméstico não
   justifica otimizar agora.
+- Os filtros `reviewStatus`/`hasAnilist`/`hasTmdb`/`allEpisodesPaired` referenciam `Anime`/
+  `TmdbFilePairing`/`VideoFile` só pelo nome na string HQL (sem import) — evita acoplamento de
+  pacote em `mediafolder`, mas é um acoplamento de schema sem proteção do compilador: renomear
+  um campo usado aqui (ex. `Anime.tmdbId`, `Anime.reviewStatus`) em `anime` quebra essa query em
+  runtime, não em build. `allEpisodesPaired`, especificamente, nunca bate (nem `true` nem
+  `false`) numa pasta sem nenhum arquivo — não é um terceiro valor, é a ausência de dado pra
+  avaliar a condição.
+- `MediaFolder.findPage` usa `FROM MediaFolder m WHERE ...` com alias explícito (em vez do
+  curto `where ...` sem `FROM`) desde que os filtros de anime precisaram de subquery
+  correlacionada — sem alias, a correlação do `EXISTS`/`IN` com a pasta externa seria ambígua.
+  Mesmo padrão já usado em `Anime.findRoots` pra correlacionar com `AnimeRelation`.
 - **Confirmado nas migrations:** `media_folder.parent_id` e `video_file.folder_id` têm
   `ON DELETE CASCADE` na DDL (`V2__create-catalog-tables.sql`) — a cascata de descendentes e
   arquivos ao deletar uma pasta é real. Já `anime.folder_id` (`V6__create-anime-table.sql`)

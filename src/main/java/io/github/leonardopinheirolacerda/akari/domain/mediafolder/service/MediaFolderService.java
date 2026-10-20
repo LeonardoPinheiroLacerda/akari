@@ -1,6 +1,7 @@
 package io.github.leonardopinheirolacerda.akari.domain.mediafolder.service;
 
 import io.github.leonardopinheirolacerda.akari.api.dto.AnimeBindingSummary;
+import io.github.leonardopinheirolacerda.akari.api.dto.AnimeReviewStatus;
 import io.github.leonardopinheirolacerda.akari.api.dto.MediaFolderPage;
 import io.github.leonardopinheirolacerda.akari.api.dto.MediaFolderRequest;
 import io.github.leonardopinheirolacerda.akari.api.dto.MediaFolderResponse;
@@ -188,6 +189,11 @@ public class MediaFolderService {
      * @param storageProviderId id do provider; {@code null} não filtra
      * @param parentId id da pasta pai; {@code null} não filtra
      * @param hasFiles filtra por ter ou não arquivos diretos; {@code null} não filtra
+     * @param reviewStatus status de revisão do anime vinculado; {@code null} não filtra
+     * @param hasAnilist filtra por ter ou não anime vinculado à AniList; {@code null} não filtra
+     * @param hasTmdb filtra por ter ou não binding TMDB; {@code null} não filtra
+     * @param allEpisodesPaired filtra por ter todo arquivo pareado ao TMDB; {@code null} não
+     *                          filtra
      * @param sort specs {@code campo[:asc|desc]} na whitelist {@code name}/{@code createdAt}
      * @return página de pastas que atendem aos filtros, cada uma com {@code animeBinding}
      *         preenchido quando vinculada
@@ -200,6 +206,10 @@ public class MediaFolderService {
             Integer storageProviderId,
             Integer parentId,
             Boolean hasFiles,
+            AnimeReviewStatus reviewStatus,
+            Boolean hasAnilist,
+            Boolean hasTmdb,
+            Boolean allEpisodesPaired,
             List<String> sort) {
 
         final PageResult<MediaFolder> pageResult = MediaFolder.findPage(
@@ -210,6 +220,10 @@ public class MediaFolderService {
                 storageProviderId,
                 parentId,
                 hasFiles,
+                reviewStatus,
+                hasAnilist,
+                hasTmdb,
+                allEpisodesPaired,
                 sort
         );
 

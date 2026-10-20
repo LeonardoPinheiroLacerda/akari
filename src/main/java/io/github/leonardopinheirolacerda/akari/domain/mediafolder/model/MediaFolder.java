@@ -1,5 +1,6 @@
 package io.github.leonardopinheirolacerda.akari.domain.mediafolder.model;
 
+import io.github.leonardopinheirolacerda.akari.api.dto.AnimeReviewStatus;
 import io.github.leonardopinheirolacerda.akari.api.dto.MediaType;
 import io.github.leonardopinheirolacerda.akari.model.PageResult;
 import io.github.leonardopinheirolacerda.akari.domain.storageprovider.model.StorageProvider;
@@ -119,6 +120,14 @@ public class MediaFolder extends PanacheEntityBase {
      * Pagina as pastas, aplicando os filtros informados como AND (cada parâmetro não-nulo
      * restringe o resultado) e a ordenação pedida.
      *
+     * <p>{@code reviewStatus}/{@code hasAnilist}/{@code hasTmdb}/{@code allEpisodesPaired}
+     * filtram pelo anime vinculado à pasta (via subquery correlacionada em {@code Anime}/
+     * {@code TmdbFilePairing}, referenciados só pelo nome HQL — este model não importa nada
+     * de {@code domain/anime}, mantendo a dependência de pacote só no sentido
+     * {@code anime → mediafolder} já existente). Uma pasta sem nenhum anime vinculado só bate
+     * com {@code hasAnilist=false}; combinada com qualquer um dos outros três, não traz
+     * resultado (não há anime pra casar a condição).
+     *
      * @param page página desejada, 0-based
      * @param size tamanho da página
      * @param name substring case-insensitive do nome; {@code null} não filtra
@@ -127,6 +136,14 @@ public class MediaFolder extends PanacheEntityBase {
      * @param parentId id da pasta pai; {@code null} não filtra
      * @param hasFiles {@code true}/{@code false} filtra por ter ou não arquivos diretos;
      *                 {@code null} não filtra
+     * @param reviewStatus status de revisão do anime vinculado; {@code null} não filtra
+     * @param hasAnilist {@code true}/{@code false} filtra por ter ou não anime vinculado à
+     *                   AniList; {@code null} não filtra
+     * @param hasTmdb {@code true}/{@code false} filtra por ter ou não binding TMDB;
+     *                {@code null} não filtra
+     * @param allEpisodesPaired {@code true}/{@code false} filtra por ter todo arquivo pareado
+     *                          ao TMDB; pasta sem nenhum arquivo não bate com nenhum dos dois;
+     *                          {@code null} não filtra
      * @param sort specs {@code campo[:asc|desc]} na whitelist {@code name}/{@code createdAt};
      *             {@code null}/vazio usa a ordenação padrão
      * @return página de pastas que atendem aos filtros
@@ -139,46 +156,75 @@ public class MediaFolder extends PanacheEntityBase {
             Integer storageProviderId,
             Integer parentId,
             Boolean hasFiles,
+            AnimeReviewStatus reviewStatus,
+            Boolean hasAnilist,
+            Boolean hasTmdb,
+            Boolean allEpisodesPaired,
             List<String> sort) {
 
         final List<String> clauses = new ArrayList<>();
         final Map<String, Object> params = new HashMap<>();
 
         if (name != null) {
-            clauses.add("lower(name) like lower(:name)");
+            clauses.add("lower(m.name) like lower(:name)");
             params.put("name", "%" + name + "%");
         }
         if (mediaType != null) {
-            clauses.add("mediaType = :mediaType");
+            clauses.add("m.mediaType = :mediaType");
             params.put("mediaType", mediaType);
         }
         if (storageProviderId != null) {
-            clauses.add("storageProvider.id = :storageProviderId");
+            clauses.add("m.storageProvider.id = :storageProviderId");
             params.put("storageProviderId", storageProviderId);
         }
         if (parentId != null) {
-            clauses.add("parent.id = :parentId");
+            clauses.add("m.parent.id = :parentId");
             params.put("parentId", parentId);
         }
         if (hasFiles != null) {
             clauses.add(
-                    hasFiles 
-                        ? "size(videoFiles) > 0" 
-                        : "size(videoFiles) = 0"
+                    hasFiles
+                        ? "size(m.videoFiles) > 0"
+                        : "size(m.videoFiles) = 0"
             );
+        }
+        if (reviewStatus != null) {
+            clauses.add("EXISTS (SELECT 1 FROM Anime a WHERE a.folder.id = m.id AND a.reviewStatus = :reviewStatus)");
+            params.put("reviewStatus", reviewStatus);
+        }
+        if (hasAnilist != null) {
+            clauses.add(
+                    hasAnilist
+                        ? "EXISTS (SELECT 1 FROM Anime a WHERE a.folder.id = m.id)"
+                        : "NOT EXISTS (SELECT 1 FROM Anime a WHERE a.folder.id = m.id)"
+            );
+        }
+        if (hasTmdb != null) {
+            clauses.add(
+                    hasTmdb
+                        ? "EXISTS (SELECT 1 FROM Anime a WHERE a.folder.id = m.id AND a.tmdbId IS NOT NULL)"
+                        : "NOT EXISTS (SELECT 1 FROM Anime a WHERE a.folder.id = m.id AND a.tmdbId IS NOT NULL)"
+            );
+        }
+        if (allEpisodesPaired != null) {
+            final String allPairedCondition =
+                    "size(m.videoFiles) > 0 AND size(m.videoFiles) = ("
+                            + "SELECT COUNT(p) FROM TmdbFilePairing p WHERE p.fileId IN "
+                            + "(SELECT vf.id FROM VideoFile vf WHERE vf.folder.id = m.id))";
+            clauses.add(allEpisodesPaired ? allPairedCondition : "NOT (" + allPairedCondition + ")");
         }
 
         final String where = clauses.isEmpty()
                 ? ""
-                : "where " + String.join(" AND ", clauses);
+                : "WHERE " + String.join(" AND ", clauses);
 
         final Map<String, String> sortableFields = Map.of(
-                "name", "name",
-                "createdAt", "createdAt"
+                "name", "m.name",
+                "createdAt", "m.createdAt"
         );
 
         final PanacheQuery<MediaFolder> panacheQuery = MediaFolder
-                .find(where, PaginationUtils.toSort(sort, sortableFields), params)
+                .find("FROM MediaFolder m " + where, PaginationUtils.toSort(sort, sortableFields), params)
                 .page(page, size);
 
         return new PageResult<>(
