@@ -14,6 +14,7 @@ import io.github.leonardopinheirolacerda.akari.domain.anibridge.model.TmdbMappin
 import io.github.leonardopinheirolacerda.akari.domain.anibridge.service.AnibridgeResolutionService;
 import io.github.leonardopinheirolacerda.akari.domain.anilist.service.AnilistSearchService;
 import io.github.leonardopinheirolacerda.akari.domain.anime.model.Anime;
+import io.github.leonardopinheirolacerda.akari.domain.anime.service.AnimeOverrideService;
 import io.github.leonardopinheirolacerda.akari.domain.anime.service.AnimeService;
 import io.github.leonardopinheirolacerda.akari.domain.anime.service.AnimeTmdbFilePairingService;
 import io.github.leonardopinheirolacerda.akari.domain.anime.service.AnimeTmdbService;
@@ -61,6 +62,9 @@ public class FolderAutoBindService {
     AnimeService animeService;
 
     @Inject
+    AnimeOverrideService animeOverrideService;
+
+    @Inject
     AnimeTmdbService animeTmdbService;
 
     @Inject
@@ -99,7 +103,7 @@ public class FolderAutoBindService {
                     folderName,
                     "Falha inesperada ao vincular automaticamente",
                     folderId,
-                    null);
+                    coverImageOf(animeService.findByFolder(folderId).orElse(null)));
         }
     }
 
@@ -212,7 +216,7 @@ public class FolderAutoBindService {
                     folderName,
                     "Não foi encontrado um mapeamento TMDB pra esse anime",
                     folderId,
-                    null);
+                    coverImageOf(anime));
             return anime;
         }
 
@@ -230,7 +234,7 @@ public class FolderAutoBindService {
         } catch (IntegrationException | ResourceNotFoundException e) {
             Log.warnf(e, "Bind TMDB %d falhou pro anime %d (pasta %d)", best.tmdbId(), anime.anilistId, folderId);
             notificationService.notify(
-                    NotificationLevel.WARNING, folderName, "Bind no TMDB falhou", folderId, null);
+                    NotificationLevel.WARNING, folderName, "Bind no TMDB falhou", folderId, coverImageOf(anime));
             return anime;
         }
 
@@ -260,7 +264,7 @@ public class FolderAutoBindService {
                     "Mapeamento do anibridge tem temporadas conflitantes pra esse anime — "
                             + "pareamento automático não tentado",
                     folderId,
-                    null);
+                    coverImageOf(anime));
             animeService.updateReviewStatusIfNotReviewed(anime.anilistId, AnimeReviewStatus.PARTIAL);
             return;
         }
@@ -360,7 +364,7 @@ public class FolderAutoBindService {
                             + "isolada com segurança — os arquivos que dependiam dessa correção não "
                             + "foram pareados",
                     folderId,
-                    null);
+                    coverImageOf(anime));
         }
 
         if (paired < videoFiles.size()) {
@@ -369,7 +373,7 @@ public class FolderAutoBindService {
                     folderName,
                     "%d de %d arquivos pareados".formatted(paired, videoFiles.size()),
                     folderId,
-                    null);
+                    coverImageOf(anime));
         }
 
         final AnimeReviewStatus reviewStatus = paired == videoFiles.size()
@@ -413,6 +417,19 @@ public class FolderAutoBindService {
         return episodes.stream()
                 .filter(episode -> episode.episodeNumber().equals(resolved.tmdbEpisode()))
                 .findFirst();
+    }
+
+    /**
+     * Capa pra notificação relacionada a um anime já bindado — override do TMDB se setado,
+     * senão a capa da AniList (ver {@link AnimeOverrideService#resolveThumbnailMedium}).
+     *
+     * @param anime anime da pasta, ou {@code null} se ainda não há nenhum bindado
+     * @return a URL da capa, ou {@code null} sem anime
+     */
+    private String coverImageOf(Anime anime) {
+        return anime == null
+                ? null
+                : animeOverrideService.resolveThumbnailMedium(anime);
     }
 
 }

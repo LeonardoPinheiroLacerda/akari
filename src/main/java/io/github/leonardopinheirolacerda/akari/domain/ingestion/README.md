@@ -24,7 +24,7 @@ Orquestrar chamadas a `storageprovider` (listar árvore remota) e a `mediafolder
 - `domain/storageprovider` (`StorageProvider`, `StorageProviderService`, `StorageProviderClientFactory`, `StorageProviderClient`, `StorageItem`) — lista a árvore remota e verifica existência de `rootPath`.
 - `domain/mediafolder` (`MediaFolder`, `MediaFolderService`) — cria/busca/remove pastas do catalog.
 - `domain/videofile` (`VideoFile`, `VideoFileService`) — cria/lista/remove arquivos de vídeo do catalog.
-- `domain/anime` (`Anime`, `AnimeService`, `AnimeRelationsService`, `AnimeTmdbService`, `AnimeTmdbFilePairingService`) — binding de anime à pasta e atualização de `reviewStatus`.
+- `domain/anime` (`Anime`, `AnimeService`, `AnimeOverrideService`, `AnimeRelationsService`, `AnimeTmdbService`, `AnimeTmdbFilePairingService`) — binding de anime à pasta, resolução da capa efetiva (override TMDB ou AniList) pras notificações, e atualização de `reviewStatus`.
 - `domain/anilist` (`AnilistSearchService`) — busca de candidato na AniList pelo nome da pasta.
 - `domain/anibridge` (`AnibridgeResolutionService`, `MappingSegment`, `ResolvedEpisode`, `TmdbMappingCandidate`) — resolve o mapeamento AniList ↔ TMDB e o episódio TMDB a partir do número extraído.
 - `domain/tmdb` (`TmdbService`, `TmdbEpisodeResponse`) — bind TMDB e metadata de episódio (thumbnail, nome, overview etc.).
@@ -56,6 +56,8 @@ Nenhum outro domínio depende de `ingestion` (confirmado por grep: nenhuma class
 Ao final (ou em caso de falha irrecuperável no listTree), a chave é liberada em `IngestionRunRegistry.finish` (bloco `finally`), e uma notificação `INFO` resume quantas pastas foram criadas e quantas passaram por auto-bind.
 
 **Auto-bind** (`FolderAutoBindService.autoBindFolder`, nunca lança): bind AniList (busca por nome, pula candidato já vinculado a outra pasta) → bind TMDB via `AnibridgeResolutionService.resolveBestCandidate` → se TV, pareamento episódio a episódio usando `EpisodeNumberExtractor` + segments do anibridge, com fallback de offset absoluto (`AbsoluteEpisodeOffsetService`) e fallback de pasta de episódio único. Atualiza `reviewStatus` do anime para `PENDING_REVIEW` (completo) ou `PARTIAL` (incompleto), nunca sobrescrevendo um `REVIEWED` manual.
+
+As notificações `WARNING` disparadas depois que o anime já está vinculado à AniList (falha no bind TMDB, conflito/numeração absoluta/pareamento parcial) levam a capa do anime (`FolderAutoBindService.coverImageOf` → `AnimeOverrideService.resolveThumbnailMedium`). As 3 notificações do próprio `bindAnilist` (busca/bind na AniList falhou ou sem resultado) e a do `listTree`/resumo em `IngestionService` não têm capa — ainda não existe (ou nunca existirá, no caso do resumo que cobre várias pastas) um anime único pra ilustrar.
 
 **Remoção** (`FolderRemovalService.removeFolders`): remove o anime vinculado a cada pasta antes da pasta, porque a FK `anime.folder_id` não tem cascade.
 

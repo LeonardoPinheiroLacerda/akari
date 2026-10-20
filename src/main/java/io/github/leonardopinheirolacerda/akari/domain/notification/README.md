@@ -43,6 +43,11 @@ criação (`notify()`), usado internamente — não há endpoint de criação na
   `IngestionService`). O domínio `notification` nunca lê nada de `ingestion`; a relação é
   unidirecional — `notification` é escrito por fora e lido só pela própria API (e pelo stream
   SSE, que todo cliente inscrito recebe).
+- `coverImageUrl` chega preenchido nas chamadas de `FolderAutoBindService` feitas depois que a
+  pasta já tem anime vinculado à AniList (`coverImageOf` → `AnimeOverrideService.resolveThumbnailMedium`
+  — override do TMDB se setado, senão a capa da AniList, já como URL absoluta). As 3 chamadas de
+  `bindAnilist` (busca/bind na AniList) e as 2 de `IngestionService` (sem pasta única associada)
+  mandam `null` — `notification` não resolve nem valida a URL recebida, só a persiste e repassa.
 
 ## Pontos de entrada
 
