@@ -30,6 +30,9 @@ public enum CacheEventType {
     EVICTED,
 
     /** Uma linha {@code QUEUED} ou {@code DOWNLOADING} foi cancelada e removida do cache. */
-    CANCELLED
+    CANCELLED,
+
+    /** Uma linha {@code COMPLETED} teve o arquivo apagado manualmente e foi removida do cache. */
+    DELETED
 
 }

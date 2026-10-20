@@ -2,7 +2,7 @@
 
 ## Objetivo do módulo
 
-Fila serial (1 slot) de download de arquivos de vídeo remotos para um diretório local, com eviction LRU por orçamento de espaço, cancelamento de linhas em andamento e acompanhamento de progresso em tempo real via SSE.
+Fila serial (1 slot) de download de arquivos de vídeo remotos para um diretório local, com eviction LRU por orçamento de espaço, cancelamento/remoção manual de linhas e acompanhamento de progresso em tempo real via SSE.
 
 ## Responsabilidade principal
 
@@ -14,7 +14,7 @@ Este pacote também hospeda `IntegrationCache` (`model/IntegrationCache.java`), 
 
 - `POST /v1/cache/items` — enfileira o download de um `VideoFile` remoto (`CacheResource.queueCacheDownload` → `CacheService.queueCacheDownload`).
 - `GET /v1/cache/items` — pagina as linhas do cache, com filtro opcional `pendingOnly` (`CacheResource.listCaches` → `CacheService.listCaches`).
-- `DELETE /v1/cache/items/{itemId}` — cancela uma linha `QUEUED` ou `DOWNLOADING` (`CacheResource.cancelCacheDownload` → `CacheService.cancelCacheDownload`).
+- `DELETE /v1/cache/items/{itemId}` — remove uma linha: cancela se `QUEUED`/`DOWNLOADING`, apaga o arquivo se `COMPLETED` (`CacheResource.deleteCacheItem` → `CacheService.deleteCacheItem`).
 - `GET /v1/cache/events` — stream SSE de progresso (`CacheEventResource.subscribe` → `CacheEventBroadcaster.subscribe`), code-first (não gerado do contrato — o gerador jaxrs-spec não descreve SSE).
 - Motor de processamento da fila, disparado por scheduler (`CacheScheduler` a cada 5s) — reconcilia downloads em andamento, inicia o próximo da fila, aplica eviction LRU (`CacheQueueProcessorService.processQueue`).
 - Polling de progresso do download ativo, disparado por scheduler (`CacheScheduler` a cada 1s), só quando há inscritos SSE (`CacheQueueProcessorService.pollProgress`).
@@ -51,7 +51,7 @@ Este pacote também hospeda `IntegrationCache` (`model/IntegrationCache.java`), 
 
 **Progresso** (`CacheQueueProcessorService.pollProgress`, a cada 1s): só executa se há sinks SSE abertos; consulta `RcloneClient.getTransferProgress` da linha `DOWNLOADING` e publica `PROGRESS`.
 
-**Cancelamento** (`CacheService.cancelCacheDownload`): bloqueia linhas `COMPLETED`/`FAILED` (já resolvidas, não há o que cancelar). Para uma linha `DOWNLOADING`, interrompe o job via `RcloneClient.stopJob` e apaga o arquivo parcial em `cache.dir` antes de remover a linha; para `QUEUED`, só remove a linha (nunca chegou a escrever no disco). Publica o evento SSE `CANCELLED` ao final — não aguarda o próximo ciclo do `CacheScheduler`.
+**Remoção manual** (`CacheService.deleteCacheItem`): bloqueia linhas `FAILED` (reenfileire via `POST /v1/cache/items` ou aguarde a eviction LRU). Para `QUEUED`/`DOWNLOADING` (cancelamento): se `DOWNLOADING`, interrompe o job via `RcloneClient.stopJob` e apaga o arquivo parcial em `cache.dir`; para `QUEUED`, só remove a linha (nunca chegou a escrever no disco); publica `CANCELLED`. Para `COMPLETED` (remoção do arquivo já baixado): apaga o arquivo de `cache.dir` antes de remover a linha; publica `DELETED`. Em qualquer caso, publica o evento SSE sem aguardar o próximo ciclo do `CacheScheduler`.
 
 **SSE** (`CacheEventBroadcaster`): a instância de `Sse` chega só via `@Context` no primeiro `subscribe` (não é injetável direto num bean `@ApplicationScoped`) e é capturada ali. Inscrição sem nada ativo recebe `IDLE` e é fechada na hora — nunca mantém conexão aberta sem nada a observar.
 

@@ -158,44 +158,53 @@ public class CacheService {
     }
 
     /**
-     * Cancela uma linha {@code QUEUED} ou {@code DOWNLOADING}, removendo-a do cache.
+     * Remove uma linha do cache, cancelando ou apagando o arquivo conforme o status.
      *
-     * <p>Se a linha estiver {@code DOWNLOADING}, interrompe o job rclone em andamento e apaga
-     * o arquivo parcial do disco antes de remover a linha. Publica o evento SSE
-     * {@code CANCELLED} ao final.
+     * <p>{@code QUEUED}/{@code DOWNLOADING}: cancela — se {@code DOWNLOADING}, interrompe o
+     * job rclone em andamento e apaga o arquivo parcial do disco antes de remover a linha;
+     * publica o evento SSE {@code CANCELLED}. {@code COMPLETED}: apaga o arquivo já baixado
+     * do disco antes de remover a linha; publica o evento SSE {@code DELETED}.
      *
-     * @param itemId id da linha a cancelar
+     * @param itemId id da linha a remover
      * @throws ResourceNotFoundException se o {@code itemId} não existir
-     * @throws BusinessRuleException se a linha já estiver {@code COMPLETED} ou {@code FAILED}
-     *         (não estão mais em andamento pra cancelar)
+     * @throws BusinessRuleException se a linha estiver {@code FAILED} (reenfileire via
+     *         {@code POST /v1/cache/items} ou aguarde a eviction LRU)
      * @throws IntegrationException se o rclone falhar ao interromper o job
      */
     @Transactional
-    public void cancelCacheDownload(UUID itemId) {
+    public void deleteCacheItem(UUID itemId) {
         final VideoFileCache row = VideoFileCache.find(itemId)
                 .orElseThrow(() -> new ResourceNotFoundException("Não foi possível localizar uma linha de cache com o id informado"));
 
-        if (row.status == CacheStatus.COMPLETED || row.status == CacheStatus.FAILED) {
-            throw new BusinessRuleException("Esta linha já está " + row.status + " e não está mais em andamento pra cancelar");
+        final CacheStatus status = row.status;
+
+        if (status == CacheStatus.FAILED) {
+            throw new BusinessRuleException("Esta linha está FAILED — reenfileire ou aguarde a eviction LRU");
         }
 
-        if (row.status == CacheStatus.DOWNLOADING && row.jobId != null) {
+        if (status == CacheStatus.DOWNLOADING && row.jobId != null) {
             try {
                 rcloneClient.stopJob(new RcloneJobStopRequest(row.jobId));
             } catch (ProcessingException | WebApplicationException e) {
                 Log.errorf(e, "Falha ao interromper o job rclone %d (linha %s)", row.jobId, row.id);
                 throw new IntegrationException("Falha ao interromper o download no rclone", e);
             }
+        }
 
+        if (status == CacheStatus.DOWNLOADING || status == CacheStatus.COMPLETED) {
             deleteOnDisk(row.id);
         }
 
         final UUID id = row.id;
         row.delete();
 
-        Log.infof("Linha %s cancelada", id);
+        Log.infof("Linha %s removida (era %s)", id, status);
 
-        cacheEventBroadcaster.publish(CacheEvent.cancelled(id));
+        final CacheEvent event = status == CacheStatus.COMPLETED
+                ? CacheEvent.deleted(id)
+                : CacheEvent.cancelled(id);
+
+        cacheEventBroadcaster.publish(event);
     }
 
     private void deleteOnDisk(UUID id) {

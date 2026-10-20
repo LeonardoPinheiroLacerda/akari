@@ -13,13 +13,13 @@ import java.util.UUID;
  * {@code items}; {@code IDLE} não preenche nenhum; {@code QUEUED}/{@code STARTED}/
  * {@code COMPLETED} preenchem {@code id} e {@code status}; {@code FAILED} soma
  * {@code errorMessage}; {@code PROGRESS} preenche {@code id}, {@code status} e as métricas de
- * transferência; {@code EVICTED}/{@code CANCELLED} só preenchem {@code id}.
+ * transferência; {@code EVICTED}/{@code CANCELLED}/{@code DELETED} só preenchem {@code id}.
  *
  * @param type tipo do evento, decide quais dos demais campos vêm preenchidos
  * @param id id da linha de cache a que o evento se refere; {@code null} em {@code SNAPSHOT}/
  *           {@code IDLE}
  * @param status status da linha no momento do evento; {@code null} em {@code SNAPSHOT}/
- *               {@code IDLE}/{@code EVICTED}/{@code CANCELLED}
+ *               {@code IDLE}/{@code EVICTED}/{@code CANCELLED}/{@code DELETED}
  * @param errorMessage motivo da falha; só preenchido em {@code FAILED}
  * @param bytes bytes já transferidos; só preenchido em {@code PROGRESS}
  * @param totalBytes total esperado de bytes; só preenchido em {@code PROGRESS}
@@ -138,6 +138,16 @@ public record CacheEvent(
      */
     public static CacheEvent cancelled(UUID id) {
         return new CacheEvent(CacheEventType.CANCELLED, id, null, null, null, null, null, null, null, null);
+    }
+
+    /**
+     * Monta o evento de uma linha {@code COMPLETED} cujo arquivo foi apagado manualmente.
+     *
+     * @param id id da linha removida (já removida do banco e do disco)
+     * @return evento {@code DELETED}, sem status (a linha não existe mais)
+     */
+    public static CacheEvent deleted(UUID id) {
+        return new CacheEvent(CacheEventType.DELETED, id, null, null, null, null, null, null, null, null);
     }
 
 }

@@ -59,17 +59,16 @@ public class CacheResource implements CacheApi {
     }
 
     /**
-     * {@code DELETE /v1/cache/items/{itemId}} — cancela uma linha {@code QUEUED} ou
-     * {@code DOWNLOADING}.
+     * {@code DELETE /v1/cache/items/{itemId}} — remove uma linha do cache: cancela se
+     * {@code QUEUED}/{@code DOWNLOADING}, apaga o arquivo se {@code COMPLETED}.
      *
-     * @param itemId id da linha a cancelar
+     * @param itemId id da linha a remover
      * @throws ResourceNotFoundException (traduzida em 404) se o {@code itemId} não existir
-     * @throws BusinessRuleException (traduzida em 400) se a linha já estiver {@code COMPLETED}
-     *         ou {@code FAILED}
+     * @throws BusinessRuleException (traduzida em 400) se a linha estiver {@code FAILED}
      * @throws IntegrationException (traduzida em 502) se o rclone falhar ao interromper o job
      */
     @Override
-    public void cancelCacheDownload(UUID itemId) {
-        cacheService.cancelCacheDownload(itemId);
+    public void deleteCacheItem(UUID itemId) {
+        cacheService.deleteCacheItem(itemId);
     }
 }
