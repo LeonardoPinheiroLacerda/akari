@@ -30,6 +30,10 @@ Traduzir a GraphQL da AniList (query `Page(page, perPage).media(search, type: AN
 - **Mapeamento** `AnilistMediaResponse` → `AnilistMediaSummary` (DTO do contrato), incluindo
   conversão de `format`/`season` brutos (string livre da AniList) pros enums do contrato, com
   fallback pra `UNKNOWN` quando o valor não bate com nenhuma constante conhecida (`AnilistMapper`).
+- **Estúdio principal**: as duas queries (`MEDIA_SEARCH`, `MEDIA_BY_ID`) pedem
+  `studios(isMain: true)`; `AnilistMapper.toMainStudio`/`AnimeMapper.toMainStudio` extraem o
+  nome do primeiro estúdio devolvido (helper duplicado nos dois mappers de propósito — cada
+  domínio consome `AnilistMediaResponse` de forma independente, sem domínio comum).
 
 ## Dependências internas e externas
 

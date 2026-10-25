@@ -8,7 +8,7 @@ Manter a metadata de anime do akari: o vínculo entre uma pasta física do catal
 
 O domínio é organizado em dois eixos, refletidos nas tags do contrato (`Anime`, `AnimeRelations`, `AnimeTmdb`, `AnimeTmdbFilePairing`):
 
-- **Eixo base (Anime):** binding anime↔pasta, fetch/sync na AniList, curadoria manual de raiz de franquia, status de revisão da ingestão, e o grafo de relações entre animes (sequel/prequel/side story).
+- **Eixo base (Anime):** binding anime↔pasta, fetch/sync na AniList, curadoria manual de raiz de franquia, status de revisão da ingestão, o grafo de relações entre animes (sequel/prequel/side story) e a franquia organizada em raiz/temporadas/filmes/especiais pra tela de detalhe do app.
 - **Eixo TMDB (enriquecimento opcional):** binding TMDB↔anime, overrides manuais de título/sinopse/poster/backdrop/logo, e pairing por arquivo de vídeo (temporada/episódio/thumbnail). Um anime funciona sem TMDB; só banner e logo do `AnimeResponse` ficam `null` sem binding + overrides.
 
 Cada faceta bem distinta tem seu próprio par resource/service, todos compartilhando o mesmo `model/` (principalmente `Anime`), conforme a convenção do projeto pra domínios com múltiplos resources:
@@ -16,7 +16,7 @@ Cada faceta bem distinta tem seu próprio par resource/service, todos compartilh
 | Resource | Service | Faceta |
 |---|---|---|
 | `AnimeResource` | `AnimeService` | binding↔pasta, sync AniList, curadoria, revisão |
-| `AnimeRelationsResource` | `AnimeRelationsService` | grafo de relações, raízes de franquia |
+| `AnimeRelationsResource` | `AnimeRelationsService` | grafo de relações, raízes de franquia, franquia organizada em raiz/temporadas/filmes/especiais |
 | `AnimeTmdbResource` | `AnimeTmdbService` | binding TMDB, overrides, schema de overrides |
 | `AnimeTmdbFilePairingResource` | `AnimeTmdbFilePairingService` | pairing TMDB por arquivo, schema de temporadas/episódios |
 
@@ -36,6 +36,7 @@ Grafo de relações:
 - Sincronizar as arestas do grafo a partir da resposta da AniList, em cascata pros vizinhos já conhecidos localmente (`syncRelations`).
 - Materializar o grafo via BFS bidirecional até profundidade configurável (`getAnimeRelationGraph`).
 - Listar animes-raiz da coleção, paginados (`listRelationRoots`).
+- Montar a franquia de um anime já organizada em raiz/temporadas/filmes/especiais pra tela de detalhe do app (`getAnimeFranchise`).
 - Achar o prequel direto de um anime, usado pelo domínio `ingestion` pra calcular deslocamento de numeração absoluta (`findDirectPrequelId`).
 
 Eixo TMDB:
@@ -77,7 +78,7 @@ Nenhum service do domínio injeta mais de dois domínios externos ao mesmo tempo
 
 ## Pontos de entrada
 
-HTTP, via os quatro `*Resource` (`/v1/metadata/animes/...`, `/v1/metadata/folders/{folderId}/anime`, `/v1/metadata/anime-relations`, `/v1/metadata/files/{fileId}/tmdb-pairing`) — ver `openapi.yaml` linhas 856-1172, tags `Anime`, `AnimeRelations`, `AnimeTmdb`, `AnimeTmdbFilePairing`.
+HTTP, via os quatro `*Resource` (`/v1/metadata/animes/...`, `/v1/metadata/folders/{folderId}/anime`, `/v1/metadata/anime-relations`, `/v1/metadata/files/{fileId}/tmdb-pairing`) — ver `openapi.yaml` linhas 900-1263, tags `Anime`, `AnimeRelations`, `AnimeTmdb`, `AnimeTmdbFilePairing`.
 
 Programático, pra outros domínios (sem HTTP):
 - `AnimeService.findByFolder`, `.exists`, `.find`, `.findOrThrow`, `.updateReviewStatusIfNotReviewed`, `.getAnimeBindings`.
@@ -93,6 +94,8 @@ Programático, pra outros domínios (sem HTTP):
 
 **Grafo de relações (`AnimeRelationsService.getAnimeRelationGraph`):** BFS bidirecional sobre `AnimeRelation` (segue tanto `fromAnilistId` quanto `toAnilistId`) até `depth` saltos, classificando cada nó como raiz manual/natural/não-raiz via `RelationType.ANCESTOR_LINKS` (`PREQUEL`, `PARENT`).
 
+**Franquia organizada (`AnimeRelationsService.getAnimeFranchise`):** sobe até a raiz seguindo `RelationType.ANCESTOR_LINKS` (saindo do pivot) e `SUMMARY` em sentido invertido (chegando no pivot — uma aresta `A -[SUMMARY]-> B` indica que B é derivado de A); `ALTERNATIVE` fica de fora dessa subida porque a AniList costuma taguear esse tipo nos dois sentidos, o que criaria um ciclo sem lado ancestral objetivo. A partir da raiz, fecha a franquia via BFS bidirecional sem limite de profundidade, só por `RelationType.FRANCHISE_LINKS` (`SEQUEL`, `SIDE_STORY`, `SPIN_OFF`, `SUMMARY`, `PARENT`, `ALTERNATIVE`). `seasons` é a cadeia de `SEQUEL` a partir da raiz, na ordem da cadeia, filtrada por `RelationType.SERIES_FORMATS`; o resto do fechamento vira `movies`/`specials`, separados por `RelationType.MOVIE_FORMATS`/`SPECIAL_FORMATS` (três listas disjuntas) e ordenados por `seasonYear`, depois `Season` (ordem natural do enum), depois `anilistId`. `root`/`seasons`/`movies`/`specials` usam o `AnimeResponse` completo, resolvido via `AnimeOverrideService` igual às demais vistas do domínio. Busca os `Anime` da franquia em lote (`Anime.findByIds`) pra evitar N+1.
+
 **Resolução de overrides (`AnimeOverrideService`):** usada por `AnimeService.toResponse`/`toBindingSummary` e por `AnimeRelationsService` pra decidir, campo a campo, entre o override manual (TMDB) e o dado cru (AniList); banner e logo só existem via override (a AniList não tem esses campos).
 
 **Bind TMDB (`AnimeTmdbService.bindTmdb`):** valida que o anime existe e ainda não tem binding → confirma o `tmdbId` no TMDB pro `mediaType` informado → grava o binding → `prefillImageOverrides` tenta preencher backdrop/logo com a imagem mais votada no idioma preferido (`SettingService`), com `RetryUtils.withRateLimitRetry`; falha aqui é engolida (log + segue sem imagem), nunca aborta o bind.
@@ -104,10 +107,11 @@ Programático, pra outros domínios (sem HTTP):
 - `model/Anime.java` — entidade central; PK é o próprio `anilistId` (sem id surrogate), concentra dados AniList + binding/overrides TMDB + curadoria + revisão.
 - `service/AnimeOverrideService.java` — motor único de resolução override↔dado cru, reaproveitado pelas outras facetas.
 - `service/AnimeService.java` — binding↔pasta, sync, curadoria; ponto de entrada mais usado por outros domínios.
-- `service/AnimeRelationsService.java` — sync recursivo do grafo e BFS de materialização; lógica mais complexa do domínio.
+- `service/AnimeRelationsService.java` — sync recursivo do grafo, BFS de materialização e montagem da franquia (`getAnimeFranchise`); lógica mais complexa do domínio.
 - `service/AnimeTmdbService.java` — binding TMDB, overrides, schema de opções; maior arquivo do domínio (344 linhas).
 - `service/AnimeTmdbFilePairingService.java` — pairing por arquivo e schema de temporadas/episódios.
-- `model/AnimeRelation.java` + `model/RelationType.java` — grafo de relações; `RelationType.ANCESTOR_LINKS` é a fonte única da regra "o que quebra uma raiz natural de franquia".
+- `model/AnimeRelation.java` + `model/RelationType.java` — grafo de relações; `RelationType` concentra as listas-fonte-única usadas pelo grafo e pela franquia (`ANCESTOR_LINKS`, `FRANCHISE_LINKS`, `SPECIAL_LINKS`, `SERIES_FORMATS`, `MOVIE_FORMATS`, `SPECIAL_FORMATS`).
+- `model/Season.java` — enum da estação de estreia (`WINTER`/`SPRING`/`SUMMER`/`FALL`), usado só pra ordenar `movies`/`specials` da franquia sem uma data de estreia mais precisa persistida localmente.
 
 ## Observações técnicas e débitos identificados
 

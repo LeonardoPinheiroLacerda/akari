@@ -1,6 +1,7 @@
 package io.github.leonardopinheirolacerda.akari.domain.anime.resource;
 
 import io.github.leonardopinheirolacerda.akari.api.AnimeRelationsApi;
+import io.github.leonardopinheirolacerda.akari.api.dto.AnimeFranchiseResponse;
 import io.github.leonardopinheirolacerda.akari.api.dto.AnimePage;
 import io.github.leonardopinheirolacerda.akari.api.dto.AnimeRelationGraphResponse;
 import io.github.leonardopinheirolacerda.akari.domain.anime.service.AnimeRelationsService;
@@ -45,5 +46,19 @@ public class AnimeRelationsResource implements AnimeRelationsApi {
     @Override
     public AnimePage listRelationRoots(Integer page, Integer size) {
         return animeRelationsService.listRelationRoots(page, size);
+    }
+
+    /**
+     * {@code GET /v1/metadata/animes/{anilistId}/franchise} — franquia do anime já organizada
+     * em raiz/temporadas/especiais, pra tela de detalhe do app.
+     *
+     * @param anilistId anime que ancora a busca; não precisa ser a raiz
+     * @return a franquia organizada, com {@code 200 OK}
+     * @throws ResourceNotFoundException (traduzida em 404) se não há metadata salva pro id
+     *         informado
+     */
+    @Override
+    public AnimeFranchiseResponse getAnimeFranchise(Integer anilistId) {
+        return animeRelationsService.getAnimeFranchise(anilistId);
     }
 }
