@@ -28,6 +28,9 @@ public final class AnilistQueries {
                   averageScore
                   isAdult
                   genres
+                  studios(isMain: true) {
+                    nodes { name }
+                  }
                 }
               }
             }
@@ -54,6 +57,9 @@ public final class AnilistQueries {
                 averageScore
                 isAdult
                 genres
+                studios(isMain: true) {
+                  nodes { name }
+                }
                 relations {
                   edges {
                     relationType(version: 2)

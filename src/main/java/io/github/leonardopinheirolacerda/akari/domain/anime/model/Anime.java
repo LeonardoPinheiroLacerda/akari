@@ -86,6 +86,8 @@ public class Anime extends PanacheEntityBase {
     @JdbcTypeCode(SqlTypes.JSON)
     public List<String> genres;
 
+    public String studio;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "franchise_root_curation")
     public FranchiseRootCuration franchiseRootCuration;

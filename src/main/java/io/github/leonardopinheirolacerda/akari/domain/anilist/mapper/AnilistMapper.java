@@ -4,6 +4,7 @@ import io.github.leonardopinheirolacerda.akari.api.dto.AnilistFormat;
 import io.github.leonardopinheirolacerda.akari.api.dto.AnilistMediaSummary;
 import io.github.leonardopinheirolacerda.akari.api.dto.AnilistSeason;
 import io.github.leonardopinheirolacerda.akari.domain.anilist.client.dtos.AnilistMediaResponse;
+import io.github.leonardopinheirolacerda.akari.domain.anilist.client.dtos.AnilistStudioConnectionResponse;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
 
@@ -25,6 +26,7 @@ public interface AnilistMapper {
      */
     @Mapping(source = "id", target = "anilistId")
     @Mapping(source = "idMal", target = "malId")
+    @Mapping(target = "studio", expression = "java(toMainStudio(media.studios()))")
     AnilistMediaSummary toSummary(AnilistMediaResponse media);
 
     /**
@@ -71,6 +73,20 @@ public interface AnilistMapper {
         } catch (IllegalArgumentException e) {
             return AnilistSeason.UNKNOWN;
         }
+    }
+
+    /**
+     * Extrai o nome do estúdio principal, se a AniList tiver informado algum (a query já filtra
+     * {@code isMain: true}); pega o primeiro caso haja mais de um.
+     *
+     * @param studios bloco cru de estúdios retornado pela AniList
+     * @return o nome do estúdio principal, ou {@code null} se não houver nenhum
+     */
+    default String toMainStudio(AnilistStudioConnectionResponse studios) {
+        if (studios == null || studios.nodes() == null || studios.nodes().isEmpty()) {
+            return null;
+        }
+        return studios.nodes().get(0).name();
     }
 
 }

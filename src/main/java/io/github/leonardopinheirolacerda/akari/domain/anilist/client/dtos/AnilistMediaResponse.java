@@ -22,6 +22,7 @@ import java.util.List;
  * @param averageScore nota média em escala 0–100
  * @param isAdult flag NSFW
  * @param genres nomes dos gêneros
+ * @param studios estúdios principais do anime (query já filtra {@code isMain: true})
  * @param relations relações com outros títulos; {@code null} na query de search
  */
 public record AnilistMediaResponse(
@@ -40,6 +41,7 @@ public record AnilistMediaResponse(
         Integer averageScore,
         Boolean isAdult,
         List<String> genres,
+        AnilistStudioConnectionResponse studios,
         AnilistRelationsResponse relations
 ) {
 }

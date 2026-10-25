@@ -5,6 +5,7 @@ import io.github.leonardopinheirolacerda.akari.api.dto.AnimeResponse;
 import io.github.leonardopinheirolacerda.akari.api.dto.AnimeThumbnailsResponse;
 import io.github.leonardopinheirolacerda.akari.api.dto.AnimeTitlesResponse;
 import io.github.leonardopinheirolacerda.akari.domain.anilist.client.dtos.AnilistMediaResponse;
+import io.github.leonardopinheirolacerda.akari.domain.anilist.client.dtos.AnilistStudioConnectionResponse;
 import io.github.leonardopinheirolacerda.akari.domain.anime.model.Anime;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
@@ -51,6 +52,7 @@ public interface AnimeMapper {
     @Mapping(source = "coverImage.extraLarge", target = "thumbnailLarge")
     @Mapping(target = "duration", expression = "java(toDurationLabel(source.duration()))")
     @Mapping(target = "score", expression = "java(toScore(source.averageScore()))")
+    @Mapping(target = "studio", expression = "java(toMainStudio(source.studios()))")
     @Mapping(target = "folder", ignore = true)
     @Mapping(target = "franchiseRootCuration", ignore = true)
     @Mapping(target = "createdAt", ignore = true)
@@ -93,6 +95,14 @@ public interface AnimeMapper {
             return null;
         }
         return averageScore / 10.0;
+    }
+
+    // a query já filtra isMain: true; pega o primeiro, já que a AniList pode listar mais de um
+    default String toMainStudio(AnilistStudioConnectionResponse studios) {
+        if (studios == null || studios.nodes() == null || studios.nodes().isEmpty()) {
+            return null;
+        }
+        return studios.nodes().get(0).name();
     }
 
 }

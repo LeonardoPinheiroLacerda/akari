@@ -620,8 +620,9 @@ paths:
           andamento antes de remover.
         - `COMPLETED`: apaga o arquivo já baixado de `cache.dir` antes de remover a linha.
 
-        Responde `400` (`BUSINESS_RULE_VIOLATION`) se a linha estiver `FAILED` — reenfileire
-        (`POST /v1/cache/items`) ou aguarde a eviction LRU.
+        Responde `400` (`BUSINESS_RULE_VIOLATION`) se a linha estiver `FAILED` — o único caminho
+        para ela é reenfileirar (`POST /v1/cache/items`). Uma linha `FAILED` não é removida pela
+        eviction LRU, que só considera linhas `COMPLETED`: ela permanece até ser reenfileirada.
 
         Responde `404` se o `itemId` não existir.
       responses:
@@ -2977,6 +2978,10 @@ components:
           description: Nomes de gêneros
           items:
             type: string
+        studio:
+          type: string
+          nullable: true
+          description: Estúdio principal responsável pela produção, segundo a AniList
 
     AnilistMediaSummaryPage:
       description: Envelope paginado dos resultados de busca
@@ -3285,6 +3290,10 @@ components:
           type: string
           nullable: true
           description: Formato (`TV`, `MOVIE`, `OVA`, ...)
+        studio:
+          type: string
+          nullable: true
+          description: Estúdio principal responsável pela produção, segundo a AniList
         hasTmdb:
           type: boolean
           nullable: true
@@ -3344,6 +3353,10 @@ components:
           type: string
           nullable: true
           description: Estação de estreia (`WINTER`, `SPRING`, ...)
+        studio:
+          type: string
+          nullable: true
+          description: Estúdio principal responsável pela produção, segundo a AniList
         score:
           type: number
           format: double
