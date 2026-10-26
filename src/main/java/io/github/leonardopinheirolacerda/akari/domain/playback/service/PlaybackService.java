@@ -1,13 +1,19 @@
 package io.github.leonardopinheirolacerda.akari.domain.playback.service;
 
 import io.github.leonardopinheirolacerda.akari.api.dto.AudioTrack;
+import io.github.leonardopinheirolacerda.akari.api.dto.CacheStatus;
+import io.github.leonardopinheirolacerda.akari.api.dto.FileAvailabilityResponse;
+import io.github.leonardopinheirolacerda.akari.api.dto.FileAvailabilityStatus;
 import io.github.leonardopinheirolacerda.akari.api.dto.MediaInfoResponse;
 import io.github.leonardopinheirolacerda.akari.api.dto.PlaybackSessionResponse;
 import io.github.leonardopinheirolacerda.akari.api.dto.SeekRequest;
 import io.github.leonardopinheirolacerda.akari.api.dto.SessionHeartbeat;
 import io.github.leonardopinheirolacerda.akari.api.dto.StartPlaybackSessionRequest;
+import io.github.leonardopinheirolacerda.akari.api.dto.StorageProviderType;
 import io.github.leonardopinheirolacerda.akari.api.dto.SubtitleTrack;
 import io.github.leonardopinheirolacerda.akari.api.dto.SwitchTracksRequest;
+import io.github.leonardopinheirolacerda.akari.domain.cache.model.VideoFileCache;
+import io.github.leonardopinheirolacerda.akari.domain.cache.service.CacheService;
 import io.github.leonardopinheirolacerda.akari.domain.mediaprobe.service.MediaProbeService;
 import io.github.leonardopinheirolacerda.akari.domain.playback.client.FfmpegClient;
 import io.github.leonardopinheirolacerda.akari.domain.playback.client.FfmpegException;
@@ -42,6 +48,7 @@ import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
@@ -85,6 +92,9 @@ public class PlaybackService {
     VideoFileService videoFileService;
 
     @Inject
+    CacheService cacheService;
+
+    @Inject
     MediaProbeService mediaProbeService;
 
     @Inject
@@ -125,7 +135,7 @@ public class PlaybackService {
     @Transactional
     public PlaybackSessionResponse startPlaybackSession(StartPlaybackSessionRequest request) {
         final VideoFile videoFile = videoFileService.findOrThrow(request.getFileId());
-        final Profile profile = resolveProfile(request.getProfile());
+        final Profile profile = resolveProfile(request.getProfile().name());
         final Path inputFile = VideoFileLocationUtils.resolvePath(
                 videoFile,
                 storageProviderClientFactory,
@@ -315,6 +325,44 @@ public class PlaybackService {
     }
 
     /**
+     * Diz se um arquivo já pode tocar ou precisa ser baixado pro cache antes — sem efeito
+     * colateral, não enfileira nada.
+     *
+     * @param fileId id do arquivo no catalog
+     * @return {@code READY} (provider {@code LOCAL}, ou remoto com cache {@code COMPLETED}),
+     *         {@code NEEDS_DOWNLOAD} (remoto sem linha de cache, ou linha {@code FAILED}) ou
+     *         {@code DOWNLOADING} (remoto com linha {@code QUEUED}/{@code DOWNLOADING});
+     *         {@code cacheItemId} preenchido sempre que já existe linha de cache
+     * @throws ResourceNotFoundException se o {@code fileId} não existir no catalog
+     */
+    public FileAvailabilityResponse getFileAvailability(Integer fileId) {
+        final VideoFile videoFile = videoFileService.findOrThrow(fileId);
+
+        if (videoFile.folder.storageProvider.type == StorageProviderType.LOCAL) {
+            return new FileAvailabilityResponse()
+                    .fileId(fileId)
+                    .status(FileAvailabilityStatus.READY)
+                    .cacheItemId(null);
+        }
+
+        final Optional<VideoFileCache> cacheItem = cacheService.findCacheItemByFileId(fileId);
+
+        if (cacheItem.isEmpty()) {
+            return new FileAvailabilityResponse()
+                    .fileId(fileId)
+                    .status(FileAvailabilityStatus.NEEDS_DOWNLOAD)
+                    .cacheItemId(null);
+        }
+
+        final VideoFileCache cache = cacheItem.get();
+
+        return new FileAvailabilityResponse()
+                .fileId(fileId)
+                .status(availabilityStatusOf(cache.status))
+                .cacheItemId(cache.id);
+    }
+
+    /**
      * Encerra e remove toda sessão que não recebeu heartbeat dentro do TTL configurado.
      *
      * <p>Cada sessão é tratada isoladamente — uma falha ao encerrar uma não impede as demais de
@@ -442,6 +490,14 @@ public class PlaybackService {
                         "Nenhuma estratégia de transcode aplicável ao profile " + profile + " para o arquivo " + fileId));
 
         return strategy.buildSpec(mediaInfo);
+    }
+
+    private FileAvailabilityStatus availabilityStatusOf(CacheStatus cacheStatus) {
+        return switch (cacheStatus) {
+            case COMPLETED -> FileAvailabilityStatus.READY;
+            case QUEUED, DOWNLOADING -> FileAvailabilityStatus.DOWNLOADING;
+            case FAILED -> FileAvailabilityStatus.NEEDS_DOWNLOAD;
+        };
     }
 
     private void validateTrackBounds(MediaInfoResponse mediaInfo, Integer audioTrackIndex, Integer subtitleTrackIndex) {

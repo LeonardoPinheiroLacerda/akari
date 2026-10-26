@@ -158,6 +158,17 @@ public class CacheService {
     }
 
     /**
+     * Busca a linha de cache de um arquivo, se existir — usado por outros domínios (ex.:
+     * {@code playback}) que precisam saber o status cru, não o {@code CacheItem} mapeado.
+     *
+     * @param fileId id do arquivo de vídeo no catalog
+     * @return a linha existente, em qualquer status; vazio se o arquivo nunca foi enfileirado
+     */
+    public Optional<VideoFileCache> findCacheItemByFileId(Integer fileId) {
+        return VideoFileCache.findByVideoFileId(fileId);
+    }
+
+    /**
      * Remove uma linha do cache, cancelando ou apagando o arquivo conforme o status.
      *
      * <p>{@code QUEUED}/{@code DOWNLOADING}: cancela — se {@code DOWNLOADING}, interrompe o

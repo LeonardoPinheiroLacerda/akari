@@ -30,8 +30,9 @@ Este pacote também hospeda `IntegrationCache` (`model/IntegrationCache.java`), 
 
 ## Módulos relacionados
 
-- `utils/VideoFileLocationUtils` — não faz parte deste domínio, mas importa `VideoFileCache` diretamente para resolver o caminho em disco de um `VideoFile` (local direto, ou via cache se remoto e `COMPLETED`). É o ponto de acoplamento real entre este domínio e `playback`/`mediaprobe`.
-- `domain/playback` (`PlaybackService`) e `domain/mediaprobe` (`MediaProbeService`) — consomem `cache` indiretamente, só através de `VideoFileLocationUtils`; nenhum dos dois importa `io.github.leonardopinheirolacerda.akari.domain.cache` diretamente.
+- `utils/VideoFileLocationUtils` — não faz parte deste domínio, mas importa `VideoFileCache` diretamente para resolver o caminho em disco de um `VideoFile` (local direto, ou via cache se remoto e `COMPLETED`). É o ponto de acoplamento entre este domínio e `mediaprobe` (e `playback`, pra resolver o path do transcode).
+- `domain/mediaprobe` (`MediaProbeService`) — consome `cache` indiretamente, só através de `VideoFileLocationUtils`; não importa `io.github.leonardopinheirolacerda.akari.domain.cache` diretamente.
+- `domain/playback` (`PlaybackService`) — consome `cache` dos dois jeitos: indiretamente via `VideoFileLocationUtils` (resolver o path do transcode) e diretamente via `CacheService.findCacheItemByFileId` (`getFileAvailability`, pra saber se um arquivo remoto já pode tocar sem duplicar a lógica de status em `cache`).
 - `domain/anilist` (`AnilistSearchService`) e `domain/tmdb` (`TmdbService`) — únicos consumidores diretos de `IntegrationCache`, via `utils/CacheUtils.resolve`.
 
 ## Pontos de entrada
@@ -39,6 +40,7 @@ Este pacote também hospeda `IntegrationCache` (`model/IntegrationCache.java`), 
 - `resource/CacheResource` — implementa `CacheApi` (gerado do contrato), expõe `/v1/cache/items`.
 - `resource/CacheEventResource` — code-first, expõe `/v1/cache/events` (SSE), sem interface gerada.
 - `scheduler/CacheScheduler` — único disparador do motor da fila (`CacheQueueProcessorService`); nada externo chama o processor diretamente.
+- `service/CacheService.findCacheItemByFileId` — programático, pra `domain/playback` (sem HTTP).
 
 ## Fluxos importantes
 
@@ -70,4 +72,4 @@ Este pacote também hospeda `IntegrationCache` (`model/IntegrationCache.java`), 
 - A fila é serial por construção (sempre no máximo uma linha `DOWNLOADING` — `startNextIfIdle` não inicia um novo download enquanto `findDownloading()` não estiver vazio), mas isso não é imposto por nenhum lock de banco, só pela ordem de execução do `CacheScheduler` com `ConcurrentExecution.SKIP`.
 - `evictForIncoming` prossegue mesmo quando um único arquivo entrante excede o orçamento total configurado, apenas logando um aviso — não há hard-limit nem rejeição do enfileiramento nesse caso. **Intencional** (confirmado pelo mantenedor): conseguir assistir é prioridade sobre respeitar o orçamento à risca.
 - `CacheQueueProcessorService` e `CacheService` são duas facetas do mesmo `VideoFileCache` por decisão deliberada de code style (documentado no Javadoc de ambos), não uma duplicação acidental.
-- Dependência real `playback`/`mediaprobe` → `cache` passa por `utils/VideoFileLocationUtils`, não por chamada direta a `CacheService`/`VideoFileCache` — útil ter em mente ao avaliar impacto de mudanças neste domínio.
+- Dependência `mediaprobe` → `cache` passa só por `utils/VideoFileLocationUtils`, nunca por chamada direta a `CacheService`/`VideoFileCache`. `playback` → `cache` é dos dois jeitos (ver "Módulos relacionados") — mudança em `CacheService.findCacheItemByFileId` ou no significado de `CacheStatus` tem impacto direto em `PlaybackService.getFileAvailability`, não só indireto via `VideoFileLocationUtils`.

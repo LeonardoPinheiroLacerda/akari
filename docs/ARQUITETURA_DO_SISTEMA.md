@@ -141,7 +141,8 @@ anilist         → cache (IntegrationCache)
 tmdb            → cache (IntegrationCache), setting
 anibridge       → tmdb
 anime           → anilist, tmdb, mediafolder, videofile, setting
-playback        → videofile, mediaprobe, storageprovider, setting (+ cache via utils)
+playback        → videofile, mediaprobe, storageprovider, setting, cache (direto via
+                  CacheService.findCacheItemByFileId, e indireto via utils pro path do arquivo)
 ingestion       → storageprovider, mediafolder, videofile, anime, anibridge, tmdb, notification
 ```
 

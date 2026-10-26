@@ -15,7 +15,8 @@ A sessão (`PlaybackSession`) é 100% efêmera: não existe um "status encerrado
 
 ## Funcionalidades existentes
 
-- Iniciar sessão de transcode (`POST /v1/playback/sessions`): resolve o arquivo em disco, valida índices de faixa, escolhe a estratégia de transcode pelo profile (`WEB`/`TV`/`MOBILE`), sobe o `ffmpeg` e persiste a sessão.
+- Disponibilidade do arquivo (`GET /v1/playback/files/{fileId}/availability`): sem efeito colateral (não enfileira nada), diz se o arquivo já pode tocar (`READY`: provider `LOCAL`, ou remoto com cache `COMPLETED`), precisa ser baixado (`NEEDS_DOWNLOAD`: remoto sem linha de cache, ou linha `FAILED`) ou já está baixando (`DOWNLOADING`: remoto com linha `QUEUED`/`DOWNLOADING`) — com o `cacheItemId` da linha, quando existir, pro cliente correlacionar com o SSE de `/v1/cache/events`.
+- Iniciar sessão de transcode (`POST /v1/playback/sessions`): resolve o arquivo em disco, valida índices de faixa, escolhe a estratégia de transcode pelo profile (`TranscodeProfile`: `WEB`/`TV`/`MOBILE`, enum fixo do contrato — não configurável via `Setting`), sobe o `ffmpeg` e persiste a sessão.
 - Seek (`POST .../seek`): se o instante pedido já está dentro da janela já transcodificada (lida da playlist, com tolerância de 0.5s), não reinicia o processo; fora da janela, reinicia o `ffmpeg` do novo offset reaproveitando as faixas ativas.
 - Troca de faixas (`POST .../tracks`): sempre reinicia o transcode — trocar `-map`/filtro de legenda exige novo processo `ffmpeg`, não há posição que evite o reinício.
 - Servir playlist (`GET .../playlist.m3u8`) e arquivos HLS (`GET .../{file}`: segmentos, variant playlists, legendas WebVTT, init segment), com validação de nome por regex (proteção contra path traversal).
@@ -31,7 +32,7 @@ Dependências de saída (único sentido — ver "Observações técnicas"):
 - `domain/mediaprobe` (`MediaProbeService`) — metadados técnicos (codecs, faixas, frame rate) usados tanto para validar índices de faixa quanto para montar o comando `ffmpeg`.
 - `domain/storageprovider` (`StorageProviderClientFactory`) — resolve o path local do arquivo (via `VideoFileLocationUtils`, em `utils/`, compartilhado com `mediaprobe`).
 - `domain/setting` (`SettingService`) — preferências `playback.work.base-dir`, `playback.session.heartbeat-ttl`, `playback.transcode.hardware-acceleration`.
-- Indiretamente, `domain/cache` (via `VideoFileLocationUtils`, para arquivos de provider remoto).
+- `domain/cache` (`CacheService.findCacheItemByFileId`) — status da linha de cache de um arquivo remoto, usado por `getFileAvailability`. Também indiretamente via `VideoFileLocationUtils`, pra resolver o path em disco de um arquivo remoto já baixado.
 
 Dependência externa: binário `ffmpeg` resolvido via `PATH` (config `akari.playback.ffmpeg.binary`, default `ffmpeg`), chamado via `ProcessBuilder`. Nenhuma validação de disponibilidade no startup — só falha na primeira sessão iniciada. **Aceito por ora, mas roadmap já desenhado** (confirmado pelo mantenedor): vai existir um readiness check central em `config/` (ex.: `/q/health/ready`) validando dependências de infra — este binário, `ffprobe` e o processo `rclone rcd` — ver `config/README.md`, `mediaprobe/README.md` e `storageprovider/provider/README.md`.
 
@@ -45,6 +46,8 @@ Nenhum outro domínio depende de `playback` — confirmado por busca textual (`g
 - `scheduler/PlaybackScheduler` — dispara `PlaybackService.sweepExpiredSessions()` a cada 5s.
 
 ## Fluxos importantes
+
+**Disponibilidade**: `PlaybackService.getFileAvailability` resolve o `VideoFile` → se o provider for `LOCAL`, `READY` direto (sem checar `cacheItemId`, sempre `null`); se remoto, busca a linha de cache do arquivo via `CacheService.findCacheItemByFileId` — sem linha ou linha `FAILED` vira `NEEDS_DOWNLOAD`, `QUEUED`/`DOWNLOADING` vira `DOWNLOADING`, `COMPLETED` vira `READY`, sempre com o `cacheItemId` da linha quando ela existe. Mesma condição de `COMPLETED` que `VideoFileLocationUtils.resolvePath` usa internamente pra resolver o arquivo no disco — não há etapa entre os dois.
 
 **Início de sessão**: `PlaybackResource` → `PlaybackService.startPlaybackSession` → resolve `VideoFile` e path em disco → probe de mídia → valida índices de faixa → `TranscodeProfileSelector.select(profile, probe)` escolhe a `HlsTranscodeStrategy` vencedora → `strategy.buildSpec(probe)` gera a `HlsTranscodeSpec` → cria o diretório de trabalho (`<work-base-dir>/<sessionId>`) → `FfmpegClient.start` monta o comando e sobe o processo → persiste `PlaybackSession` com pid, `workDir`, `processStartedAt`.
 

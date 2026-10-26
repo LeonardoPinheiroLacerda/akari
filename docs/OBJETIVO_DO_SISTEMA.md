@@ -70,10 +70,14 @@ anibridge, franquias/relações entre animes).
    embutido só como enriquecimento (título, thumbnail, sinopse) — não define a posição. Existe
    pra que o cliente (app de TV) não precise descobrir o `folderId`, paginar `VideoFile`
    separadamente nem reordenar nada: o backend é a fonte única da ordem.
-7. **Reprodução** (`Playback`) → cliente inicia uma sessão de transcode HLS para um `VideoFile`
-   (arquivo `LOCAL` lido direto do disco; arquivo remoto, baixado antes para o cache local via
-   `Cache`), reposiciona com *seek*, consome a playlist `m3u8` e os segmentos gerados, e mantém a
-   sessão viva com *heartbeats* periódicos até o cliente parar de assistir.
+7. **Reprodução** (`Playback`) → antes de iniciar, o cliente consulta
+   `GET /v1/playback/files/{fileId}/availability` pra saber se o arquivo já pode tocar ou
+   precisa ser baixado pro cache primeiro (`Cache`) — sem essa consulta, teria que inferir isso
+   combinando `VideoFile`/pasta/provider e a listagem do cache, o que a regra geral do sistema
+   (ver "Regras arquiteturais" em `ARQUITETURA_DO_SISTEMA.md`) não permite. Depois, inicia uma
+   sessão de transcode HLS para o `VideoFile`, reposiciona com *seek*, consome a playlist `m3u8`
+   e os segmentos gerados, e mantém a sessão viva com *heartbeats* periódicos até o cliente
+   parar de assistir.
 8. **Configuração administrativa** (`Setting`) → preferências chave/valor (ex.: API key do TMDB)
    configuráveis pelo admin; preferências obrigatórias sem valor fazem os fluxos que dependem
    delas responderem `503` (`INTEGRATION_NOT_CONFIGURED`).

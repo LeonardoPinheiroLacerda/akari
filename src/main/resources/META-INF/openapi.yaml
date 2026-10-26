@@ -92,6 +92,10 @@ tags:
 
       O recurso central é a **sessão de playback**, identificada por um `sessionId` (UUID) gerado
       ao iniciar o transcode. Os demais endpoints operam sobre essa sessão.
+
+      Antes de iniciar uma sessão, `GET /v1/playback/files/{fileId}/availability` diz se o
+      arquivo já pode tocar ou precisa ser baixado pro cache primeiro — só consulta, sem
+      enfileirar nada.
   - name: AnilistSearch
     description: |
       Busca paginada de anime na AniList.
@@ -663,6 +667,35 @@ paths:
           $ref: '#/components/responses/InternalServerError'
 
   # ---------- playback ----------
+  /v1/playback/files/{fileId}/availability:
+    parameters:
+      - $ref: '#/components/parameters/FileIdPathParam'
+    get:
+      tags: [Playback]
+      operationId: getFileAvailability
+      summary: Diz se o arquivo já pode tocar ou precisa ser baixado pro cache antes
+      description: |
+        Consulta, sem efeito colateral (não enfileira nada no cache), o que falta antes de
+        iniciar uma sessão de playback pra este arquivo:
+        - `READY`: já pode chamar `POST /v1/playback/sessions` — provider `LOCAL`, ou remoto
+          com o cache `COMPLETED`.
+        - `NEEDS_DOWNLOAD`: provider remoto sem linha de cache, ou com a linha `FAILED`. O
+          cliente enfileira com `POST /v1/cache/items`.
+        - `DOWNLOADING`: provider remoto com linha `QUEUED` ou `DOWNLOADING`. Não enfileire de
+          novo — só acompanhe pelo SSE de `/v1/cache/events` até chegar `COMPLETED`.
+
+        Não traz progresso nem percentual — isso é papel exclusivo do SSE. `cacheItemId` vem
+        preenchido sempre que já existe uma linha de cache (em qualquer status), pra o cliente
+        correlacionar os eventos do SSE a este arquivo; `null` para provider `LOCAL` ou quando
+        ainda não há linha.
+      responses:
+        '200':
+          $ref: '#/components/responses/FileAvailabilityOk'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /v1/playback/sessions:
     post:
       tags: [Playback]
@@ -1949,6 +1982,12 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/SessionHeartbeat'
+    FileAvailabilityOk:
+      description: Disponibilidade do arquivo pra iniciar uma sessão de playback
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FileAvailabilityResponse'
 
     # ---------- anilist ----------
     AnilistMediaSummaryPageOk:
@@ -2788,6 +2827,45 @@ components:
       format: uuid
       description: Identificador da sessão de playback
 
+    TranscodeProfile:
+      type: string
+      description: |
+        Profile de transcode suportado pelo backend. Fixo no código (não configurável via
+        `Setting`): `WEB` (navegador, hls.js), `TV` (TV/set-top box — profile recomendado para
+        uma TV 1080p como o Google TV Streamer), `MOBILE` (dispositivo móvel). Hoje as três
+        resolvem pra mesma estratégia de transcode internamente (sem diferenciação real de
+        comportamento ainda), mas o valor correto segue sendo o que descreve o dispositivo do
+        cliente, já que a seleção de estratégia por profile é o mecanismo de extensão futuro.
+      enum:
+        - WEB
+        - TV
+        - MOBILE
+
+    FileAvailabilityStatus:
+      type: string
+      description: O que falta, se algo, antes de iniciar uma sessão de playback pro arquivo
+      enum:
+        - READY
+        - NEEDS_DOWNLOAD
+        - DOWNLOADING
+
+    FileAvailabilityResponse:
+      type: object
+      description: Disponibilidade de um arquivo pra iniciar uma sessão de playback
+      required: [fileId, status]
+      properties:
+        fileId:
+          $ref: '#/components/schemas/FileId'
+        status:
+          $ref: '#/components/schemas/FileAvailabilityStatus'
+        cacheItemId:
+          allOf: [{ $ref: '#/components/schemas/CacheItemId' }]
+          nullable: true
+          description: >-
+            Id da linha do cache, pra correlacionar com o SSE de `/v1/cache/events`; `null` pra
+            provider `LOCAL` ou quando ainda não existe linha (`NEEDS_DOWNLOAD` sem download
+            nunca tentado)
+
     StartPlaybackSessionRequest:
       type: object
       description: Parâmetros para iniciar uma sessão de transcode
@@ -2796,10 +2874,7 @@ components:
         fileId:
           $ref: '#/components/schemas/FileId'
         profile:
-          type: string
-          description: |
-            Profile de transcode escolhido pelo cliente. Os valores válidos são os profiles de
-            transcode suportados pelo backend; um valor desconhecido é rejeitado com `400`.
+          $ref: '#/components/schemas/TranscodeProfile'
         audioTrackIndex:
           type: integer
           format: int32

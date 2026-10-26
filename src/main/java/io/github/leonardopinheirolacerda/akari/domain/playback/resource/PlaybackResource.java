@@ -1,6 +1,7 @@
 package io.github.leonardopinheirolacerda.akari.domain.playback.resource;
 
 import io.github.leonardopinheirolacerda.akari.api.PlaybackApi;
+import io.github.leonardopinheirolacerda.akari.api.dto.FileAvailabilityResponse;
 import io.github.leonardopinheirolacerda.akari.api.dto.PlaybackSessionResponse;
 import io.github.leonardopinheirolacerda.akari.api.dto.SeekRequest;
 import io.github.leonardopinheirolacerda.akari.api.dto.SessionHeartbeat;
@@ -38,6 +39,19 @@ public class PlaybackResource implements PlaybackApi {
 
     @Inject
     PlaybackService playbackService;
+
+    /**
+     * {@code GET /v1/playback/files/{fileId}/availability} — diz se o arquivo já pode tocar ou
+     * precisa ser baixado pro cache antes.
+     *
+     * @param fileId id do arquivo no catalog
+     * @return a disponibilidade do arquivo, com {@code 200 OK}
+     * @throws ResourceNotFoundException (traduzida em 404) se o {@code fileId} não existir
+     */
+    @Override
+    public FileAvailabilityResponse getFileAvailability(Integer fileId) {
+        return playbackService.getFileAvailability(fileId);
+    }
 
     /**
      * {@code POST /v1/playback/sessions} — inicia uma sessão de transcode.
