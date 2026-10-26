@@ -13,7 +13,9 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
@@ -84,6 +86,10 @@ public class ReconciliationService {
      * Step 3 — cria (ou reencontra) uma pasta e os arquivos de vídeo diretos dela. Chamado uma
      * vez por diretório remoto, em ordem de profundidade ascendente — cada chamada é sua
      * própria transação, por isso o pai sempre existe no catalog antes do filho ser processado.
+     *
+     * <p>Arquivo já catalogado que ainda não tem {@code naturalSortKey} (ingerido antes dessa
+     * coluna existir) recebe a chave aqui mesmo, ao ser reencontrado — uma pasta já completa
+     * faz o backfill só rodando essa reconciliação de novo, sem job separado.
      */
     @Transactional
     public FolderReconciliationResult reconcileFolder(Integer providerId,
@@ -100,12 +106,14 @@ public class ReconciliationService {
             created = true;
         }
 
-        final Set<String> existingFilePaths = videoFileService.listByFolder(folder.id).stream()
-                .map(file -> file.path)
-                .collect(Collectors.toSet());
+        final Map<String, VideoFile> existingFilesByPath = videoFileService.listByFolder(folder.id).stream()
+                .collect(Collectors.toMap(file -> file.path, Function.identity()));
 
         for (StorageItem videoItem : directVideos) {
-            if (existingFilePaths.contains(videoItem.path())) {
+            final VideoFile existingFile = existingFilesByPath.get(videoItem.path());
+
+            if (existingFile != null) {
+                videoFileService.backfillNaturalSortKeyIfMissing(existingFile);
                 continue;
             }
 

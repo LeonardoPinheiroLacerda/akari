@@ -30,13 +30,13 @@ Orquestrar chamadas a `storageprovider` (listar árvore remota) e a `mediafolder
 - `domain/tmdb` (`TmdbService`, `TmdbEpisodeResponse`) — bind TMDB e metadata de episódio (thumbnail, nome, overview etc.).
 - `domain/notification` (`NotificationService`) — reporta conclusão/erro da reconciliação e falhas pontuais de auto-bind (`INFO`/`WARNING`/`ERROR`).
 - `domain/setting` (`SettingService`) — precheck de `tmdb.api-key` configurado.
-- `extractor/EpisodeNumberExtractor` — interno ao próprio domínio, sem subpacote `model`/`mapper` compartilhado com os demais.
+- `extractor/EpisodeNumberExtractor` — sem subpacote `model`/`mapper` compartilhado com os demais; é o único ponto por onde `videofile` (`VideoFileService.naturalSortKeyOf`) também consome esse domínio, reaproveitando a mesma extração do pairing automático pra não duplicá-la.
 - `exceptions/` (`BusinessRuleException`, `IntegrationException`, `ResourceNotFoundException`).
 - `utils/` (`DirectoryUtils`, `FileNameUtils`, `ThreadUtils`, `RetryUtils`).
 
 ## Módulos relacionados
 
-Nenhum outro domínio depende de `ingestion` (confirmado por grep: nenhuma classe fora de `domain/ingestion` importa `akari.domain.ingestion`). O módulo é um orquestrador de ponta — consome vários domínios, mas não é consumido por nenhum.
+`domain/videofile` (`VideoFileService`) importa `extractor/EpisodeNumberExtractor` pra calcular `naturalSortKey` — única classe fora de `domain/ingestion` que importa algo daqui. Fora essa exceção, o módulo continua um orquestrador de ponta — consome vários domínios, não é consumido por nenhum outro.
 
 ## Pontos de entrada
 
@@ -50,7 +50,7 @@ Nenhum outro domínio depende de `ingestion` (confirmado por grep: nenhuma class
 **Reconciliação em background** (`IngestionService.runReconciliation`), 4 etapas:
 1. Lista a árvore remota (`StorageProviderClient.listTree`); falha aqui gera notificação `ERROR` e aborta.
 2. `ReconciliationService.reconcileRemovals` (Step 2, uma transação) — remove do catalog pastas/arquivos cujo path não existe mais no provider, via `FolderRemovalService`.
-3. Para cada diretório remoto, em ordem de profundidade ascendente, `ReconciliationService.reconcileFolder` (Step 3, uma transação por pasta) — cria a pasta se não existir e os `VideoFile`s diretos novos.
+3. Para cada diretório remoto, em ordem de profundidade ascendente, `ReconciliationService.reconcileFolder` (Step 3, uma transação por pasta) — cria a pasta se não existir e os `VideoFile`s diretos novos; arquivo direto já catalogado que ainda não tem `naturalSortKey` (ver README de `videofile`) recebe a chave aqui mesmo, via `VideoFileService.backfillNaturalSortKeyIfMissing`.
 4. Para cada pasta recém/já existente com vídeos diretos, `FolderAutoBindService.autoBindFolder` (Step 4) — processado uma pasta por vez, com `sleep` de 1500ms entre pastas (throttle proativo para AniList/TMDB).
 
 Ao final (ou em caso de falha irrecuperável no listTree), a chave é liberada em `IngestionRunRegistry.finish` (bloco `finally`), e uma notificação `INFO` resume quantas pastas foram criadas e quantas passaram por auto-bind.

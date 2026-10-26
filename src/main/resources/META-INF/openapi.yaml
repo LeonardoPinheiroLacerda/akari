@@ -1002,6 +1002,42 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /v1/metadata/animes/{anilistId}/episodes:
+    parameters:
+      - $ref: '#/components/parameters/AnilistIdPathParam'
+    get:
+      tags: [AnimeEpisodes]
+      operationId: listAnimeEpisodes
+      summary: Lista paginada dos episódios do anime, pronta pra tela de episódios
+      description: |
+        Resolve a pasta vinculada ao anime e pagina os arquivos de vídeo dela em **ordem
+        natural de nome** — trechos numéricos comparam como número, não caractere a
+        caractere (`Bleach.002` antes de `Bleach.010`), com o `id` como desempate pra
+        paginação ser estável. O pareamento TMDB (`tmdbPairing`), quando houver, só
+        enriquece o item (título, thumbnail, sinopse, etc.) — não define a posição. Um
+        arquivo sem pareamento aparece na posição real dele pelo nome, não no fim da
+        lista. Mesmo schema de item de `GET /v1/catalog/video-files` (`VideoFileResponse`,
+        com `tmdbPairing` embutido).
+
+        Arquivo ingerido antes dessa ordenação existir, até ser reencontrado numa próxima
+        varredura da pasta, pode ainda não ter a chave de ordenação calculada — nesse caso
+        aparece no fim, atrás dos já ordenados.
+
+        Anime sem arquivos na pasta devolve página vazia — só é `404` se o `anilistId` não
+        existir.
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/SizeParam'
+      responses:
+        '200':
+          $ref: '#/components/responses/VideoFilePageOk'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /v1/metadata/folders/{folderId}/anime:
     parameters:
       - $ref: '#/components/parameters/FolderIdPathParam'

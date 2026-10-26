@@ -6,10 +6,11 @@ Manter a metadata de anime do akari: o vínculo entre uma pasta física do catal
 
 ## Responsabilidade principal
 
-O domínio é organizado em dois eixos, refletidos nas tags do contrato (`Anime`, `AnimeRelations`, `AnimeTmdb`, `AnimeTmdbFilePairing`):
+O domínio é organizado em dois eixos mais uma faceta de listagem que combina os dois, refletidos nas tags do contrato (`Anime`, `AnimeRelations`, `AnimeTmdb`, `AnimeTmdbFilePairing`, `AnimeEpisodes`):
 
 - **Eixo base (Anime):** binding anime↔pasta, fetch/sync na AniList, curadoria manual de raiz de franquia, status de revisão da ingestão, o grafo de relações entre animes (sequel/prequel/side story) e a franquia organizada em raiz/temporadas/filmes/especiais pra tela de detalhe do app.
 - **Eixo TMDB (enriquecimento opcional):** binding TMDB↔anime, overrides manuais de título/sinopse/poster/backdrop/logo, e pairing por arquivo de vídeo (temporada/episódio/thumbnail). Um anime funciona sem TMDB; só banner e logo do `AnimeResponse` ficam `null` sem binding + overrides.
+- **Episódios (AnimeEpisodes):** resolve a pasta do anime (eixo base) e delega a listagem em si pro domínio `videofile`, já em ordem natural de nome — pronta pra tela de episódios do app, sem o cliente precisar descobrir `folderId` nem reordenar. O pareamento TMDB (eixo TMDB) só enriquece cada item (via `videofile`), não define mais a posição.
 
 Cada faceta bem distinta tem seu próprio par resource/service, todos compartilhando o mesmo `model/` (principalmente `Anime`), conforme a convenção do projeto pra domínios com múltiplos resources:
 
@@ -19,6 +20,7 @@ Cada faceta bem distinta tem seu próprio par resource/service, todos compartilh
 | `AnimeRelationsResource` | `AnimeRelationsService` | grafo de relações, raízes de franquia, franquia organizada em raiz/temporadas/filmes/especiais |
 | `AnimeTmdbResource` | `AnimeTmdbService` | binding TMDB, overrides, schema de overrides |
 | `AnimeTmdbFilePairingResource` | `AnimeTmdbFilePairingService` | pairing TMDB por arquivo, schema de temporadas/episódios |
+| `AnimeEpisodeResource` | `AnimeEpisodeService` | listagem paginada de episódios (arquivos de vídeo) do anime, em ordem natural de nome |
 
 `AnimeOverrideService` **não tem resource próprio** — confirmado no código: é um `@ApplicationScoped` puro, sem endpoint HTTP, que resolve campo a campo qual valor prevalece (override manual do TMDB, quando setado, ou o dado cru da AniList). Existe pra não duplicar essa regra nos quatro services que montam `AnimeResponse`/`AnimeBindingSummary`/`AnimeRelationNode` a partir de `Anime`: `AnimeService` e `AnimeRelationsService` o injetam diretamente; `AnimeTmdbService`/`AnimeTmdbFilePairingService` não precisam dele porque não exibem o anime resolvido, só o estado de binding/pairing cru.
 
@@ -51,6 +53,9 @@ File pairing:
 - Montar o schema de temporadas/episódios da série TMDB vinculada, pro cliente não adivinhar números (`getTmdbFilePairingSchema`).
 - Resumir pairings de vários arquivos numa chamada (`getTmdbFilePairings`), consumido por `videofile` pra embutir `tmdbPairing` na listagem de arquivos.
 
+Episódios:
+- Paginar os episódios (arquivos de vídeo) do anime em ordem natural de nome (trechos numéricos comparam como número, `id` como desempate), delegando a listagem em si pro `videofile`; o pareamento TMDB, quando houver, só enriquece o item, não define a posição (`listAnimeEpisodes`).
+
 ## Dependências internas e externas
 
 **Internas (entre classes do próprio domínio):**
@@ -58,27 +63,29 @@ File pairing:
 - `AnimeRelationsService` injeta `AnimeOverrideService` (resolve título/thumbnail dos nós do grafo).
 - `AnimeTmdbService` injeta `AnimeService` (busca o anime base, reusa `findOrThrow`).
 - `AnimeTmdbFilePairingService` injeta `AnimeTmdbService` (reusa `findBoundAnimeOrThrow`).
+- `AnimeEpisodeService` injeta `AnimeService` (resolve o anime e a pasta).
 
 **Externas (outros domínios), por service:**
 - `AnimeService`: `anilist.service.AnilistSearchService` (fetch/sync), `mediafolder.service.MediaFolderService` (resolve a pasta no bind).
 - `AnimeRelationsService`: `anilist.service.AnilistSearchService` (busca vizinhos durante o sync em cascata).
 - `AnimeTmdbService`: `tmdb.service.TmdbService` (detalhes, imagens, traduções), `setting.service.SettingService` (idioma preferido de backdrop/logo).
 - `AnimeTmdbFilePairingService`: `tmdb.service.TmdbService` (temporadas/episódios), `videofile.service.VideoFileService` (valida o arquivo).
+- `AnimeEpisodeService`: `videofile.service.VideoFileService` (`listVideoFilesOrderedByNaturalSortKey` — listagem em si, já com `tmdbPairing` embutido).
 - Model `Anime` referencia `mediafolder.model.MediaFolder` via `@OneToOne`.
 
-Nenhum service do domínio injeta mais de dois domínios externos ao mesmo tempo — o acoplamento alto do domínio como um todo (5 domínios externos: `anilist`, `tmdb`, `mediafolder`, `videofile`, `setting`) é distribuído entre as quatro facetas, não concentrado num único service.
+Nenhum service do domínio injeta mais de dois domínios externos ao mesmo tempo — o acoplamento alto do domínio como um todo (5 domínios externos: `anilist`, `tmdb`, `mediafolder`, `videofile`, `setting`) é distribuído entre as cinco facetas, não concentrado num único service.
 
 ## Módulos relacionados
 
 - **`ingestion`** é o maior consumidor externo: `FolderAutoBindService` orquestra as três etapas (bind AniList → bind TMDB → pairing de episódios) automaticamente durante a varredura de pastas, usando `AnimeService`, `AnimeTmdbService` e `AnimeTmdbFilePairingService` diretamente; `AbsoluteEpisodeOffsetService` usa `AnimeService.find` e `AnimeRelationsService.findDirectPrequelId` pra andar a cadeia de prequels; `FolderRemovalService` usa `AnimeService` pra resolver os `anilistId` antes de remover uma pasta.
 - **`mediafolder`**: `MediaFolderService.listFolders` embute `AnimeBindingSummary` via `AnimeService.getAnimeBindings`; `Anime.folder` referencia `MediaFolder`.
-- **`videofile`**: `VideoFileService.listVideoFiles` embute `TmdbFilePairingResponse` via `AnimeTmdbFilePairingService.getTmdbFilePairings`.
+- **`videofile`**: `VideoFileService.listVideoFiles`/`listVideoFilesOrderedByNaturalSortKey` embutem `TmdbFilePairingResponse` via `AnimeTmdbFilePairingService.getTmdbFilePairings`; `AnimeEpisodeService` delega a listagem de episódios inteira pro `VideoFileService.listVideoFilesOrderedByNaturalSortKey`.
 - **`anilist`** e **`tmdb`**: fontes de dados externos consumidas via seus `*SearchService`.
 - **`setting`**: fornece a preferência de idioma usada no pré-preenchimento de imagens TMDB.
 
 ## Pontos de entrada
 
-HTTP, via os quatro `*Resource` (`/v1/metadata/animes/...`, `/v1/metadata/folders/{folderId}/anime`, `/v1/metadata/anime-relations`, `/v1/metadata/files/{fileId}/tmdb-pairing`) — ver `openapi.yaml` linhas 900-1263, tags `Anime`, `AnimeRelations`, `AnimeTmdb`, `AnimeTmdbFilePairing`.
+HTTP, via os cinco `*Resource` (`/v1/metadata/animes/...`, `/v1/metadata/folders/{folderId}/anime`, `/v1/metadata/anime-relations`, `/v1/metadata/files/{fileId}/tmdb-pairing`, `/v1/metadata/animes/{anilistId}/episodes`) — ver `openapi.yaml`, tags `Anime`, `AnimeRelations`, `AnimeTmdb`, `AnimeTmdbFilePairing`, `AnimeEpisodes`.
 
 Programático, pra outros domínios (sem HTTP):
 - `AnimeService.findByFolder`, `.exists`, `.find`, `.findOrThrow`, `.updateReviewStatusIfNotReviewed`, `.getAnimeBindings`.

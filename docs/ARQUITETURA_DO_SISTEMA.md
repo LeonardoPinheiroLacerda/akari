@@ -76,6 +76,11 @@ O sistema tem 13 domínios de negócio hoje: `storageprovider`, `ingestion`, `me
   justamente para não forçar esse import. Essa regra foi verificada íntegra em todo o pacote.
 - Domínio novo é só um pacote novo em `domain/`, sem necessidade de aviso prévio. Pacote
   transversal novo (irmão de `domain`, `exceptions`, `config`, `utils`, `model`) exige aviso.
+- **O backend é a fonte da verdade da ordem/agrupamento que o cliente exibe** — nenhum endpoint
+  deve depender do cliente combinar múltiplas chamadas, agrupar ou reordenar o que recebeu pra
+  ficar correto. Exemplo real: `GET /v1/metadata/animes/{anilistId}/episodes` existe
+  especificamente pra não obrigar o app de TV a descobrir `folderId`, paginar `VideoFile`
+  separadamente e reordenar pelo pareamento TMDB — tudo isso virou responsabilidade do backend.
 
 ## Convenções técnicas
 
@@ -129,7 +134,7 @@ setting           (folha — não depende de nenhum outro domínio)
 notification      (folha — não depende de nenhum outro domínio; só recebe escrita)
 
 mediafolder     → storageprovider, anime
-videofile       → mediafolder, anime
+videofile       → mediafolder, anime, ingestion (extractor.EpisodeNumberExtractor)
 cache           → storageprovider, videofile (via utils, não import direto de domain)
 mediaprobe      → storageprovider, setting, videofile
 anilist         → cache (IntegrationCache)
@@ -140,9 +145,17 @@ playback        → videofile, mediaprobe, storageprovider, setting (+ cache via
 ingestion       → storageprovider, mediafolder, videofile, anime, anibridge, tmdb, notification
 ```
 
-Nenhum domínio depende de `playback`, `mediaprobe`, `cache`, `notification` ou `ingestion` — são
-"topo" do grafo, consumidos só pela camada HTTP (ou, no caso de `notification`, só escritos por
-`ingestion` e nunca lidos de volta por outro domínio).
+Nenhum domínio depende de `playback`, `mediaprobe`, `cache` ou `notification` — são "topo" do
+grafo, consumidos só pela camada HTTP (ou, no caso de `notification`, só escritos por `ingestion`
+e nunca lidos de volta por outro domínio).
+
+**Ciclo deliberado `videofile` ↔ `ingestion`:** `ingestion` depende de `videofile` (cria/lista
+arquivos na reconciliação) e `videofile` passa a depender de `ingestion` só por
+`extractor.EpisodeNumberExtractor` — reaproveita a mesma heurística de extração de episódio do
+pairing automático pra calcular a chave de ordenação natural (`VideoFileService.
+naturalSortKeyOf`), em vez de duplicá-la. É o único ciclo do grafo; Java não impede (não há
+dependência circular de build, maven é um módulo só), mas é uma exceção notável à topologia
+acíclica do restante do grafo.
 
 **Acoplamento atípico identificado:** o service de busca do TMDB (`tmdb.service.
 TmdbService`) expõe só 2 operações via `resource/` (`/v1/tmdb/search/movies` e
@@ -156,7 +169,10 @@ nesse service tem raio de impacto em 3 domínios além do seu próprio resource.
 
 - **PostgreSQL** — único banco, schema único, FKs reais entre domínios (ex.: `videofile` →
   `mediafolder`). Migrações via Flyway (`classpath:db`). Em testes, H2 em modo de compatibilidade
-  PostgreSQL substitui o Postgres real.
+  PostgreSQL substitui o Postgres real, mas **não** via Flyway — as migrations usam sintaxe
+  específica do Postgres (`TIMESTAMPTZ`) que o H2 não entende; o schema de teste é gerado pelo
+  próprio Hibernate a partir do mapeamento das entidades (`%test.quarkus.hibernate-orm.
+  database.generation=drop-and-create`, Flyway desligado só no profile de teste).
 - **rclone (`rcd` local, não containerizado)** — obrigatório para qualquer storage provider `MEGA`:
   resolve listagem/download remoto (`RcloneClient`) e obscurece credenciais sensíveis
   (`POST /core/obscure`) antes de persistir. Roda fora de container de propósito, para compartilhar
@@ -209,9 +225,11 @@ itens abaixo são backlog real (a corrigir aos poucos), exceto onde indicado "Ac
    paginação em lookups em lote (`getAnimeBindings`/`getTmdbFilePairings`); possível corrida no
    bind (check-then-persist sem lock explícito, mitigada só pela PK do banco).
 6. **`ingestion`**: `EpisodeNumberExtractor` usa regex calibrada empiricamente — risco de regressão
-   silenciosa se alterada sem reteste; throttle de 1500ms entre pastas no auto-bind é hardcoded, não
-   configurável via `setting`; `IngestionResource` não tem `@ApplicationScoped` (inconsistência
-   pontual com o padrão dos demais resources).
+   silenciosa se alterada sem reteste, agora com raio de impacto maior porque `videofile` também
+   depende dela (ver ciclo `videofile` ↔ `ingestion` acima): uma regressão aqui erra tanto o
+   pairing TMDB quanto a ordem da listagem de episódios; throttle de 1500ms entre pastas no
+   auto-bind é hardcoded, não configurável via `setting`; `IngestionResource` não tem
+   `@ApplicationScoped` (inconsistência pontual com o padrão dos demais resources).
 7. **`mediafolder`/`videofile`**: `MediaFolderService.create()` e `VideoFileService` não validam
    duplicidade de path/nome na escrita (assumem que o chamador — tipicamente `ingestion` — já
    garantiu); `deleteRoots()` de `mediafolder` é documentado no próprio código como workaround para
@@ -263,6 +281,9 @@ itens abaixo são backlog real (a corrigir aos poucos), exceto onde indicado "Ac
 - Ao alterar `EpisodeNumberExtractor` (regex calibrada empiricamente) ou
   `AnibridgeResolutionService` (critério de candidato "suspeito"), tratar como código de alto risco
   de regressão silenciosa — testar manualmente contra casos reais antes de assumir correção.
+  `EpisodeNumberExtractor` tem dois consumidores agora (`ingestion` no pairing automático,
+  `videofile` na ordenação natural da listagem de episódios): qualquer mudança de comportamento
+  afeta os dois ao mesmo tempo.
 - Manter o contrato (`openapi.yaml`) como fonte da verdade das descrições de tag — ao mudar um
   comportamento, atualizar a descrição da tag junto, pra este documento e o contrato não divergirem
   da implementação real.

@@ -2,14 +2,16 @@
 
 Migrations do schema PostgreSQL da aplicação, aplicadas pelo Flyway no boot
 (`quarkus.flyway.migrate-at-start=true`, `quarkus.flyway.locations=classpath:db`, configurados em
-`application.properties`). Em testes, o schema sobe no H2 em modo de compatibilidade PostgreSQL —
-as mesmas migrations rodam lá também; evite SQL exclusivo de dialeto Postgres que o H2 não suporte
-sem necessidade real.
+`application.properties`). Em testes, o Flyway é desligado (`%test.quarkus.flyway.
+migrate-at-start=false`) e o schema no H2 (modo de compatibilidade PostgreSQL) sai do próprio
+Hibernate, a partir do mapeamento das entidades (`%test.quarkus.hibernate-orm.database.
+generation=drop-and-create`) — essas migrations **não** rodam em teste, porque usam sintaxe
+específica do Postgres (ex.: `TIMESTAMPTZ` no V1) que o H2 não entende.
 
 ## Convenção de nome
 
 `V<versão>__<descrição-em-kebab-case>.sql`, sequencial, sem gaps. Versão nova é sempre a próxima
-inteira (`V15__...`), nunca reaproveita ou insere entre versões existentes. Migration já aplicada
+inteira (`V17__...`), nunca reaproveita ou insere entre versões existentes. Migration já aplicada
 em qualquer ambiente **nunca é editada** — correção de schema é sempre uma migration nova.
 
 ## Tabelas por domínio
@@ -21,7 +23,7 @@ não há tabela compartilhada entre domínios além das FKs explícitas abaixo.
 |---|---|---|---|
 | `storage_provider` | V1 | `storageprovider` | `config` é `JSONB` — guarda a config tipada (já com campos sensíveis obscurecidos pelo rclone antes de persistir). |
 | `media_folder` | V2 | `mediafolder` | Auto-referência (`parent_id`) para a árvore de pastas; FK em `storage_provider`. |
-| `video_file` | V2 | `videofile` | FK em `media_folder`, `ON DELETE CASCADE`. |
+| `video_file` | V2, V16 | `videofile` | FK em `media_folder`, `ON DELETE CASCADE`. V16 adiciona `natural_sort_key` (nullable, indexada com `folder_id`+`id`) — chave de ordenação da listagem de episódios. |
 | `setting` | V3 | `setting` | PK é a própria `key`; seed inicial de todas as preferências conhecidas insere nesta migration (ver abaixo). `secret=TRUE` marca valor que a API nunca ecoa. |
 | `notification` | V4 | `notification` | `folder_id` sem FK declarada (referência solta ao id de `media_folder`, não normalizada). |
 | `integration_cache` | V5 | `cache` (lado `IntegrationCache`, não `VideoFileCache`) | Cache key/value genérico de resposta de integração (AniList/TMDB), `payload` em `JSONB`. Note que esta tabela convive em `domain/cache/model/` com `video_file_cache` (V12), que é uma entidade funcionalmente independente — ver observação no `README.md` de `domain/cache/`. |
@@ -40,6 +42,10 @@ não há tabela compartilhada entre domínios além das FKs explícitas abaixo.
   existentes ficam `NULL`).
 - **V14** — adiciona 7 colunas de metadata de episódio em `tmdb_file_pairing` (todas nullable, sem
   backfill).
+- **V16** — adiciona `natural_sort_key` em `video_file` (nullable) + índice. Diferente de V11/V14:
+  tem backfill, mas não dentro da migration — `ReconciliationService` (domínio `ingestion`)
+  recalcula a chave de qualquer arquivo que a reencontre sem ela numa nova varredura; linha que
+  não passar por reconciliação de novo continua `NULL` indefinidamente.
 
 ## Seed de `setting` (V3 + V10)
 
@@ -66,4 +72,6 @@ ver observação equivalente no `README.md` de `domain/setting/`).
   `domain/cache/`).
 - **Alterações sem backfill (V11, V14)** são aditivas e nullable — seguras para dados existentes,
   mas significam que linhas antigas ficam com a coluna nova vazia até o próximo sync/curadoria, não
-  há migração de dados retroativa.
+  há migração de dados retroativa. **V16** também não faz backfill na própria migration, mas tem
+  um caminho de preenchimento definido (reconciliação do `ingestion`, ver acima) — não é vazio
+  indefinidamente por decisão, é vazio até a próxima varredura da pasta.

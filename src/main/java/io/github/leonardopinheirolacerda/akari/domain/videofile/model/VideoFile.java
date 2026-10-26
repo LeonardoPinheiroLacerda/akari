@@ -45,6 +45,16 @@ public class VideoFile extends PanacheEntityBase {
 
     public String format;
 
+    /**
+     * Chave de ordenação natural derivada de {@code name} — define a posição do arquivo na
+     * listagem de episódios. Número de episódio extraído via {@code EpisodeNumberExtractor}
+     * (mesma heurística do pairing automático), zero-preenchido; nome em minúsculas quando a
+     * extração não casa com nenhum padrão. {@code null} em arquivos ingeridos antes dessa
+     * coluna existir, até a próxima reconciliação da pasta reencontrá-los.
+     */
+    @Column(name = "natural_sort_key")
+    public String naturalSortKey;
+
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)
     public OffsetDateTime createdAt;
@@ -85,6 +95,32 @@ public class VideoFile extends PanacheEntityBase {
     public static PageResult<VideoFile> findPage(Integer folderId, Integer page, Integer size) {
         final PanacheQuery<VideoFile> panacheQuery = VideoFile
                 .find("folder.id = ?1", folderId)
+                .page(page, size);
+
+        return new PageResult<>(
+                panacheQuery.list(),
+                page,
+                size,
+                panacheQuery.count(),
+                panacheQuery.pageCount()
+        );
+    }
+
+    /**
+     * Pagina os arquivos de uma pasta em ordem natural de {@code name} — base da listagem de
+     * episódios, onde a posição vem do nome do arquivo, não do pareamento TMDB. Arquivos sem
+     * {@code naturalSortKey} (ainda não reencontrados numa reconciliação desde que a coluna
+     * passou a existir) vão para o fim.
+     *
+     * @param folderId id da pasta no catalog
+     * @param page página desejada, 0-based
+     * @param size tamanho da página
+     * @return página de arquivos da pasta, em ordem natural; vazia se a pasta não existir ou
+     *         não tiver arquivos
+     */
+    public static PageResult<VideoFile> findPageOrderedByNaturalSortKey(Integer folderId, Integer page, Integer size) {
+        final PanacheQuery<VideoFile> panacheQuery = VideoFile
+                .find("FROM VideoFile vf WHERE vf.folder.id = ?1 ORDER BY vf.naturalSortKey NULLS LAST, vf.id", folderId)
                 .page(page, size);
 
         return new PageResult<>(

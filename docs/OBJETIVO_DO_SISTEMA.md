@@ -64,14 +64,20 @@ anibridge, franquias/relações entre animes).
 5. **Pairing de arquivo com episódio** (`AnimeTmdbFilePairing`) → cada `VideoFile` de uma pasta
    vinculada é associado a uma temporada/episódio do TMDB (com apoio do `anibridge` para resolver
    numeração absoluta↔temporada, quando aplicável), permitindo gerar thumbnail por episódio.
-6. **Reprodução** (`Playback`) → cliente inicia uma sessão de transcode HLS para um `VideoFile`
+6. **Listagem de episódios pronta pra tela** (`AnimeEpisodes`) → resolve a pasta vinculada ao
+   anime e pagina os arquivos de vídeo dela em ordem natural pelo nome do arquivo (número de
+   episódio extraído pela mesma heurística do pairing automático), já com o pareamento TMDB
+   embutido só como enriquecimento (título, thumbnail, sinopse) — não define a posição. Existe
+   pra que o cliente (app de TV) não precise descobrir o `folderId`, paginar `VideoFile`
+   separadamente nem reordenar nada: o backend é a fonte única da ordem.
+7. **Reprodução** (`Playback`) → cliente inicia uma sessão de transcode HLS para um `VideoFile`
    (arquivo `LOCAL` lido direto do disco; arquivo remoto, baixado antes para o cache local via
    `Cache`), reposiciona com *seek*, consome a playlist `m3u8` e os segmentos gerados, e mantém a
    sessão viva com *heartbeats* periódicos até o cliente parar de assistir.
-7. **Configuração administrativa** (`Setting`) → preferências chave/valor (ex.: API key do TMDB)
+8. **Configuração administrativa** (`Setting`) → preferências chave/valor (ex.: API key do TMDB)
    configuráveis pelo admin; preferências obrigatórias sem valor fazem os fluxos que dependem
    delas responderem `503` (`INTEGRATION_NOT_CONFIGURED`).
-8. **Observabilidade** (`Notification`) → eventos relevantes do sistema ficam disponíveis como
+9. **Observabilidade** (`Notification`) → eventos relevantes do sistema ficam disponíveis como
    lista paginada (0-based, pensada para um botão "ver mais" no cliente) e contador de não lidas.
    Hoje, todas as notificações são emitidas pelo domínio `ingestion` (`IngestionService` e
    `FolderAutoBindService`): falha ao listar o storage provider, falha de integração com
@@ -111,6 +117,8 @@ anibridge, franquias/relações entre animes).
 - Busca paginada cache-first em AniList e TMDB.
 - Binding, sincronização e curadoria de metadata de anime (AniList + TMDB), incluindo relações
   entre animes e pairing de arquivo↔episódio.
+- Listagem de episódios pronta pra tela, paginada e em ordem natural — o cliente não combina
+  chamadas nem reordena.
 - Preferências administrativas chave/valor, com suporte a valores secretos.
 - Notificações de observabilidade com push em tempo real.
 
