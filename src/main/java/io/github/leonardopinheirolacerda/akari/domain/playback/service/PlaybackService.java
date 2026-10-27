@@ -21,6 +21,7 @@ import io.github.leonardopinheirolacerda.akari.domain.playback.client.model.Ffmp
 import io.github.leonardopinheirolacerda.akari.domain.playback.mapper.PlaybackMapper;
 import io.github.leonardopinheirolacerda.akari.domain.playback.model.PlaybackSession;
 import io.github.leonardopinheirolacerda.akari.domain.playback.parser.HlsPlaylistParser;
+import io.github.leonardopinheirolacerda.akari.domain.playback.registry.TranscodeProcessRegistry;
 import io.github.leonardopinheirolacerda.akari.domain.playback.transcode.HlsTranscodeStrategy;
 import io.github.leonardopinheirolacerda.akari.domain.playback.transcode.Profile;
 import io.github.leonardopinheirolacerda.akari.domain.playback.transcode.TranscodeProfileSelector;
@@ -34,6 +35,7 @@ import io.github.leonardopinheirolacerda.akari.exceptions.BusinessRuleException;
 import io.github.leonardopinheirolacerda.akari.exceptions.IntegrationException;
 import io.github.leonardopinheirolacerda.akari.exceptions.IntegrationNotConfiguredException;
 import io.github.leonardopinheirolacerda.akari.exceptions.ResourceNotFoundException;
+import io.github.leonardopinheirolacerda.akari.exceptions.TranscodeFailedException;
 import io.github.leonardopinheirolacerda.akari.utils.VideoFileLocationUtils;
 import io.quarkus.logging.Log;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -65,6 +67,16 @@ import java.util.regex.Pattern;
 public class PlaybackService {
 
     private static final double SEEK_WINDOW_TOLERANCE_SECONDS = 0.5;
+
+    /**
+     * Quanto tempo esperar, logo depois de subir o ffmpeg, pra confirmar que ele não morreu de
+     * cara (filtro inválido, codec sem suporte) — detectado aqui em vez de só na primeira
+     * requisição de playlist, pra responder o erro já no {@code POST} que iniciou/reiniciou o
+     * transcode.
+     */
+    private static final Duration FFMPEG_STARTUP_GRACE = Duration.ofMillis(600);
+
+    private static final Duration FFMPEG_STARTUP_POLL_INTERVAL = Duration.ofMillis(100);
 
     /**
      * Formatos de nome de arquivo HLS que uma sessão pode produzir: segmento de rendition única
@@ -118,6 +130,9 @@ public class PlaybackService {
     @Inject
     PlaybackMapper playbackMapper;
 
+    @Inject
+    TranscodeProcessRegistry transcodeProcessRegistry;
+
     /**
      * Inicia uma nova sessão de transcode HLS.
      *
@@ -131,6 +146,8 @@ public class PlaybackService {
      * @throws IntegrationNotConfiguredException se {@code playback.work.base-dir} não estiver
      *         configurado
      * @throws IntegrationException se o ffmpeg falhar ao iniciar
+     * @throws TranscodeFailedException se o ffmpeg morrer logo depois de subir, antes de
+     *         confirmar que o transcode começou
      */
     @Transactional
     public PlaybackSessionResponse startPlaybackSession(StartPlaybackSessionRequest request) {
@@ -151,6 +168,8 @@ public class PlaybackService {
         final Path workDir = createWorkDir(sessionId);
 
         final Long jobId = startFfmpeg(
+                sessionId,
+                videoFile.id,
                 inputFile,
                 workDir,
                 0.0,
@@ -193,6 +212,7 @@ public class PlaybackService {
      * @return a sessão atualizada (mesmo {@code sessionId}, possivelmente novo
      *         {@code startOffsetSeconds} se houve reinício)
      * @throws ResourceNotFoundException se a sessão não existir ou já tiver expirado
+     * @throws TranscodeFailedException se o reinício do ffmpeg morrer logo depois de subir
      */
     @Transactional
     public PlaybackSessionResponse seekPlaybackSession(UUID sessionId, SeekRequest request) {
@@ -229,6 +249,7 @@ public class PlaybackService {
      * @return a sessão atualizada (mesmo {@code sessionId}, novo {@code startOffsetSeconds})
      * @throws ResourceNotFoundException se a sessão não existir ou já tiver expirado
      * @throws BusinessRuleException se os novos índices de faixa não existirem no arquivo
+     * @throws TranscodeFailedException se o reinício do ffmpeg morrer logo depois de subir
      */
     @Transactional
     public PlaybackSessionResponse switchPlaybackSessionTracks(UUID sessionId, SwitchTracksRequest request) {
@@ -251,13 +272,21 @@ public class PlaybackService {
      * @return a playlist {@code master.m3u8} (sessão com legenda soft) ou {@code index.m3u8}
      *         (demais casos), como texto
      * @throws ResourceNotFoundException se a sessão não existir, tiver expirado, ou a playlist
-     *         ainda não tiver sido escrita (transcode ainda não produziu o primeiro segmento)
+     *         ainda não tiver sido escrita e o processo ainda estiver rodando (transcode ainda
+     *         não produziu o primeiro segmento) — o cliente deve continuar tentando
+     * @throws TranscodeFailedException se o ffmpeg já tiver morrido sem ter sido pedido pelo
+     *         backend — essa playlist nunca vai ser gerada, o cliente deve parar de tentar
      */
     public String getPlaybackPlaylist(UUID sessionId) {
         final PlaybackSession session = findActiveOrThrow(sessionId);
         final Path playlistFile = resolveClientPlaylistFile(session);
 
         if (!Files.isRegularFile(playlistFile)) {
+            if (transcodeProcessRegistry.hasFailedUnexpectedly(sessionId)) {
+                transcodeProcessRegistry.logMissingPlaylistOnce(sessionId);
+                throw new TranscodeFailedException("O transcode desta sessão falhou antes de gerar a playlist");
+            }
+
             throw new ResourceNotFoundException("A playlist desta sessão ainda não foi gerada");
         }
 
@@ -424,6 +453,8 @@ public class PlaybackService {
 
         final Path workDir = createWorkDir(session.sessionId);
         final Long jobId = startFfmpeg(
+                session.sessionId,
+                videoFile.id,
                 inputFile,
                 workDir,
                 positionSeconds,
@@ -444,7 +475,9 @@ public class PlaybackService {
         return session;
     }
 
-    private Long startFfmpeg(Path inputFile,
+    private Long startFfmpeg(UUID sessionId,
+                             Integer fileId,
+                             Path inputFile,
                              Path workDir,
                              Double startOffsetSeconds,
                              Integer audioTrackIndex,
@@ -456,6 +489,8 @@ public class PlaybackService {
         final HwAccel hwAccel = HwAccel.fromSetting(hwAccelSetting);
 
         final FfmpegStartParams params = new FfmpegStartParams(
+                sessionId,
+                fileId,
                 spec,
                 inputFile,
                 workDir,
@@ -466,12 +501,49 @@ public class PlaybackService {
                 hwAccel
         );
 
-        try {
-            return ffmpegClient.start(params);
+        final Long pid;
 
+        try {
+            pid = ffmpegClient.start(params);
         } catch (FfmpegException e) {
             Log.errorf(e, "Falha ao iniciar o ffmpeg em %s", workDir);
             throw new IntegrationException(e.getMessage(), e);
+        }
+
+        if (diedWithinStartupGrace(sessionId)) {
+            transcodeProcessRegistry.forget(sessionId);
+            playbackWorkspaceService.delete(workDir);
+            throw new TranscodeFailedException(
+                    "O transcode da sessão " + sessionId + " falhou ao iniciar (ffmpeg encerrou logo após subir)");
+        }
+
+        return pid;
+    }
+
+    /**
+     * Espera {@value #FFMPEG_STARTUP_GRACE} pelo processo recém-iniciado, checando com
+     * {@value #FFMPEG_STARTUP_POLL_INTERVAL} de intervalo — sai mais rápido se o processo já
+     * morreu, pra não atrasar o {@code POST} em caso de falha.
+     */
+    private boolean diedWithinStartupGrace(UUID sessionId) {
+        final long deadline = System.nanoTime() + FFMPEG_STARTUP_GRACE.toNanos();
+
+        while (System.nanoTime() < deadline) {
+            if (!transcodeProcessRegistry.isAlive(sessionId)) {
+                return true;
+            }
+
+            sleepQuietly(FFMPEG_STARTUP_POLL_INTERVAL);
+        }
+
+        return !transcodeProcessRegistry.isAlive(sessionId);
+    }
+
+    private void sleepQuietly(Duration duration) {
+        try {
+            Thread.sleep(duration.toMillis());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
 
@@ -558,8 +630,10 @@ public class PlaybackService {
     }
 
     private void terminateAndCleanup(PlaybackSession session) {
+        transcodeProcessRegistry.markStoppedByBackend(session.sessionId);
         processTerminationService.terminate(session.ffmpegPid, session.processStartedAt);
         playbackWorkspaceService.delete(Path.of(session.workDir));
+        transcodeProcessRegistry.forget(session.sessionId);
     }
 
 }

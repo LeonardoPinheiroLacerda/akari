@@ -6,6 +6,7 @@ import io.github.leonardopinheirolacerda.akari.api.dto.VideoTrack;
 import io.github.leonardopinheirolacerda.akari.domain.playback.client.model.FfmpegStartParams;
 import io.github.leonardopinheirolacerda.akari.domain.playback.client.model.SubtitleMode;
 import io.github.leonardopinheirolacerda.akari.domain.playback.client.model.SubtitlePlan;
+import io.github.leonardopinheirolacerda.akari.domain.playback.registry.TranscodeProcessRegistry;
 import io.github.leonardopinheirolacerda.akari.domain.playback.transcode.spec.AudioCodec;
 import io.github.leonardopinheirolacerda.akari.domain.playback.transcode.spec.AudioTranscode;
 import io.github.leonardopinheirolacerda.akari.domain.playback.transcode.spec.HlsFlag;
@@ -20,6 +21,7 @@ import io.github.leonardopinheirolacerda.akari.domain.playback.transcode.spec.Vi
 import io.github.leonardopinheirolacerda.akari.domain.playback.transcode.spec.VideoTranscode;
 import io.quarkus.logging.Log;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 import java.io.IOException;
@@ -41,10 +43,11 @@ import java.util.StringJoiner;
  * seleção de faixas/codecs → muxer HLS). Rendition única e ABR divergem a partir da seleção de
  * faixas/codecs, mas convergem de novo no muxer.
  *
- * <p>Diferente do {@code FfprobeClient}, não há saída pra capturar: o resultado do transcode são
- * os próprios arquivos HLS escritos em {@code workDir}, então stdout/stderr são descartados.
- * Encerrar o processo não é responsabilidade desta classe — é gerência de processo genérica,
- * sem nada de ffmpeg/HLS, que fica no {@code ProcessTerminationService}.
+ * <p>O resultado do transcode são os próprios arquivos HLS escritos em {@code workDir}, então
+ * stdout é descartado; o stderr é capturado pelo {@link TranscodeProcessRegistry} enquanto o
+ * processo roda, já que o diretório de trabalho é apagado na limpeza e não haveria como lê-lo
+ * depois. Encerrar o processo não é responsabilidade desta classe — é gerência de processo
+ * genérica, sem nada de ffmpeg/HLS, que fica no {@code ProcessTerminationService}.
  *
  * <p>Não traduz falhas em {@code AkariException} — {@link #start} lança {@link FfmpegException},
  * que quem chama (o {@code PlaybackService}) embrulha em {@code IntegrationException}.
@@ -52,8 +55,11 @@ import java.util.StringJoiner;
 @ApplicationScoped
 public class FfmpegClient {
 
-    /** Codecs de legenda de texto (SubRip): entregues como WebVTT soft. O resto é queimado. */
+    /** Codecs de legenda de texto (SubRip): entregues como WebVTT soft. */
     private static final Set<String> SRT_CODECS = Set.of("subrip", "srt");
+
+    /** Codecs de legenda de imagem (bitmap): queimados via {@code overlay}, não via libass. */
+    private static final Set<String> IMAGE_SUBTITLE_CODECS = Set.of("hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle");
 
     private static final String MASTER_NAME = "master.m3u8";
 
@@ -63,8 +69,15 @@ public class FfmpegClient {
     @ConfigProperty(name = "akari.playback.ffmpeg.binary", defaultValue = "ffmpeg")
     String ffmpegBinary;
 
+    @Inject
+    TranscodeProcessRegistry transcodeProcessRegistry;
+
     /**
      * Sobe um processo {@code ffmpeg} de transcode HLS com os parâmetros informados.
+     *
+     * <p>Registra o início no log (sessão, arquivo, pid, faixas escolhidas e o comando completo)
+     * e passa o processo pro {@link TranscodeProcessRegistry}, que acompanha o resto do ciclo de
+     * vida dele (stderr, encerramento esperado ou não).
      *
      * @param params spec, entrada, destino e seleção de faixas/aceleração do transcode
      * @return o pid do processo iniciado
@@ -72,12 +85,10 @@ public class FfmpegClient {
      */
     public Long start(FfmpegStartParams params) {
         final List<String> command = buildCommand(params);
+        final String subtitleCodec = subtitleCodec(params.mediaInfo(), params.subtitleTrackIndex());
 
         final ProcessBuilder processBuilder = new ProcessBuilder(command)
-                .redirectOutput(ProcessBuilder.Redirect.DISCARD)
-                .redirectError(ProcessBuilder.Redirect.DISCARD);
-
-        Log.infof("Iniciando ffmpeg pra sessão em %s", params.workDir());
+                .redirectOutput(ProcessBuilder.Redirect.DISCARD);
 
         final Process process;
 
@@ -89,6 +100,22 @@ public class FfmpegClient {
                     e
             );
         }
+
+        Log.infof(
+                "ffmpeg iniciado pra sessão %s (arquivo %d, pid %d): audioTrackIndex=%s, subtitleTrackIndex=%s (codec=%s), "
+                        + "vídeo de entrada %dx%d (DAR=%s). Comando: %s",
+                params.sessionId(),
+                params.fileId(),
+                process.pid(),
+                params.audioTrackIndex(),
+                params.subtitleTrackIndex(),
+                subtitleCodec,
+                videoWidth(params.mediaInfo()),
+                videoHeight(params.mediaInfo()),
+                displayAspectRatio(params.mediaInfo()),
+                String.join(" ", command));
+
+        transcodeProcessRegistry.track(params.sessionId(), process);
 
         return process.pid();
     }
@@ -119,6 +146,10 @@ public class FfmpegClient {
     private void appendGlobalOptions(List<String> args) {
         args.add(ffmpegBinary);
         args.add("-y");
+        args.add("-hide_banner");
+        args.add("-loglevel");
+        args.add("warning");
+        args.add("-nostats");
     }
 
     private void appendSeek(List<String> args, double startOffsetSeconds) {
@@ -223,6 +254,120 @@ public class FfmpegClient {
     }
 
     /**
+     * Largura/altura reais do vídeo, pra escalar a legenda de imagem (autorada no canvas próprio
+     * dela, ex.: 1920x1080 em BDs, que pode não bater com a resolução real do vídeo, ex.:
+     * 1440x1080 em conteúdo 4:3) pro tamanho do frame antes do {@link #overlayFilter overlay} —
+     * sem isso, a legenda cola fora de posição sempre que os dois canvas têm tamanhos diferentes.
+     * Probe sem largura/altura não deveria acontecer (todo stream de vídeo tem as duas), por isso
+     * lança em vez de arriscar uma legenda mal posicionada com um valor chutado.
+     */
+    private int videoWidth(MediaInfoResponse mediaInfo) {
+        return mediaInfo.getVideo()
+                .stream()
+                .map(VideoTrack::getWidth)
+                .filter(Objects::nonNull)
+                .findFirst()
+                .orElseThrow(() -> new FfmpegException("Arquivo sem largura de vídeo no probe — não é possível escalar a legenda de imagem"));
+    }
+
+    private int videoHeight(MediaInfoResponse mediaInfo) {
+        return mediaInfo.getVideo()
+                .stream()
+                .map(VideoTrack::getHeight)
+                .filter(Objects::nonNull)
+                .findFirst()
+                .orElseThrow(() -> new FfmpegException("Arquivo sem altura de vídeo no probe — não é possível escalar a legenda de imagem"));
+    }
+
+    private String displayAspectRatio(MediaInfoResponse mediaInfo) {
+        return mediaInfo.getVideo()
+                .stream()
+                .map(VideoTrack::getDisplayAspectRatio)
+                .filter(Objects::nonNull)
+                .findFirst()
+                .orElse(null);
+    }
+
+    /** Parseia {@code "W:H"} (SAR/DAR do probe) num número; ausente ou malformado → {@code null}. */
+    private Double parseRatio(String ratio) {
+        if (ratio == null) {
+            return null;
+        }
+
+        final String[] parts = ratio.split(":");
+
+        if (parts.length != 2) {
+            return null;
+        }
+
+        try {
+            final double numerator = Double.parseDouble(parts[0]);
+            final double denominator = Double.parseDouble(parts[1]);
+
+            if (denominator <= 0) {
+                return null;
+            }
+
+            return numerator / denominator;
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Largura final do vídeo pra uma altura-alvo, corrigida pelo DAR real — o mesmo resultado que
+     * {@link #sarCorrectedScale} produz via {@code iw*sar}, mas calculado em Java porque a legenda
+     * de imagem precisa de um número concreto pra escalar o bitmap antes do {@link #overlayFilter
+     * overlay} (não dá pra referenciar a saída de outro pad do filtergraph por nome sem o filtro
+     * {@code scale2ref}, mais obscuro). Sem DAR no probe, cai pra proporção bruta
+     * largura/altura do vídeo — equivale a assumir pixel quadrado, sem correção.
+     *
+     * @param targetHeight altura-alvo (rung do ABR ou profile); {@code null} mantém a altura
+     *                     original do vídeo
+     */
+    private int targetVideoWidth(MediaInfoResponse mediaInfo, Integer targetHeight) {
+        final int rawWidth = videoWidth(mediaInfo);
+        final int rawHeight = videoHeight(mediaInfo);
+        final int height = targetHeight != null
+                ? targetHeight
+                : rawHeight;
+
+        final Double dar = parseRatio(displayAspectRatio(mediaInfo));
+        final double ratio = dar != null
+                ? dar
+                : ((double) rawWidth / rawHeight);
+
+        return evenFloor((int) Math.round(height * ratio));
+    }
+
+    /** Arredonda pra baixo até o próximo par — exigido pelos encoders, mesma regra do {@code trunc(x/2)*2} do ffmpeg. */
+    private int evenFloor(int value) {
+        return (value / 2) * 2;
+    }
+
+    /**
+     * Corrige a SAR pra 1:1 (pixel quadrado) escalando a largura pela proporção real decodificada
+     * ({@code iw*sar}) e fixando {@code setsar=1} — sem isso, vídeo anamórfico (pixel não
+     * quadrado, ex.: BD 4:3 que é 16:9 na exibição) sai com a razão de aspecto errada, porque o
+     * player assume pixel quadrado e ignora a SAR do stream. Se {@code targetHeight} for
+     * informado, encadeia o downscale pra altura da rendition logo em seguida — nessa ordem,
+     * porque o downscale precisa partir da geometria já corrigida, e quem queima legenda em cima
+     * (texto ou imagem) precisa fazer isso depois deste filtro, nunca antes.
+     *
+     * <p>Sem efeito em vídeo com pixel quadrado (SAR 1:1 ou ausente — {@code iw*sar} dá a própria
+     * largura): o BLEACH (1440x1080, DAR 4:3, SAR 1:1) continua saindo 1440x1080, sem esticar.
+     */
+    private String sarCorrectedScale(Integer targetHeight) {
+        final String squarePixels = "scale=trunc(iw*sar/2)*2:ih,setsar=1";
+
+        if (targetHeight == null) {
+            return squarePixels;
+        }
+
+        return squarePixels + ",scale=-2:" + targetHeight;
+    }
+
+    /**
      * Descobre o codec da faixa de legenda escolhida no probe (índice entre as legendas). Índice
      * ausente ou fora de faixa → {@code null} (sem legenda).
      */
@@ -253,16 +398,24 @@ public class FfmpegClient {
             FfmpegStartParams params,
             Integer keyframeFrames,
             SubtitlePlan subtitlePlan) {
-        appendStreamMapping(args, params.audioTrackIndex(), subtitlePlan);
-        appendVideo(args, spec.video(), ladder.isEmpty() ? null : ladder.get(0), subtitlePlan.burnFilter(), params.hwAccel(), keyframeFrames);
+        final Resolution resolution = ladder.isEmpty()
+                ? null
+                : ladder.get(0);
+
+        final String videoMapTarget = appendVideoFilterGraph(args, params.mediaInfo(), subtitlePlan, resolution, "v0");
+
+        appendStreamMapping(args, videoMapTarget, params.audioTrackIndex(), subtitlePlan);
+        appendVideo(args, spec.video(), resolution, subtitlePlan, params.hwAccel(), keyframeFrames);
         appendAudio(args, spec.audio());
         appendSubtitleGroup(args, subtitlePlan);
         appendMuxer(args, spec.hls(), params.workDir(), subtitlePlan.isSoft());
     }
 
     /**
-     * Resolve como a legenda escolhida (se houver) entra no transcode, pelo codec da faixa:
-     * SRT (texto) → {@link SubtitleMode#SOFT}; o resto → {@link SubtitleMode#BURN}.
+     * Resolve como a legenda escolhida (se houver) entra no transcode, pelo codec da faixa: SRT
+     * (texto) → {@link SubtitleMode#SOFT}; demais formatos de texto (ex.: ASS) →
+     * {@link SubtitleMode#BURN_TEXT}; formatos de imagem (PGS, VobSub, DVB) →
+     * {@link SubtitleMode#BURN_IMAGE}.
      */
     private SubtitlePlan resolveSubtitlePlan(FfmpegStartParams params, double startOffsetSeconds) {
         final Integer subtitleTrackIndex = params.subtitleTrackIndex();
@@ -272,24 +425,32 @@ public class FfmpegClient {
             return new SubtitlePlan(SubtitleMode.NONE, null, null);
         }
 
-        if (SRT_CODECS.contains(subtitleCodec.toLowerCase(Locale.ROOT))) {
+        final String normalizedCodec = subtitleCodec.toLowerCase(Locale.ROOT);
+
+        if (SRT_CODECS.contains(normalizedCodec)) {
             return new SubtitlePlan(SubtitleMode.SOFT, subtitleTrackIndex, null);
         }
 
+        if (IMAGE_SUBTITLE_CODECS.contains(normalizedCodec)) {
+            return new SubtitlePlan(SubtitleMode.BURN_IMAGE, subtitleTrackIndex, null);
+        }
+
         return new SubtitlePlan(
-                SubtitleMode.BURN,
+                SubtitleMode.BURN_TEXT,
                 subtitleTrackIndex,
                 burnSubtitleFilter(params.inputFile(), subtitleTrackIndex, startOffsetSeconds));
     }
 
     /**
-     * Filtro de hardsub. O {@code subtitles} lê a legenda direto do arquivo, com os tempos
-     * originais, mas o {@code -ss} de entrada (seek com reinício) zera o PTS do vídeo — sem
-     * compensar, ele desenharia as falas do início do episódio. Desloca o PTS pro tempo original
-     * antes do burn e volta a zerar depois, mantendo o timeline da playlist começando em 0.
+     * Filtro de hardsub de texto. O {@code subtitles} lê a legenda direto do arquivo, com os
+     * tempos originais, mas o {@code -ss} de entrada (seek com reinício) zera o PTS do vídeo —
+     * sem compensar, ele desenharia as falas do início do episódio. Desloca o PTS pro tempo
+     * original antes do burn e volta a zerar depois, mantendo o timeline da playlist começando
+     * em 0.
      */
     private String burnSubtitleFilter(Path inputFile, int subtitleTrackIndex, double startOffsetSeconds) {
-        final String subtitles = "subtitles=" + inputFile + ":si=" + subtitleTrackIndex;
+        final String escapedPath = escapeFilterPath(inputFile.toString());
+        final String subtitles = "subtitles=" + escapedPath + ":si=" + subtitleTrackIndex;
 
         if (startOffsetSeconds <= 0) {
             return subtitles;
@@ -298,9 +459,93 @@ public class FfmpegClient {
         return "setpts=PTS+" + formatSeconds(startOffsetSeconds) + "/TB," + subtitles + ",setpts=PTS-STARTPTS";
     }
 
-    private void appendStreamMapping(List<String> args, Integer audioTrackIndex, SubtitlePlan subtitlePlan) {
+    /**
+     * Escapa caracteres que o parser do filtergraph do ffmpeg trata como sintaxe (`:` separa
+     * opções do filtro, `[`/`]` denotam link de pad, `'` fecha aspas) — sem isso, um caminho com
+     * colchete (comum em nome de release de fansub, ex.: {@code [Erai-raws] ... [1080p][Hash].mkv})
+     * quebra o parse do filtro e o ffmpeg morre antes de processar qualquer frame. A barra
+     * invertida é escapada primeiro, pra não duplicar as que esta função mesma insere.
+     */
+    private String escapeFilterPath(String path) {
+        return path
+                .replace("\\", "\\\\")
+                .replace(":", "\\:")
+                .replace("'", "\\'")
+                .replace("[", "\\[")
+                .replace("]", "\\]");
+    }
+
+    /**
+     * Overlay pra legenda de imagem (PGS, VobSub, DVB): decodifica o stream de legenda como vídeo
+     * e sobrepõe no stream principal — diferente do {@code subtitles} (libass), que só lê legenda
+     * de texto. Os dois streams vêm do mesmo demuxer com o mesmo {@code -ss} de entrada, então os
+     * PTS já saem alinhados, sem precisar do deslocamento que {@link #burnSubtitleFilter} faz pro
+     * caso de texto.
+     *
+     * <p>O vídeo é corrigido de SAR (e, se houver rung, já reduzido pra altura dela via
+     * {@link #sarCorrectedScale}) antes do overlay — a legenda precisa ser queimada na geometria
+     * final, não esticada depois (senão o texto sai distorcido pelo redimensionamento). A legenda
+     * de imagem é desenhada no canvas próprio dela (ex.: 1920x1080 em BDs), que pode não bater com
+     * a resolução real do vídeo — por isso ela também é escalada pra essa mesma geometria final
+     * ({@link #targetVideoWidth}) antes de sobrepor; sem isso, a legenda sai fora de posição
+     * (deslocada, não centralizada) sempre que os dois canvas divergem.
+     *
+     * @param mediaInfo probe da mídia, pra saber a resolução/SAR real do vídeo
+     * @param subtitleTrackIndex posição da legenda entre as faixas de legenda do arquivo
+     * @param resolution resolução da rendition, pra embutir o downscale final no mesmo filtro;
+     *                   {@code null} mantém a altura original do vídeo
+     * @param outputLabel nome do pad de saída do filtro, referenciado depois no {@code -map}
+     */
+    private String overlayFilter(MediaInfoResponse mediaInfo, Integer subtitleTrackIndex, Resolution resolution, String outputLabel) {
+        final Integer targetHeight = resolution != null ? resolution.height : null;
+        final int finalHeight = targetHeight != null ? targetHeight : videoHeight(mediaInfo);
+        final int finalWidth = targetVideoWidth(mediaInfo, targetHeight);
+
+        final String videoLabel = "vcorr_" + outputLabel;
+        final String subtitleLabel = "sub_" + outputLabel;
+
+        final String videoChain = "[0:v]" + sarCorrectedScale(targetHeight) + "[" + videoLabel + "]";
+        final String subtitleChain = "[0:s:" + subtitleTrackIndex + "]scale=" + finalWidth + ":" + finalHeight + "[" + subtitleLabel + "]";
+        final String overlayChain = "[" + videoLabel + "][" + subtitleLabel + "]overlay[" + outputLabel + "]";
+
+        return videoChain + ";" + subtitleChain + ";" + overlayChain;
+    }
+
+    /** Uma cadeia {@link #overlayFilter} por rendition do ABR, com os pads {@code v0}, {@code v1}... */
+    private String overlayFilterComplexForLadder(MediaInfoResponse mediaInfo, Integer subtitleTrackIndex, List<Resolution> ladder) {
+        final StringJoiner chains = new StringJoiner(";");
+
+        for (int i = 0; i < ladder.size(); i++) {
+            chains.add(overlayFilter(mediaInfo, subtitleTrackIndex, ladder.get(i), "v" + i));
+        }
+
+        return chains.toString();
+    }
+
+    /**
+     * Pra legenda de imagem, adiciona o {@code -filter_complex} do overlay (com o downscale da
+     * rendition já embutido) e devolve o label do pad de vídeo resultante, pra mapear no lugar de
+     * {@code 0:v:0}. Nos demais modos não adiciona nada e devolve {@code 0:v:0} mesmo.
+     */
+    private String appendVideoFilterGraph(List<String> args,
+                                          MediaInfoResponse mediaInfo,
+                                          SubtitlePlan subtitlePlan,
+                                          Resolution resolution,
+                                          String label) {
+
+        if (!subtitlePlan.isBurnImage()) {
+            return "0:v:0";
+        }
+
+        args.add("-filter_complex");
+        args.add(overlayFilter(mediaInfo, subtitlePlan.trackIndex(), resolution, label));
+
+        return "[" + label + "]";
+    }
+
+    private void appendStreamMapping(List<String> args, String videoMapTarget, Integer audioTrackIndex, SubtitlePlan subtitlePlan) {
         args.add("-map");
-        args.add("0:v:0");
+        args.add(videoMapTarget);
         args.add("-map");
         args.add("0:a:" + audioTrackIndex);
 
@@ -313,7 +558,7 @@ public class FfmpegClient {
     private void appendVideo(List<String> args,
                              VideoTranscode video,
                              Resolution resolution,
-                             String burnFilter,
+                             SubtitlePlan subtitlePlan,
                              HwAccel hwAccel,
                              Integer keyframeFrames) {
 
@@ -330,11 +575,12 @@ public class FfmpegClient {
         appendRateControl(args, video.rateControl(), null);
         appendGop(args, keyframeFrames, null);
 
-        final String filter = videoFilter(resolution, burnFilter);
-        if (filter != null) {
-            args.add("-vf");
-            args.add(filter);
+        if (subtitlePlan.isBurnImage()) {
+            return;
         }
+
+        args.add("-vf");
+        args.add(videoFilter(resolution, subtitlePlan.burnFilter()));
     }
 
     /** {@code -preset}/{@code -tune}: compartilhado entre rendition única e cada variante do ABR. */
@@ -349,18 +595,22 @@ public class FfmpegClient {
         }
     }
 
-    /** Cadeia de filtros de vídeo: downscale para a resolução da rung e/ou burn de legenda. */
+    /**
+     * Cadeia de filtros de vídeo: correção de SAR ({@link #sarCorrectedScale}, com o downscale
+     * pra resolução da rung já embutido, se houver) e, por cima, o burn de legenda de texto —
+     * nessa ordem, pra queimar já na geometria final. Sempre devolve pelo menos a correção de
+     * SAR: mesmo sem downscale nem legenda, a saída do transcode deve sair com pixel quadrado.
+     */
     private String videoFilter(Resolution resolution, String burnFilter) {
         final List<String> filters = new ArrayList<>();
 
-        if (resolution != null) {
-            filters.add("scale=-2:" + resolution.height);
-        }
+        filters.add(sarCorrectedScale(resolution != null ? resolution.height : null));
+
         if (burnFilter != null) {
             filters.add(burnFilter);
         }
 
-        return filters.isEmpty() ? null : String.join(",", filters);
+        return String.join(",", filters);
     }
 
     private void appendAudio(List<String> args, AudioTranscode audio) {
@@ -450,10 +700,15 @@ public class FfmpegClient {
                            Integer keyframeFrames,
                            SubtitlePlan subtitlePlan) {
 
-        if (subtitlePlan.mode() == SubtitleMode.BURN) {
+        if (subtitlePlan.mode() == SubtitleMode.BURN_TEXT) {
             Log.warnf(
                     "Hardsub em ABR: o filtro de burn vai rodar em cada uma das %d renditions, não é o ideal mas é suportado",
                     ladder.size());
+        }
+
+        if (subtitlePlan.isBurnImage()) {
+            args.add("-filter_complex");
+            args.add(overlayFilterComplexForLadder(params.mediaInfo(), subtitlePlan.trackIndex(), ladder));
         }
 
         final String varStreamMap = appendAbrStreamMapping(args, ladder, params.audioTrackIndex(), subtitlePlan);
@@ -477,7 +732,10 @@ public class FfmpegClient {
 
         for (int i = 0; i < ladder.size(); i++) {
             args.add("-map");
-            args.add("0:v:0");
+            args.add(subtitlePlan.isBurnImage()
+                    ? "[v" + i + "]"
+                    : "0:v:0"
+            );
             args.add("-map");
             args.add("0:a:" + audioTrackIndex);
 
@@ -496,6 +754,14 @@ public class FfmpegClient {
         return varStreamMap.toString();
     }
 
+    /**
+     * A resolução de cada rendition é imposta via {@code -filter:v:i} (não {@code -s:v:i}, que
+     * forçaria a largura fixa da rung — errada pra fonte que não é 16:9, ex.: 4:3) — reaproveita o
+     * mesmo {@link #videoFilter} da rendition única, que corrige a SAR e reduz pra altura da rung
+     * preservando a proporção real do vídeo. Pulado pra legenda de imagem, cujo
+     * {@code -filter_complex} ({@link #overlayFilterComplexForLadder}) já faz a correção de SAR e
+     * o downscale.
+     */
     private void appendAbrVideoCodecs(List<String> args,
                                       List<Resolution> ladder,
                                       VideoTranscode video,
@@ -508,16 +774,18 @@ public class FfmpegClient {
         for (int i = 0; i < ladder.size(); i++) {
             args.add("-c:v:" + i);
             args.add(encoder);
-            args.add("-s:v:" + i);
-            args.add(ladder.get(i).width + "x" + ladder.get(i).height);
 
             appendPresetAndTune(args, video);
             appendRateControl(args, video.rateControl(), i);
             appendGop(args, keyframeFrames, i);
 
-            if (subtitlePlan.mode() == SubtitleMode.BURN) {
+            if (!subtitlePlan.isBurnImage()) {
+                final String burnFilter = subtitlePlan.mode() == SubtitleMode.BURN_TEXT
+                        ? subtitlePlan.burnFilter()
+                        : null;
+
                 args.add("-filter:v:" + i);
-                args.add(subtitlePlan.burnFilter());
+                args.add(videoFilter(ladder.get(i), burnFilter));
             }
         }
     }

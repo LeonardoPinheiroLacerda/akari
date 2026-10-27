@@ -11,7 +11,10 @@ public enum SubtitleMode {
     /** Faixa de texto (SRT) entregue como WebVTT soft, numa variante própria do HLS. */
     SOFT,
 
-    /** Faixa não textual (ex.: ASS) queimada na imagem do vídeo. */
-    BURN
+    /** Faixa de texto (ex.: ASS/SSA) queimada na imagem do vídeo pelo filtro {@code subtitles} (libass). */
+    BURN_TEXT,
+
+    /** Faixa de imagem (PGS, VobSub, DVB) queimada via {@code overlay} do stream de legenda decodificado. */
+    BURN_IMAGE
 
 }

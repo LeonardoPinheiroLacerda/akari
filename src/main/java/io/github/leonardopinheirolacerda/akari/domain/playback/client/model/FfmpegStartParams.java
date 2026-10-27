@@ -6,10 +6,14 @@ import io.github.leonardopinheirolacerda.akari.domain.playback.transcode.spec.Hl
 import io.github.leonardopinheirolacerda.akari.domain.playback.transcode.spec.HwAccel;
 
 import java.nio.file.Path;
+import java.util.UUID;
 
 /**
  * Parâmetros usados pra montar o comando e subir um processo {@code ffmpeg} de transcode HLS.
  *
+ * @param sessionId sessão de playback dona deste processo — usado só pra log e rastreio, não
+ *                  entra no comando
+ * @param fileId arquivo sendo reproduzido — usado só pra log, não entra no comando
  * @param spec intenção de transcode (vídeo/áudio/HLS) escolhida pela {@code HlsTranscodeStrategy}
  *             vencedora
  * @param inputFile arquivo de vídeo de origem, já resolvido em disco
@@ -22,10 +26,12 @@ import java.nio.file.Path;
  * @param subtitleTrackIndex posição (0-based) da faixa de legenda entre as faixas de legenda do
  *                           arquivo; {@code null} se nenhuma legenda selecionada
  * @param mediaInfo probe da mídia — o {@link FfmpegClient} resolve nele o codec da legenda
- *                  escolhida, pra decidir soft (WebVTT) vs burn-in
+ *                  escolhida, pra decidir soft (WebVTT) vs burn (texto ou imagem)
  * @param hwAccel aceleração de hardware do encoder de vídeo
  */
 public record FfmpegStartParams(
+        UUID sessionId,
+        Integer fileId,
         HlsTranscodeSpec spec,
         Path inputFile,
         Path workDir,

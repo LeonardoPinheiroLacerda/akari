@@ -18,6 +18,7 @@ import java.util.Map;
  * @param width largura em pixels; só se aplica a vídeo
  * @param height altura em pixels; só se aplica a vídeo
  * @param displayAspectRatio razão de aspecto de exibição, ex. {@code "16:9"}; só vídeo
+ * @param sampleAspectRatio razão de aspecto da amostra/pixel, ex. {@code "1:1"}; só vídeo
  * @param avgFrameRate taxa de quadros média, como fração (ex. {@code "24000/1001"}); só vídeo
  * @param bitRate taxa de bits do stream em bits/segundo, como string
  * @param pixFmt formato de pixel, ex. {@code "yuv420p"}; só vídeo
@@ -37,6 +38,7 @@ public record FfprobeStream(
         Integer width,
         Integer height,
         @JsonProperty("display_aspect_ratio") String displayAspectRatio,
+        @JsonProperty("sample_aspect_ratio") String sampleAspectRatio,
         @JsonProperty("avg_frame_rate") String avgFrameRate,
         @JsonProperty("bit_rate") String bitRate,
         @JsonProperty("pix_fmt") String pixFmt,
