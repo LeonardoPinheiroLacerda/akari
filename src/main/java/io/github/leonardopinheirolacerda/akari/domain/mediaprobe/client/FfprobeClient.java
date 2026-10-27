@@ -38,13 +38,14 @@ public class FfprobeClient {
     ObjectMapper objectMapper;
 
     /**
-     * Roda {@code ffprobe -show_format -show_streams} sobre o arquivo e parseia a saída.
+     * Roda {@code ffprobe -show_format -show_streams -show_chapters} sobre o arquivo e parseia
+     * a saída.
      *
      * <p>Assume que o arquivo existe — a checagem de existência é responsabilidade de quem
      * chama.
      *
      * @param file arquivo de vídeo já resolvido em disco
-     * @return metadados crus do container e dos streams, como o ffprobe os emitiu
+     * @return metadados crus do container, dos streams e dos capítulos, como o ffprobe os emitiu
      * @throws FfprobeException se o binário não puder ser iniciado, o processo não responder
      *         dentro do timeout, terminar com código de saída não-zero, ou a saída não for um
      *         JSON válido
@@ -74,6 +75,7 @@ public class FfprobeClient {
                 "-print_format", "json",
                 "-show_format",
                 "-show_streams",
+                "-show_chapters",
                 file.toString()
         );
 

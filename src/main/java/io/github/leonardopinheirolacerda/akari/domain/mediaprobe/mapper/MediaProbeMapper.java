@@ -1,10 +1,12 @@
 package io.github.leonardopinheirolacerda.akari.domain.mediaprobe.mapper;
 
 import io.github.leonardopinheirolacerda.akari.api.dto.AudioTrack;
+import io.github.leonardopinheirolacerda.akari.api.dto.Chapter;
 import io.github.leonardopinheirolacerda.akari.api.dto.MediaContainer;
 import io.github.leonardopinheirolacerda.akari.api.dto.MediaInfoResponse;
 import io.github.leonardopinheirolacerda.akari.api.dto.SubtitleTrack;
 import io.github.leonardopinheirolacerda.akari.api.dto.VideoTrack;
+import io.github.leonardopinheirolacerda.akari.domain.mediaprobe.client.dtos.FfprobeChapter;
 import io.github.leonardopinheirolacerda.akari.domain.mediaprobe.client.dtos.FfprobeFormat;
 import io.github.leonardopinheirolacerda.akari.domain.mediaprobe.client.dtos.FfprobeOutput;
 import io.github.leonardopinheirolacerda.akari.domain.mediaprobe.client.dtos.FfprobeStream;
@@ -65,6 +67,11 @@ public interface MediaProbeMapper {
     @Mapping(source = "disposition", target = "forced", qualifiedByName = "forcedFlag")
     @Mapping(source = "disposition", target = "hearingImpaired", qualifiedByName = "hearingImpairedFlag")
     SubtitleTrack toSubtitleTrack(FfprobeStream stream);
+
+    @Mapping(source = "startTime", target = "startSeconds", qualifiedByName = "toDouble")
+    @Mapping(source = "endTime", target = "endSeconds", qualifiedByName = "toDouble")
+    @Mapping(source = "tags", target = "title", qualifiedByName = "title")
+    Chapter toChapter(FfprobeChapter chapter);
 
     @Named("toVideoTracks")
     default List<VideoTrack> toVideoTracks(List<FfprobeStream> streams) {
