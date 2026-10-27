@@ -2885,15 +2885,17 @@ components:
       type: string
       description: |
         Profile de transcode suportado pelo backend. Fixo no código (não configurável via
-        `Setting`): `WEB` (navegador, hls.js), `TV` (TV/set-top box — profile recomendado para
-        uma TV 1080p como o Google TV Streamer), `MOBILE` (dispositivo móvel). Hoje as três
-        resolvem pra mesma estratégia de transcode internamente (sem diferenciação real de
-        comportamento ainda), mas o valor correto segue sendo o que descreve o dispositivo do
-        cliente, já que a seleção de estratégia por profile é o mecanismo de extensão futuro.
+        `Setting`): `WEB` (navegador, hls.js), `TV` (TV/set-top box genérica), `MOBILE`
+        (dispositivo móvel), `GOOGLE_TV_STREAMER` (Google TV Streamer — H.264 até o nível 5.2,
+        HEVC Main/Main10 até o nível 5.1 ou AV1 Main até o nível 5.1, cap de 4K/60fps, áudio
+        AAC). `WEB`/`TV`/`MOBILE` resolvem pra mesma estratégia de transcode internamente (sem
+        diferenciação real de comportamento ainda); `GOOGLE_TV_STREAMER` tem estratégia própria.
+        O valor correto é o que descreve o dispositivo do cliente.
       enum:
         - WEB
         - TV
         - MOBILE
+        - GOOGLE_TV_STREAMER
 
     FileAvailabilityStatus:
       type: string

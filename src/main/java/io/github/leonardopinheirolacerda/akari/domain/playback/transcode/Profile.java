@@ -16,6 +16,9 @@ public enum Profile {
     TV,
 
     /** Reprodução em dispositivo móvel. */
-    MOBILE
+    MOBILE,
+
+    /** Reprodução no Google TV Streamer. */
+    GOOGLE_TV_STREAMER
 
 }

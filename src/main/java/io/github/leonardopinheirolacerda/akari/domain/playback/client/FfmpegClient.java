@@ -406,7 +406,7 @@ public class FfmpegClient {
 
         appendStreamMapping(args, videoMapTarget, params.audioTrackIndex(), subtitlePlan);
         appendVideo(args, spec.video(), resolution, subtitlePlan, params.hwAccel(), keyframeFrames);
-        appendAudio(args, spec.audio());
+        appendAudio(args, spec.audio(), params.mediaInfo(), params.audioTrackIndex());
         appendSubtitleGroup(args, subtitlePlan);
         appendMuxer(args, spec.hls(), params.workDir(), subtitlePlan.isSoft());
     }
@@ -555,6 +555,12 @@ public class FfmpegClient {
         }
     }
 
+    /**
+     * {@code TranscodeMode#COPY} cede pra encode (usando os campos de encode da própria
+     * {@code video}, preenchidos pela estratégia mesmo quando o modo preferido é {@code COPY})
+     * quando a legenda escolhida exige burn-in — stream copy não decodifica, então não há como
+     * aplicar o filtro de overlay/queima nesse caso.
+     */
     private void appendVideo(List<String> args,
                              VideoTranscode video,
                              Resolution resolution,
@@ -562,7 +568,9 @@ public class FfmpegClient {
                              HwAccel hwAccel,
                              Integer keyframeFrames) {
 
-        if (video == null || video.mode() == TranscodeMode.COPY) {
+        final boolean needsBurn = subtitlePlan.mode() == SubtitleMode.BURN_TEXT || subtitlePlan.isBurnImage();
+
+        if (video == null || (video.mode() == TranscodeMode.COPY && !needsBurn)) {
             args.add("-c:v");
             args.add("copy");
             return;
@@ -613,8 +621,19 @@ public class FfmpegClient {
         return String.join(",", filters);
     }
 
-    private void appendAudio(List<String> args, AudioTranscode audio) {
-        if (audio == null || audio.mode() == TranscodeMode.COPY) {
+    /**
+     * {@code TranscodeMode#COPY} cede pra encode (usando os campos de encode da própria
+     * {@code audio}, preenchidos pela estratégia mesmo quando o modo preferido é {@code COPY})
+     * se a faixa de áudio realmente selecionada ({@code audioTrackIndex}) não tiver o codec
+     * esperado — a estratégia decide {@code COPY} ao avaliar o probe inteiro, sem saber qual
+     * faixa de áudio o cliente vai selecionar, então a validação final (contra a faixa de fato
+     * escolhida) só pode ser feita aqui.
+     */
+    private void appendAudio(List<String> args, AudioTranscode audio, MediaInfoResponse mediaInfo, Integer audioTrackIndex) {
+        final boolean copy = audio == null
+                || (audio.mode() == TranscodeMode.COPY && matchesSelectedAudio(audio.codec(), mediaInfo, audioTrackIndex));
+
+        if (copy) {
             args.add("-c:a");
             args.add("copy");
             return;
@@ -624,6 +643,17 @@ public class FfmpegClient {
         args.add(audioEncoder(audio.codec()));
         appendAudioBitrate(args, audio, null);
         appendAudioChannels(args, audio, null);
+    }
+
+    /** {@code true} se a faixa de áudio selecionada já estiver codificada no {@code codec} alvo. */
+    private boolean matchesSelectedAudio(AudioCodec codec, MediaInfoResponse mediaInfo, Integer audioTrackIndex) {
+        final String probedCodec = mediaInfo.getAudio().get(audioTrackIndex).getCodec();
+
+        return switch (codec) {
+            case AAC -> "aac".equalsIgnoreCase(probedCodec);
+            case FLAC -> "flac".equalsIgnoreCase(probedCodec);
+            case OPUS -> "opus".equalsIgnoreCase(probedCodec);
+        };
     }
 
     /**
