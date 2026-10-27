@@ -2,23 +2,29 @@
 
 ## Objetivo do módulo
 
-Extrai metadados técnicos (container e streams de vídeo/áudio/legenda) de um arquivo de vídeo
-já disponível em disco, executando `ffprobe` sob demanda. Expõe `GET
+Extrai metadados técnicos (container, streams de vídeo/áudio/legenda e capítulos) de um arquivo
+de vídeo já disponível em disco, executando `ffprobe` sob demanda. Expõe `GET
 /v1/mediaprobe/files/{fileId}`.
 
 ## Responsabilidade principal
 
 Dado o id de um `VideoFile` do catalog, resolver onde o arquivo físico está acessível (direto,
 se o provider for `LOCAL`; via cache local, se for remoto e o download já tiver terminado),
-invocar `ffprobe -show_format -show_streams` sobre ele e traduzir a saída JSON crua para o DTO
-de resposta do contrato (`MediaInfoResponse`). É stateless: nada é persistido, cada chamada
-roda o probe do zero.
+invocar `ffprobe -show_format -show_streams -show_chapters` sobre ele e traduzir a saída JSON
+crua para o DTO de resposta do contrato (`MediaInfoResponse`). É stateless: nada é persistido,
+cada chamada roda o probe do zero.
 
 ## Funcionalidades existentes
 
 - `GET /v1/mediaprobe/files/{fileId}` — probe completo: metadados do container
-  (`MediaContainer`: formato, duração, tamanho, bit rate) e listas de `VideoTrack`,
-  `AudioTrack`, `SubtitleTrack`, particionadas pelo `codec_type` do ffprobe.
+  (`MediaContainer`: formato, duração, tamanho, bit rate), listas de `VideoTrack`,
+  `AudioTrack`, `SubtitleTrack` (particionadas pelo `codec_type` do ffprobe) e `chapters`
+  (`startSeconds`/`endSeconds`/`title`, na ordem do arquivo, exatamente como o ffprobe os lista
+  — sem fundir, reordenar ou corrigir sobreposições entre capítulos; lista vazia se o arquivo
+  não tiver capítulos, nunca `null`).
+- `VideoTrack.sampleAspectRatio` expõe a SAR crua do ffprobe ao lado de `displayAspectRatio`
+  (ex.: um vídeo anamórfico 960x720 com SAR `4:3` e DAR `16:9`) — útil pra diagnosticar vídeo
+  anamórfico sem rodar `ffprobe` manualmente.
 - Parsing tolerante de valores crus do ffprobe (números vêm como string no JSON): conversão
   para `Double`/`Long`/`Integer`, cálculo de frame rate a partir da fração `avg_frame_rate`,
   leitura de tags (`language`/`title`) e flags de disposition (`default`/`forced`/
@@ -81,7 +87,10 @@ roda o probe do zero.
 5. `MediaProbeMapper.toResponse` converte `FfprobeOutput` para `MediaInfoResponse`: o container
    mapeia 1:1 com conversão de tipo; os `streams` (lista única, mistura vídeo/áudio/legenda) são
    particionados em três listas por `codecType`, cada item convertido pelo método `@Named`
-   correspondente, delegando parsing não-trivial para `FfprobeValueParser`.
+   correspondente; `chapters` mapeia 1:1 (sem partição, já vem numa lista própria do ffprobe),
+   convertendo `start_time`/`end_time` (string) pra `Double` e a tag `title` pelos mesmos
+   helpers `@Named` já usados pelas faixas. Todo parsing não-trivial delega pra
+   `FfprobeValueParser`.
 
 ## Arquivos críticos
 
