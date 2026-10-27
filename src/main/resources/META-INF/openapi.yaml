@@ -707,6 +707,8 @@ paths:
         (UUID) que identifica a sessão, junto do endereço da playlist `m3u8`.
 
         Responde `404` se o vídeo é de provider remoto e ainda não terminou de baixar no cache.
+        Responde `500` com `TRANSCODE_FAILED` se o `ffmpeg` morrer logo depois de subir, antes
+        de confirmar que o transcode começou — nesse caso a sessão não é criada.
       requestBody:
         $ref: '#/components/requestBodies/StartPlaybackSessionRequestBody'
       responses:
@@ -719,7 +721,7 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
         '500':
-          $ref: '#/components/responses/InternalServerError'
+          $ref: '#/components/responses/TranscodeFailed'
 
   /v1/playback/sessions/{sessionId}/seek:
     parameters:
@@ -731,7 +733,8 @@ paths:
       description: |
         Reposiciona o transcode de uma sessão já iniciada para o instante informado. A playlist
         `m3u8` passa a refletir a nova posição. Responde `404` se a sessão não existe ou já
-        expirou.
+        expirou. Responde `500` com `TRANSCODE_FAILED` se o reinício do `ffmpeg` falhar logo
+        depois de subir.
       requestBody:
         $ref: '#/components/requestBodies/SeekRequestBody'
       responses:
@@ -744,7 +747,7 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
         '500':
-          $ref: '#/components/responses/InternalServerError'
+          $ref: '#/components/responses/TranscodeFailed'
 
   /v1/playback/sessions/{sessionId}/tracks:
     parameters:
@@ -758,7 +761,8 @@ paths:
         reiniciando o transcode a partir do instante informado. Ao contrário do `seek`, esta
         operação sempre reinicia o processo de transcode — não há posição que evite o
         reinício, já que trocar `-map`/filtro de legenda exige um novo processo `ffmpeg`.
-        Responde `404` se a sessão não existe ou já expirou.
+        Responde `404` se a sessão não existe ou já expirou. Responde `500` com
+        `TRANSCODE_FAILED` se o reinício do `ffmpeg` falhar logo depois de subir.
       requestBody:
         $ref: '#/components/requestBodies/SwitchTracksRequestBody'
       responses:
@@ -771,7 +775,7 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
         '500':
-          $ref: '#/components/responses/InternalServerError'
+          $ref: '#/components/responses/TranscodeFailed'
 
   /v1/playback/sessions/{sessionId}/playlist.m3u8:
     parameters:
@@ -785,7 +789,9 @@ paths:
         transcode produz um master playlist (ABR com várias resoluções, ou legenda soft), é ele que
         é devolvido — e ele referencia os variant playlists `stream_N.m3u8`. Caso contrário,
         devolve a media playlist da rendition única. Responde `404` se a sessão não existe,
-        expirou ou ainda não produziu playlist.
+        expirou ou ainda não produziu playlist — nesse caso o cliente deve continuar tentando.
+        Responde `500` com `TRANSCODE_FAILED` se o `ffmpeg` já morreu e essa playlist nunca vai
+        ser gerada — nesse caso o cliente deve parar de tentar e mostrar erro.
 
         O header `X-Playback-Heartbeat-Ttl-Seconds` informa, em segundos, o TTL do heartbeat que o
         cliente deve respeitar — é o mesmo prazo devolvido no corpo do endpoint de heartbeat. O
@@ -802,7 +808,7 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
         '500':
-          $ref: '#/components/responses/InternalServerError'
+          $ref: '#/components/responses/TranscodeFailed'
 
   /v1/playback/sessions/{sessionId}/{file}:
     parameters:
@@ -1814,6 +1820,14 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ApiError'
+    TranscodeFailed:
+      description: >-
+        O transcode da sessão de playback falhou e não vai gerar a playlist
+        (`TRANSCODE_FAILED`), ou erro inesperado no servidor (`INTERNAL_ERROR`)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
 
     # ---------- storageprovider ----------
     StorageProviderPageOk:
@@ -2232,6 +2246,9 @@ components:
         - `INTEGRATION_NOT_CONFIGURED` (503): uma preferência obrigatória está sem valor —
           o admin precisa configurá-la em
           `PUT /v1/settings/{key}`.
+        - `TRANSCODE_FAILED` (500): o transcode de uma sessão de playback morreu antes de gerar
+          a playlist (ou depois de já ter gerado) e não vai se recuperar — o cliente deve parar
+          de tentar e mostrar erro, diferente do `RESOURCE_NOT_FOUND` de "ainda não gerada".
         - `INTERNAL_ERROR` (500): erro inesperado no servidor.
       enum:
         - VALIDATION_ERROR
@@ -2240,6 +2257,7 @@ components:
         - REQUEST_ERROR
         - INTEGRATION_ERROR
         - INTEGRATION_NOT_CONFIGURED
+        - TRANSCODE_FAILED
         - INTERNAL_ERROR
 
     ApiError:
@@ -2681,6 +2699,13 @@ components:
           type: string
           nullable: true
           description: 'Proporção de exibição (ex.: `16:9`)'
+        sampleAspectRatio:
+          type: string
+          nullable: true
+          description: >-
+            Proporção de aspecto da amostra/pixel (ex.: `1:1` pixel quadrado, `4:3` anamórfico).
+            Diferente de `1:1` indica vídeo anamórfico — `width`x`height` não reflete a proporção
+            de exibição, só `displayAspectRatio` reflete
         frameRate:
           type: number
           format: double
@@ -2759,8 +2784,11 @@ components:
           type: string
           nullable: true
           description: |
-            Codec no nome do ffprobe (ex.: `subrip`, `ass`). No playback, `subrip`/`srt` vira
-            legenda soft (WebVTT) e os demais são queimados no vídeo.
+            Codec no nome do ffprobe (ex.: `subrip`, `ass`, `hdmv_pgs_subtitle`). No playback,
+            `subrip`/`srt` vira legenda soft (WebVTT); os demais formatos de texto (ex.: `ass`)
+            são queimados no vídeo via libass; formatos de imagem (`hdmv_pgs_subtitle`,
+            `dvd_subtitle`, `dvb_subtitle`) são queimados via overlay do próprio stream de
+            legenda decodificado.
         language:
           $ref: '#/components/schemas/TrackLanguage'
         title:
@@ -2777,6 +2805,27 @@ components:
           nullable: true
           description: >-
             `true` se a faixa é para deficientes auditivos (SDH/CC — descreve sons além das falas)
+
+    Chapter:
+      type: object
+      description: |
+        Capítulo do arquivo, na ordem em que o ffprobe os lista — exatamente como estão
+        gravados, sem fundir, reordenar ou corrigir sobreposições (arquivos diferentes podem
+        ter capítulos que se sobrepõem).
+      required: [startSeconds, endSeconds]
+      properties:
+        startSeconds:
+          type: number
+          format: double
+          description: Instante de início do capítulo, em segundos
+        endSeconds:
+          type: number
+          format: double
+          description: Instante de fim do capítulo, em segundos
+        title:
+          type: string
+          nullable: true
+          description: 'Tag `title` do capítulo (ex.: `Abertura`, `Parte A`); `null` se ausente'
 
     StreamIndex:
       type: integer
@@ -2804,7 +2853,7 @@ components:
     MediaInfoResponse:
       type: object
       description: Metadados técnicos da mídia, com as faixas separadas por tipo na ordem do arquivo
-      required: [container, video, audio, subtitles]
+      required: [container, video, audio, subtitles, chapters]
       properties:
         container:
           $ref: '#/components/schemas/MediaContainer'
@@ -2820,6 +2869,11 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/SubtitleTrack'
+        chapters:
+          type: array
+          description: Capítulos do arquivo, na ordem do arquivo; lista vazia se não houver
+          items:
+            $ref: '#/components/schemas/Chapter'
 
     # ---------- playback ----------
     SessionId:
