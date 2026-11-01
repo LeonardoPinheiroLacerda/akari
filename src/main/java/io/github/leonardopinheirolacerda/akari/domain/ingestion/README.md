@@ -15,7 +15,6 @@ Orquestrar chamadas a `storageprovider` (listar árvore remota) e a `mediafolder
 - `DELETE /v1/ingestion/providers/{providerId}/available-folders` — remove do catalog tudo que foi ingerido sob um subtree, idempotente (`IngestionResource.removeIngestedSubtree` → `IngestionService.removeIngestedSubtree`).
 - Dedup de execuções concorrentes por `(providerId, rootPath)` (`IngestionRunRegistry`).
 - Extração best-effort do número de episódio a partir do nome do arquivo, usada no pairing automático (`EpisodeNumberExtractor`).
-- Cálculo de deslocamentos candidatos de numeração absoluta via cadeia de prequels da AniList (`AbsoluteEpisodeOffsetService`).
 - Auto-bind de pasta nova: busca/vincula AniList → resolve/vincula TMDB via anibridge → pareia episódios (`FolderAutoBindService`).
 - Remoção de pastas + anime vinculado, reutilizada pelo `DELETE` explícito e pelo Step 2 da reconciliação (`FolderRemovalService`).
 
@@ -30,13 +29,13 @@ Orquestrar chamadas a `storageprovider` (listar árvore remota) e a `mediafolder
 - `domain/tmdb` (`TmdbService`, `TmdbEpisodeResponse`) — bind TMDB e metadata de episódio (thumbnail, nome, overview etc.).
 - `domain/notification` (`NotificationService`) — reporta conclusão/erro da reconciliação e falhas pontuais de auto-bind (`INFO`/`WARNING`/`ERROR`).
 - `domain/setting` (`SettingService`) — precheck de `tmdb.api-key` configurado.
-- `extractor/EpisodeNumberExtractor` — sem subpacote `model`/`mapper` compartilhado com os demais; é o único ponto por onde `videofile` (`VideoFileService.naturalSortKeyOf`) também consome esse domínio, reaproveitando a mesma extração do pairing automático pra não duplicá-la.
+- `extractor/EpisodeNumberExtractor` — sem subpacote `model`/`mapper` compartilhado com os demais; é o único ponto por onde `videofile` (`VideoFileService.naturalSortKeyOf`) e `anime` (`EpisodePairingResolutionService`) também consomem esse domínio, reaproveitando a mesma extração pra não duplicá-la.
 - `exceptions/` (`BusinessRuleException`, `IntegrationException`, `ResourceNotFoundException`).
 - `utils/` (`DirectoryUtils`, `FileNameUtils`, `ThreadUtils`, `RetryUtils`).
 
 ## Módulos relacionados
 
-`domain/videofile` (`VideoFileService`) importa `extractor/EpisodeNumberExtractor` pra calcular `naturalSortKey` — única classe fora de `domain/ingestion` que importa algo daqui. Fora essa exceção, o módulo continua um orquestrador de ponta — consome vários domínios, não é consumido por nenhum outro.
+`domain/videofile` (`VideoFileService`, pra calcular `naturalSortKey`) e `domain/anime` (`EpisodePairingResolutionService`, na resolução do pairing) importam `extractor/EpisodeNumberExtractor` — as únicas classes fora de `domain/ingestion` que importam algo daqui. Fora essa exceção, o módulo continua um orquestrador de ponta — consome vários domínios, não é consumido por nenhum outro.
 
 ## Pontos de entrada
 
@@ -55,7 +54,7 @@ Orquestrar chamadas a `storageprovider` (listar árvore remota) e a `mediafolder
 
 Ao final (ou em caso de falha irrecuperável no listTree), a chave é liberada em `IngestionRunRegistry.finish` (bloco `finally`), e uma notificação `INFO` resume quantas pastas foram criadas e quantas passaram por auto-bind.
 
-**Auto-bind** (`FolderAutoBindService.autoBindFolder`, nunca lança): bind AniList (busca por nome, pula candidato já vinculado a outra pasta) → bind TMDB via `AnibridgeResolutionService.resolveBestCandidate` → se TV, pareamento episódio a episódio usando `EpisodeNumberExtractor` + segments do anibridge, com fallback de offset absoluto (`AbsoluteEpisodeOffsetService`) e fallback de pasta de episódio único. Cada episódio resolvido pelo anibridge precisa existir no TMDB (temporada buscada via `TmdbService.getSeason`, cacheada por pasta) — é de lá que sai a metadata do pairing (thumbnail, nome, sinopse). Se não existir (temporada inexistente, episódio fora da temporada ou falha na busca), o arquivo não é pareado e uma notificação `WARNING` diz quantos arquivos ficaram de fora e em quais temporadas: o anibridge pode estar dessincronizado do TMDB (ex.: apontar pra uma temporada que o TMDB não tem), e gravar o pairing sem metadata faria o arquivo aparecer como pareado sem thumbnail. Atualiza `reviewStatus` do anime para `PENDING_REVIEW` (completo) ou `PARTIAL` (incompleto), nunca sobrescrevendo um `REVIEWED` manual.
+**Auto-bind** (`FolderAutoBindService.autoBindFolder`, nunca lança): bind AniList (busca por nome, pula candidato já vinculado a outra pasta) → bind TMDB via `AnibridgeResolutionService.resolveBestCandidate` → se TV, pareamento episódio a episódio: a resolução fica em `anime` (`EpisodePairingResolutionService`, compartilhada com a proposta de pairing do portal — ver README de `anime`: número do episódio pelo `EpisodeNumberExtractor`, segments do anibridge só da série vinculada, fallbacks de offset absoluto e de pasta de episódio único, confirmação no TMDB), e o `FolderAutoBindService` grava os arquivos `PAIRED` e notifica o resto. Mapeamento conflitante notifica e não pareia nada; sem mapeamento pra série vinculada, não pareia nada e só marca `PARTIAL`. Arquivo cujo episódio não existe no TMDB (temporada inexistente, episódio fora da temporada ou falha na busca) não é pareado, e uma notificação `WARNING` diz quantos arquivos ficaram de fora e em quais temporadas: o anibridge pode estar dessincronizado do TMDB (ex.: apontar pra uma temporada que o TMDB não tem), e gravar o pairing sem metadata faria o arquivo aparecer como pareado sem thumbnail. Atualiza `reviewStatus` do anime para `PENDING_REVIEW` (completo) ou `PARTIAL` (incompleto), nunca sobrescrevendo um `REVIEWED` manual.
 
 As notificações `WARNING` disparadas depois que o anime já está vinculado à AniList (falha no bind TMDB, conflito/numeração absoluta/episódio inexistente no TMDB/pareamento parcial) levam a capa do anime (`FolderAutoBindService.coverImageOf` → `AnimeOverrideService.resolveThumbnailMedium`). As 3 notificações do próprio `bindAnilist` (busca/bind na AniList falhou ou sem resultado) e a do `listTree`/resumo em `IngestionService` não têm capa — ainda não existe (ou nunca existirá, no caso do resumo que cobre várias pastas) um anime único pra ilustrar.
 
@@ -65,7 +64,7 @@ As notificações `WARNING` disparadas depois que o anime já está vinculado à
 
 - `service/IngestionService.java` — ponto único de disparo e orquestração do fluxo completo; concentra as validações síncronas e o `runReconciliation`.
 - `service/ReconciliationService.java` — Steps 2-3; cada método é sua própria transação (chamado de uma thread virtual sem transação JTA ambiente).
-- `service/FolderAutoBindService.java` — maior e mais complexo arquivo do domínio; pairing de episódio tem múltiplos fallbacks (offset absoluto, pasta de episódio único).
+- `service/FolderAutoBindService.java` — orquestra o auto-bind e traduz a resolução do pairing (`anime.EpisodePairingResolutionService`) em gravação, notificações e `reviewStatus`.
 - `extractor/EpisodeNumberExtractor.java` — heurística de regex ajustada empiricamente contra ~10 mil arquivos reais; qualquer alteração de pattern tem risco real de regressão silenciosa no pairing.
 - `registry/IngestionRunRegistry.java` — único guardião contra reconciliação concorrente duplicada sobre o mesmo subtree.
 
@@ -74,6 +73,5 @@ As notificações `WARNING` disparadas depois que o anime já está vinculado à
 - Confirmado lendo o código: `ingestion` não tem nenhuma entidade Panache própria (sem `@Entity` em todo o domínio) — a descrição da tag no `openapi.yaml` ("não persiste estado próprio") é fiel ao código. O único estado mantido é o `Set` em memória do `IngestionRunRegistry`, explicitamente documentado como não precisando sobreviver a restart.
 - `model/FolderReconciliationResult` é um record interno de transporte entre `ReconciliationService` e `IngestionService` (carrega `folderName` para evitar reabrir a `MediaFolder` fora de transação na thread virtual) — não é um "model" de persistência, diferente do que o nome do subpacote sugeriria em outros domínios.
 - `IngestionResource` não injeta nada além de `IngestionService` e não tem `@ApplicationScoped` explícito na classe (diferente de `CacheResource`); **confirmado:** sem anotação de escopo, o CDI trata a classe como `@Dependent` (pseudo-escopo padrão) — uma instância nova por injeção/requisição, não compartilhada — então o JAX-RS resource continua funcionando normalmente, só sem o pooling de `@ApplicationScoped`. É inconsistência de anotação frente ao padrão "resource burra" dos demais domínios. **Backlog real** (confirmado pelo mantenedor).
-- `AbsoluteEpisodeOffsetService` mora deliberadamente em `ingestion`, não em `anime`, por ser regra de consumo específica do pairing TMDB (documentado no Javadoc da classe) — não é um desvio, é uma decisão de escopo registrada.
 - `runReconciliation` roda em thread virtual sem transação ambiente; cada chamada a `ReconciliationService`/`FolderRemovalService` abre sua própria transação — qualquer novo método adicionado a esses services precisa manter esse padrão (um `@Transactional` por chamada), senão quebra a premissa de que o pai sempre existe no catalog antes do filho ser processado.
 - O throttle de 1500ms entre pastas no Step 4 é fixo no código (`AUTO_BIND_THROTTLE_MILLIS`), não configurável via `SettingService`. **Backlog real** (confirmado pelo mantenedor): vale externalizar se o rate limit de AniList/TMDB mudar.

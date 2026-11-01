@@ -144,7 +144,8 @@ mediaprobe      → storageprovider, setting, videofile
 anilist         → cache (IntegrationCache)
 tmdb            → cache (IntegrationCache), setting
 anibridge       → tmdb
-anime           → anilist, tmdb, anibridge, mediafolder, videofile, setting
+anime           → anilist, tmdb, anibridge, mediafolder, videofile, setting, ingestion
+                  (extractor.EpisodeNumberExtractor)
 playback        → videofile, mediaprobe, storageprovider, setting, cache (direto via
                   CacheService.findCacheItemByFileId, e indireto via utils pro path do arquivo)
 ingestion       → storageprovider, mediafolder, videofile, anime, anibridge, tmdb, notification
@@ -154,13 +155,14 @@ Nenhum domínio depende de `playback`, `mediaprobe`, `cache` ou `notification` �
 grafo, consumidos só pela camada HTTP (ou, no caso de `notification`, só escritos por `ingestion`
 e nunca lidos de volta por outro domínio).
 
-**Ciclo deliberado `videofile` ↔ `ingestion`:** `ingestion` depende de `videofile` (cria/lista
-arquivos na reconciliação) e `videofile` passa a depender de `ingestion` só por
-`extractor.EpisodeNumberExtractor` — reaproveita a mesma heurística de extração de episódio do
-pairing automático pra calcular a chave de ordenação natural (`VideoFileService.
-naturalSortKeyOf`), em vez de duplicá-la. É o único ciclo do grafo; Java não impede (não há
-dependência circular de build, maven é um módulo só), mas é uma exceção notável à topologia
-acíclica do restante do grafo.
+**Ciclos deliberados `videofile` ↔ `ingestion` e `anime` ↔ `ingestion`:** `ingestion` depende
+de `videofile` (cria/lista arquivos na reconciliação) e de `anime` (auto-bind), e os dois
+dependem de `ingestion` só por `extractor.EpisodeNumberExtractor` — uma classe utilitária
+estática, sem service: `videofile` reaproveita a heurística de extração de episódio pra calcular
+a chave de ordenação natural (`VideoFileService.naturalSortKeyOf`), e `anime` pra resolver o
+pairing de episódios (`EpisodePairingResolutionService`), em vez de duplicá-la. São os únicos
+ciclos do grafo, ambos só por esse extractor; Java não impede (não há dependência circular de
+build, maven é um módulo só), mas é uma exceção notável à topologia acíclica do restante.
 
 **Acoplamento atípico identificado:** o service de busca do TMDB (`tmdb.service.
 TmdbService`) expõe só 2 operações via `resource/` (`/v1/tmdb/search/movies` e
@@ -286,9 +288,9 @@ itens abaixo são backlog real (a corrigir aos poucos), exceto onde indicado "Ac
 - Ao alterar `EpisodeNumberExtractor` (regex calibrada empiricamente) ou
   `AnibridgeResolutionService` (critério de candidato "suspeito"), tratar como código de alto risco
   de regressão silenciosa — testar manualmente contra casos reais antes de assumir correção.
-  `EpisodeNumberExtractor` tem dois consumidores agora (`ingestion` no pairing automático,
-  `videofile` na ordenação natural da listagem de episódios): qualquer mudança de comportamento
-  afeta os dois ao mesmo tempo.
+  `EpisodeNumberExtractor` tem dois consumidores (`anime` na resolução do pairing — automático
+  da ingestão e proposta do portal —, `videofile` na ordenação natural da listagem de
+  episódios): qualquer mudança de comportamento afeta os dois ao mesmo tempo.
 - Manter o contrato (`openapi.yaml`) como fonte da verdade das descrições de tag — ao mudar um
   comportamento, atualizar a descrição da tag junto, pra este documento e o contrato não divergirem
   da implementação real.

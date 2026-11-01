@@ -6,37 +6,28 @@ import io.github.leonardopinheirolacerda.akari.api.dto.AnimeBindingRequest;
 import io.github.leonardopinheirolacerda.akari.api.dto.AnimeReviewStatus;
 import io.github.leonardopinheirolacerda.akari.api.dto.NotificationLevel;
 import io.github.leonardopinheirolacerda.akari.api.dto.TmdbBindingRequest;
-import io.github.leonardopinheirolacerda.akari.api.dto.TmdbFilePairingRequest;
+import io.github.leonardopinheirolacerda.akari.api.dto.TmdbFilePairingProposalStatus;
 import io.github.leonardopinheirolacerda.akari.api.dto.TmdbMediaType;
-import io.github.leonardopinheirolacerda.akari.domain.anibridge.model.MappingSegment;
-import io.github.leonardopinheirolacerda.akari.domain.anibridge.model.ResolvedEpisode;
 import io.github.leonardopinheirolacerda.akari.domain.anibridge.model.TmdbMappingCandidate;
 import io.github.leonardopinheirolacerda.akari.domain.anibridge.service.AnibridgeResolutionService;
 import io.github.leonardopinheirolacerda.akari.domain.anilist.service.AnilistSearchService;
 import io.github.leonardopinheirolacerda.akari.domain.anime.model.Anime;
+import io.github.leonardopinheirolacerda.akari.domain.anime.model.FilePairingResolution;
 import io.github.leonardopinheirolacerda.akari.domain.anime.service.AnimeOverrideService;
 import io.github.leonardopinheirolacerda.akari.domain.anime.service.AnimeService;
 import io.github.leonardopinheirolacerda.akari.domain.anime.service.AnimeTmdbFilePairingService;
 import io.github.leonardopinheirolacerda.akari.domain.anime.service.AnimeTmdbService;
-import io.github.leonardopinheirolacerda.akari.domain.ingestion.extractor.EpisodeNumberExtractor;
+import io.github.leonardopinheirolacerda.akari.domain.anime.service.EpisodePairingResolutionService;
 import io.github.leonardopinheirolacerda.akari.domain.notification.service.NotificationService;
-import io.github.leonardopinheirolacerda.akari.domain.tmdb.client.dtos.TmdbEpisodeResponse;
-import io.github.leonardopinheirolacerda.akari.domain.tmdb.service.TmdbService;
-import io.github.leonardopinheirolacerda.akari.domain.videofile.model.VideoFile;
-import io.github.leonardopinheirolacerda.akari.domain.videofile.service.VideoFileService;
 import io.github.leonardopinheirolacerda.akari.exceptions.IntegrationException;
 import io.github.leonardopinheirolacerda.akari.exceptions.ResourceNotFoundException;
 import io.github.leonardopinheirolacerda.akari.utils.RetryUtils;
 import io.quarkus.logging.Log;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
-import java.util.OptionalInt;
-import java.util.Set;
-import java.util.TreeSet;
 import java.util.stream.Collectors;
 
 /**
@@ -77,16 +68,10 @@ public class FolderAutoBindService {
     AnilistSearchService anilistSearchService;
 
     @Inject
-    VideoFileService videoFileService;
-
-    @Inject
     AnibridgeResolutionService anibridgeResolutionService;
 
     @Inject
-    AbsoluteEpisodeOffsetService absoluteEpisodeOffsetService;
-
-    @Inject
-    TmdbService tmdbService;
+    EpisodePairingResolutionService episodePairingResolutionService;
 
     @Inject
     NotificationService notificationService;
@@ -246,21 +231,18 @@ public class FolderAutoBindService {
     }
 
     private void pairEpisodes(Integer folderId, String folderName, Anime anime) {
-
-        final Optional<TmdbMappingCandidate> candidate = anibridgeResolutionService.resolveBestCandidate(
-                anime.anilistId,
-                anime.malId,
-                anime.episodes
+        final List<FilePairingResolution> resolutions = episodePairingResolutionService.resolve(
+                anime,
+                folderId,
+                folderName
         );
 
-        if (candidate.isEmpty()) {
+        if (hasStatus(resolutions, TmdbFilePairingProposalStatus.NO_MAPPING)) {
             animeService.updateReviewStatusIfNotReviewed(anime.anilistId, AnimeReviewStatus.PARTIAL);
             return;
         }
 
-        final Optional<List<MappingSegment>> safeSegments = anibridgeResolutionService.resolveSafeSegments(candidate.get());
-
-        if (safeSegments.isEmpty()) {
+        if (hasStatus(resolutions, TmdbFilePairingProposalStatus.CONFLICTING_MAPPING)) {
             notificationService.notify(
                     NotificationLevel.WARNING,
                     folderName,
@@ -272,106 +254,19 @@ public class FolderAutoBindService {
             return;
         }
 
-        final List<VideoFile> videoFiles = videoFileService.listByFolder(folderId);
-        final Map<Integer, List<TmdbEpisodeResponse>> episodesBySeason = new HashMap<>();
-
-        // Pasta de 1 arquivo + anime de 1 episódio: aquele arquivo só pode ser o episódio 1 —
-        // usado como último recurso, depois de qualquer outra tentativa falhar. Cobre tanto o
-        // arquivo sem número reconhecível quanto o caso comum de OVA/special numerado pela
-        // contagem absoluta da série principal (ex.: "Clannad After Story - 25 OVA"), que não
-        // bate com o range local (1-1) do segment do anibridge pra esse special.
-        final boolean singleEpisodeFolder = videoFiles.size() == 1
-                && anime.episodes != null
-                && anime.episodes == 1;
-
-        final List<Integer> absoluteOffsetCandidates = absoluteEpisodeOffsetService.computeOffsetCandidates(anime.anilistId);
-
-        final Optional<List<MappingSegment>> offsetSegments = absoluteOffsetCandidates.isEmpty()
-                ? Optional.empty()
-                : anibridgeResolutionService.restrictToFullSeasonCoverage(safeSegments.get(), anime.episodes);
-
         int paired = 0;
-        int missingInTmdb = 0;
-        boolean ambiguousAbsoluteNumbering = false;
-        final Set<Integer> missingTmdbSeasons = new TreeSet<>();
 
-        for (VideoFile videoFile : videoFiles) {
-            final OptionalInt episodeNumber = EpisodeNumberExtractor.extract(videoFile.name);
-
-            Optional<ResolvedEpisode> resolved = Optional.empty();
-            boolean offsetNeededButIneligible = false;
-
-            if (episodeNumber.isPresent()) {
-                resolved = anibridgeResolutionService.resolveEpisode(
-                        safeSegments.get(),
-                        episodeNumber.getAsInt()
-                );
-
-                if (resolved.isEmpty() && !absoluteOffsetCandidates.isEmpty()) {
-                    if (offsetSegments.isPresent()) {
-                        for (Integer offsetCandidate : absoluteOffsetCandidates) {
-                            resolved = anibridgeResolutionService.resolveEpisode(
-                                    offsetSegments.get(),
-                                    episodeNumber.getAsInt() - offsetCandidate
-                            );
-
-                            if (resolved.isPresent()) {
-                                break;
-                            }
-                        }
-                    } else {
-                        offsetNeededButIneligible = true;
-                    }
-                }
-            }
-
-            if (resolved.isEmpty() && singleEpisodeFolder) {
-                resolved = anibridgeResolutionService.resolveEpisode(safeSegments.get(), 1);
-            }
-
-            if (resolved.isEmpty()) {
-                if (offsetNeededButIneligible) {
-                    ambiguousAbsoluteNumbering = true;
-                }
+        for (FilePairingResolution resolution : resolutions) {
+            if (resolution.status() != TmdbFilePairingProposalStatus.PAIRED) {
                 continue;
             }
 
-            final Optional<TmdbEpisodeResponse> episode = resolveEpisode(
-                    anime.tmdbId,
-                    resolved.get(),
-                    episodesBySeason,
-                    folderId,
-                    folderName
-            );
-
-            if (episode.isEmpty()) {
-                missingInTmdb++;
-
-                if (resolved.get().seasonNumber() != null) {
-                    missingTmdbSeasons.add(resolved.get().seasonNumber());
-                }
-
-                continue;
-            }
-
-            final TmdbFilePairingRequest tmdbFilePairingRequest = new TmdbFilePairingRequest()
-                    .seasonNumber(resolved.get().seasonNumber())
-                    .episodeNumber(resolved.get().tmdbEpisode())
-                    .thumbnailPath(episode.get().stillPath())
-                    .episodeName(episode.get().name())
-                    .episodeOverview(episode.get().overview())
-                    .episodeAirDate(episode.get().airDate())
-                    .episodeRuntime(episode.get().runtime())
-                    .episodeVoteAverage(episode.get().voteAverage())
-                    .episodeVoteCount(episode.get().voteCount())
-                    .episodeType(episode.get().episodeType());
-
-            animeTmdbFilePairingService.updateTmdbFilePairing(videoFile.id, tmdbFilePairingRequest);
+            animeTmdbFilePairingService.updateTmdbFilePairing(resolution.videoFile().id, resolution.pairing());
 
             paired++;
         }
 
-        if (ambiguousAbsoluteNumbering) {
+        if (hasStatus(resolutions, TmdbFilePairingProposalStatus.AMBIGUOUS_ABSOLUTE_NUMBERING)) {
             notificationService.notify(
                     NotificationLevel.WARNING,
                     folderName,
@@ -382,8 +277,16 @@ public class FolderAutoBindService {
                     coverImageOf(anime));
         }
 
-        if (missingInTmdb > 0) {
-            final String seasons = missingTmdbSeasons.stream()
+        final List<FilePairingResolution> missingInTmdb = resolutions.stream()
+                .filter(resolution -> resolution.status() == TmdbFilePairingProposalStatus.NOT_FOUND_IN_TMDB)
+                .toList();
+
+        if (!missingInTmdb.isEmpty()) {
+            final String seasons = missingInTmdb.stream()
+                    .map(resolution -> resolution.resolvedEpisode().seasonNumber())
+                    .filter(Objects::nonNull)
+                    .distinct()
+                    .sorted()
                     .map(String::valueOf)
                     .collect(Collectors.joining(", "));
 
@@ -391,63 +294,30 @@ public class FolderAutoBindService {
                     NotificationLevel.WARNING,
                     folderName,
                     "%d arquivos não foram pareados: o mapeamento do anibridge aponta pra episódios que não existem no TMDB %d (temporada %s)"
-                            .formatted(missingInTmdb, anime.tmdbId, seasons),
+                            .formatted(missingInTmdb.size(), anime.tmdbId, seasons),
                     folderId,
                     coverImageOf(anime));
         }
 
-        if (paired < videoFiles.size()) {
+        if (paired < resolutions.size()) {
             notificationService.notify(
                     NotificationLevel.WARNING,
                     folderName,
-                    "%d de %d arquivos pareados".formatted(paired, videoFiles.size()),
+                    "%d de %d arquivos pareados".formatted(paired, resolutions.size()),
                     folderId,
                     coverImageOf(anime));
         }
 
-        final AnimeReviewStatus reviewStatus = paired == videoFiles.size()
+        final AnimeReviewStatus reviewStatus = paired == resolutions.size()
                 ? AnimeReviewStatus.PENDING_REVIEW
                 : AnimeReviewStatus.PARTIAL;
 
         animeService.updateReviewStatusIfNotReviewed(anime.anilistId, reviewStatus);
     }
 
-    /**
-     * Busca no TMDB o episódio resolvido pelo anibridge, de onde sai a metadata do pairing
-     * (thumbnail, nome, sinopse etc.). Cacheia a temporada inteira por pasta — evita uma chamada
-     * por arquivo quando vários episódios caem na mesma temporada. Vazio se a temporada não
-     * existir no TMDB (o anibridge pode estar dessincronizado dele), se a busca falhar ou se o
-     * episódio não estiver na temporada — nesses casos quem chama não pareia o arquivo, pra ele
-     * aparecer como pendente em vez de pareado sem metadata.
-     */
-    private Optional<TmdbEpisodeResponse> resolveEpisode(Integer tmdbId,
-                                                         ResolvedEpisode resolved,
-                                                         Map<Integer, List<TmdbEpisodeResponse>> episodesBySeason,
-                                                         Integer folderId,
-                                                         String folderName) {
-
-        if (resolved.seasonNumber() == null) {
-            return Optional.empty();
-        }
-
-        final List<TmdbEpisodeResponse> episodes = episodesBySeason.computeIfAbsent(resolved.seasonNumber(), seasonNumber -> {
-            try {
-                return RetryUtils.withRateLimitRetry(
-                        () -> tmdbService.getSeason(
-                                tmdbId,
-                                seasonNumber,
-                                false
-                        ).episodes());
-
-            } catch (IntegrationException | ResourceNotFoundException e) {
-                Log.warnf(e, "Busca da temporada %d no TMDB falhou pra pasta %d (%s)", seasonNumber, folderId, folderName);
-                return List.of();
-            }
-        });
-
-        return episodes.stream()
-                .filter(episode -> episode.episodeNumber().equals(resolved.tmdbEpisode()))
-                .findFirst();
+    private boolean hasStatus(List<FilePairingResolution> resolutions, TmdbFilePairingProposalStatus status) {
+        return resolutions.stream()
+                .anyMatch(resolution -> resolution.status() == status);
     }
 
     /**

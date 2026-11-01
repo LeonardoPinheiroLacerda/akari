@@ -155,13 +155,19 @@ tags:
     description: Pairing TMDB por arquivo de vídeo (temporada, episódio, thumbnail)
   - name: AnimeTmdbProposal
     description: |
-      Proposta de binding TMDB pra um anime da AniList, a partir do dataset do anibridge.
+      Propostas de binding TMDB e de pairing de episódios, a partir do dataset do anibridge.
 
-      Ajuda o portal a vincular um anime ao TMDB: dado o `anilistId` selecionado, propõe a
-      série/filme do TMDB pelo mesmo critério que a ingestão usa no bind automático, junto da
-      ficha do título no TMDB pra conferência. Só consulta — nada é gravado; pra efetivar, o
-      portal chama `POST /v1/metadata/animes/{anilistId}/tmdb/binding` com o `tmdbId` e o
-      `mediaType` propostos.
+      Ajudam o portal a ligar um anime ao TMDB pelo mesmo critério que a ingestão usa
+      automaticamente. Só consultam — nada é gravado:
+
+      - `POST /v1/metadata/tmdb/binding-proposals` — dado o `anilistId` selecionado, propõe a
+        série/filme do TMDB, junto da ficha do título pra conferência. Pra efetivar, o portal
+        chama `POST /v1/metadata/animes/{anilistId}/tmdb/binding` com o `tmdbId` e o
+        `mediaType` propostos.
+      - `POST /v1/metadata/tmdb/file-pairing-proposals` — dado o `anilistId` de um anime já
+        vinculado à pasta e a uma série do TMDB, propõe a temporada/episódio de cada arquivo da
+        pasta exatamente como o pairing automático faria. Pra efetivar, o portal manda o
+        `pairing` de cada arquivo em `PUT /v1/metadata/files/{fileId}/tmdb-pairing`.
   - name: Setting
     description: |
       Preferências do admin.
@@ -1284,6 +1290,41 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /v1/metadata/tmdb/file-pairing-proposals:
+    post:
+      tags: [AnimeTmdbProposal]
+      operationId: proposeTmdbFilePairing
+      summary: Propõe o pairing TMDB dos arquivos de um anime a partir do anibridge
+      description: |
+        Propõe a temporada/episódio do TMDB pra cada arquivo de vídeo da pasta do anime, sem
+        gravar nada. O anime precisa estar vinculado à pasta e a uma série do TMDB.
+
+        É a mesma resolução do pairing automático da ingestão: o número do episódio sai do nome
+        do arquivo, e o anibridge (snapshot local) converte pra temporada/episódio do TMDB — com
+        fallback de numeração absoluta (offset calculado pela cadeia de prequels) e de pasta com
+        um único episódio. Só valem os mapeamentos do anibridge que apontam pra série vinculada:
+        se o binding foi feito pra outra série, nada é proposto (`NO_MAPPING`). Cada episódio
+        resolvido é confirmado no TMDB, de onde sai a metadata do `pairing`.
+
+        A resposta traz todos os arquivos da pasta (sem ordem garantida), com o `status` de cada
+        um — pareado ou o motivo de não ter proposta.
+
+        Responde `404` se o anime não existir ou não tiver binding TMDB, e `400` se o binding for
+        de filme (filme não tem pairing de episódio).
+      requestBody:
+        $ref: '#/components/requestBodies/TmdbFilePairingProposalRequestBody'
+      responses:
+        '200':
+          $ref: '#/components/responses/TmdbFilePairingProposalOk'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /v1/metadata/animes/{anilistId}/tmdb/overrides:
     parameters:
       - $ref: '#/components/parameters/AnilistIdPathParam'
@@ -1823,6 +1864,13 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/TmdbBindingRequest'
+    TmdbFilePairingProposalRequestBody:
+      description: Anime cujos arquivos devem receber a proposta de pairing
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/TmdbFilePairingProposalRequest'
     TmdbBindingProposalRequestBody:
       description: Anime da AniList pra propor o binding TMDB
       required: true
@@ -2129,6 +2177,12 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/AnimeFranchiseResponse'
+    TmdbFilePairingProposalOk:
+      description: Proposta de pairing por arquivo
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/TmdbFilePairingProposalResponse'
     TmdbBindingProposalOk:
       description: Proposta de binding TMDB
       content:
@@ -4312,6 +4366,90 @@ components:
           type: string
           nullable: true
           description: 'Classificação do TMDB (ex.: `standard`, `finale`)'
+
+    TmdbFilePairingProposalRequest:
+      type: object
+      description: Anime cujos arquivos devem receber a proposta de pairing
+      required: [anilistId]
+      properties:
+        anilistId:
+          $ref: '#/components/schemas/AnilistId'
+
+    TmdbFilePairingProposalStatus:
+      type: string
+      description: |
+        Resultado da proposta pra um arquivo.
+
+        - `PAIRED` — episódio resolvido e confirmado no TMDB; `pairing` traz o payload pronto.
+        - `NO_EPISODE_NUMBER` — não deu pra extrair um número de episódio do nome do arquivo.
+        - `NOT_MAPPED` — o número extraído não cai em nenhum mapeamento do anibridge pra série
+          vinculada.
+        - `AMBIGUOUS_ABSOLUTE_NUMBERING` — o arquivo usa numeração absoluta, mas o mapeamento do
+          anibridge não cobre a temporada isolada com segurança pra aplicar o offset.
+        - `NOT_FOUND_IN_TMDB` — o anibridge resolveu `seasonNumber`/`episodeNumber`, mas o
+          episódio não existe no TMDB (temporada inexistente, episódio fora da temporada, ou a
+          busca no TMDB falhou) — o anibridge pode estar dessincronizado do TMDB.
+        - `NO_MAPPING` — o anibridge não tem mapeamento do anime pra série vinculada (vale pra
+          todos os arquivos).
+        - `CONFLICTING_MAPPING` — o mapeamento do anibridge pra série vinculada tem temporadas
+          conflitantes e não é usado (vale pra todos os arquivos).
+      enum:
+        - PAIRED
+        - NO_EPISODE_NUMBER
+        - NOT_MAPPED
+        - AMBIGUOUS_ABSOLUTE_NUMBERING
+        - NOT_FOUND_IN_TMDB
+        - NO_MAPPING
+        - CONFLICTING_MAPPING
+
+    TmdbFilePairingProposal:
+      type: object
+      description: Proposta de pairing de um arquivo de vídeo
+      required: [fileId, fileName, status]
+      properties:
+        fileId:
+          $ref: '#/components/schemas/FileId'
+        fileName:
+          type: string
+          description: Nome do arquivo, de onde o número do episódio é extraído
+        status:
+          $ref: '#/components/schemas/TmdbFilePairingProposalStatus'
+        seasonNumber:
+          type: integer
+          format: int32
+          nullable: true
+          description: |
+            Temporada do TMDB resolvida pelo anibridge; preenchida em `PAIRED` e
+            `NOT_FOUND_IN_TMDB` (aí mostra pra onde o anibridge apontou)
+        episodeNumber:
+          type: integer
+          format: int32
+          nullable: true
+          description: |
+            Episódio do TMDB resolvido pelo anibridge; preenchido em `PAIRED` e
+            `NOT_FOUND_IN_TMDB`
+        pairing:
+          allOf: [{ $ref: '#/components/schemas/TmdbFilePairingRequest' }]
+          nullable: true
+          description: |
+            Payload pronto pra `PUT /v1/metadata/files/{fileId}/tmdb-pairing`, com a metadata do
+            episódio no TMDB (thumbnail, nome, sinopse etc.); só preenchido em `PAIRED`
+
+    TmdbFilePairingProposalResponse:
+      type: object
+      description: Proposta de pairing de todos os arquivos da pasta do anime
+      required: [anilistId, tmdbId, files]
+      properties:
+        anilistId:
+          $ref: '#/components/schemas/AnilistId'
+        tmdbId:
+          allOf: [{ $ref: '#/components/schemas/TmdbId' }]
+          description: Série do TMDB vinculada ao anime, base da proposta
+        files:
+          type: array
+          description: Todos os arquivos de vídeo da pasta do anime, sem ordem garantida
+          items:
+            $ref: '#/components/schemas/TmdbFilePairingProposal'
 
     TmdbFilePairingResponse:
       type: object

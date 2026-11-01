@@ -3,11 +3,18 @@ package io.github.leonardopinheirolacerda.akari.domain.anime.service;
 import io.github.leonardopinheirolacerda.akari.api.dto.TmdbBindingDetails;
 import io.github.leonardopinheirolacerda.akari.api.dto.TmdbBindingProposalRequest;
 import io.github.leonardopinheirolacerda.akari.api.dto.TmdbBindingProposalResponse;
+import io.github.leonardopinheirolacerda.akari.api.dto.TmdbFilePairingProposal;
+import io.github.leonardopinheirolacerda.akari.api.dto.TmdbFilePairingProposalRequest;
+import io.github.leonardopinheirolacerda.akari.api.dto.TmdbFilePairingProposalResponse;
+import io.github.leonardopinheirolacerda.akari.api.dto.TmdbFilePairingProposalStatus;
 import io.github.leonardopinheirolacerda.akari.api.dto.TmdbMediaType;
 import io.github.leonardopinheirolacerda.akari.domain.anibridge.model.TmdbMappingCandidate;
 import io.github.leonardopinheirolacerda.akari.domain.anibridge.service.AnibridgeResolutionService;
 import io.github.leonardopinheirolacerda.akari.domain.anilist.client.dtos.AnilistMediaResponse;
 import io.github.leonardopinheirolacerda.akari.domain.anilist.service.AnilistSearchService;
+import io.github.leonardopinheirolacerda.akari.domain.anime.model.Anime;
+import io.github.leonardopinheirolacerda.akari.domain.anime.model.FilePairingResolution;
+import io.github.leonardopinheirolacerda.akari.exceptions.BusinessRuleException;
 import io.github.leonardopinheirolacerda.akari.exceptions.IntegrationException;
 import io.github.leonardopinheirolacerda.akari.exceptions.IntegrationNotConfiguredException;
 import io.github.leonardopinheirolacerda.akari.exceptions.ResourceNotFoundException;
@@ -15,11 +22,12 @@ import io.quarkus.logging.Log;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
+import java.util.List;
 import java.util.Optional;
 
 /**
- * Proposta de binding TMDB pra um anime da AniList, a partir do dataset do anibridge — só
- * consulta, nada é gravado.
+ * Propostas de binding TMDB e de pairing de episódios pra um anime, a partir do dataset do
+ * anibridge — só consulta, nada é gravado.
  */
 @ApplicationScoped
 public class AnimeTmdbProposalService {
@@ -32,6 +40,9 @@ public class AnimeTmdbProposalService {
 
     @Inject
     AnimeTmdbService animeTmdbService;
+
+    @Inject
+    EpisodePairingResolutionService episodePairingResolutionService;
 
     /**
      * Propõe a série ou filme do TMDB pro anime, pelo melhor candidato do anibridge — o mesmo
@@ -76,6 +87,64 @@ public class AnimeTmdbProposalService {
                 .tmdbId(tmdbId)
                 .mediaType(mediaType)
                 .details(details);
+    }
+
+    /**
+     * Propõe o pairing TMDB de cada arquivo de vídeo da pasta do anime, exatamente como o
+     * pairing automático da ingestão faria (ver {@link EpisodePairingResolutionService}) — sem
+     * gravar nada.
+     *
+     * @param request anime cujos arquivos devem receber a proposta
+     * @return a série vinculada e a proposta de cada arquivo da pasta, pareado ou com o motivo
+     * @throws ResourceNotFoundException se o anime não existir ou não tiver binding TMDB
+     * @throws BusinessRuleException se o binding TMDB for de filme
+     * @throws IntegrationNotConfiguredException se {@code tmdb.api-key} estiver vazio e as
+     *                                           temporadas não estiverem em cache
+     */
+    public TmdbFilePairingProposalResponse proposeTmdbFilePairing(TmdbFilePairingProposalRequest request) {
+        final Anime anime = animeTmdbService.findBoundAnimeOrThrow(request.getAnilistId());
+
+        if (anime.tmdbMediaType != TmdbMediaType.TV) {
+            Log.warnf("Anime %d tem binding TMDB de filme, sem pairing de episódios", anime.anilistId);
+            throw new BusinessRuleException("Pairing de episódios só existe pra binding TMDB de série");
+        }
+
+        final List<FilePairingResolution> resolutions = episodePairingResolutionService.resolve(
+                anime,
+                anime.folder.id,
+                anime.folder.name
+        );
+
+        final List<TmdbFilePairingProposal> files = resolutions.stream()
+                .map(this::toFilePairingProposal)
+                .toList();
+
+        final long paired = files.stream()
+                .filter(file -> file.getStatus() == TmdbFilePairingProposalStatus.PAIRED)
+                .count();
+
+        Log.infof("Proposta de pairing pro anime %d: %d de %d arquivos pareados", anime.anilistId, paired, files.size());
+
+        return new TmdbFilePairingProposalResponse()
+                .anilistId(anime.anilistId)
+                .tmdbId(anime.tmdbId)
+                .files(files);
+    }
+
+    private TmdbFilePairingProposal toFilePairingProposal(FilePairingResolution resolution) {
+        final TmdbFilePairingProposal proposal = new TmdbFilePairingProposal()
+                .fileId(resolution.videoFile().id)
+                .fileName(resolution.videoFile().name)
+                .status(resolution.status())
+                .pairing(resolution.pairing());
+
+        if (resolution.resolvedEpisode() == null) {
+            return proposal;
+        }
+
+        return proposal
+                .seasonNumber(resolution.resolvedEpisode().seasonNumber())
+                .episodeNumber(resolution.resolvedEpisode().tmdbEpisode());
     }
 
 }

@@ -60,12 +60,14 @@ Resolve também ambiguidade quando o dataset aponta mais de um candidato TMDB pr
 
 ## Módulos relacionados
 
-- **`domain.ingestion`** (`FolderAutoBindService`) — maior consumidor do anibridge. Usa
-  `AnibridgeResolutionService` pra resolver o candidato TMDB de um anime recém-vinculado e pra
-  parear episódio a episódio dos arquivos de uma pasta.
-- **`domain.anime`** (`AnimeTmdbProposalService`) — usa
-  `AnibridgeResolutionService.resolveBestCandidate` pra propor o binding TMDB de um anime no
-  portal (`POST /v1/metadata/tmdb/binding-proposals`), sem gravar nada.
+- **`domain.ingestion`** (`FolderAutoBindService`) — usa
+  `AnibridgeResolutionService.resolveBestCandidate` pra escolher o binding TMDB de um anime
+  recém-vinculado.
+- **`domain.anime`** — `AnimeTmdbProposalService` usa `resolveBestCandidate` pra propor o
+  binding TMDB no portal (`POST /v1/metadata/tmdb/binding-proposals`);
+  `EpisodePairingResolutionService` usa `resolveCandidateFor`, `resolveSafeSegments`,
+  `restrictToFullSeasonCoverage` e `resolveEpisode` pra resolver o pairing de episódios, tanto
+  no pairing automático da ingestão quanto na proposta de pairing do portal.
 - **`domain.tmdb`** — dependência de saída do `AnibridgeResolutionService` (confirmação de
   temporadas existentes).
 - **`domain.anilist`** — não é dependência direta de código, mas semanticamente adjacente: o
@@ -78,11 +80,11 @@ Nenhum endpoint HTTP próprio — o domínio não tem `resource/`. A única expo
 Os pontos de entrada são:
 - `AnibridgeScheduler` — boot (`@Observes StartupEvent`) e `@Scheduled(every = "1h")`, aciona
   `AnibridgeService.refresh()`.
-- `AnibridgeResolutionService` (API pública do domínio pra quem precisa resolver mapeamento) e,
-  secundariamente, `AnibridgeMappingService` (busca crua) — injetados por
-  `FolderAutoBindService` (domínio `ingestion`); `AnibridgeResolutionService` também por
-  `AnimeTmdbProposalService` (domínio `anime`), que expõe a proposta de binding por HTTP — o
-  próprio `anibridge` continua sem `resource/`.
+- `AnibridgeResolutionService` (API pública do domínio pra quem precisa resolver mapeamento) —
+  injetado por `FolderAutoBindService` (domínio `ingestion`) e por `AnimeTmdbProposalService`/
+  `EpisodePairingResolutionService` (domínio `anime`), que expõem as propostas por HTTP — o
+  próprio `anibridge` continua sem `resource/`. `AnibridgeMappingService` (busca crua) é usado
+  só internamente pelo `AnibridgeResolutionService`.
 
 ## Fluxos importantes
 
@@ -97,10 +99,14 @@ Os pontos de entrada são:
 5. Protegido por um `AtomicBoolean` simples — chamada concorrente (boot + scheduled) é ignorada,
    não enfileirada nem paralelizada.
 
-**Resolução de candidato e pareamento** (orquestrado por `FolderAutoBindService`, fora deste
-domínio):
+**Resolução de candidato e pareamento** (orquestrado fora deste domínio: o candidato pelo
+`FolderAutoBindService`/`AnimeTmdbProposalService`, o pareamento pelo
+`EpisodePairingResolutionService`):
 1. `resolveBestCandidate(anilistId, malId, totalEpisodes)` — tenta por AniList, cai pra MAL se
    vazio; agrupa segments por `tmdbId:mediaType`; escolhe o não-suspeito com maior cobertura.
+   Pra quem já tem o binding (pareamento), `resolveCandidateFor(anilistId, malId, tmdbId,
+   mediaType)` monta o candidato só com os segments que apontam pra esse título (AniList, depois
+   MAL), sem escolher entre candidatos — nunca aplica a numeração de um título sobre outro.
 2. `resolveSafeSegments(candidate)` — se não há sobreposição, usa os segments crus; se há e é TV,
    confirma contra o TMDB quais temporadas existem e filtra; se ainda sobrar sobreposição, desiste
    (`Optional.empty()`).

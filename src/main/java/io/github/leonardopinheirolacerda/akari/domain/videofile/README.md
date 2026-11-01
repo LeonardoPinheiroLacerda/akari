@@ -59,11 +59,13 @@ inteiro de arquivos de uma pasta, usada na reconciliação e no pairing automát
   resolve com `videoFileService.findOrThrow(...)` ao iniciar sessão e ao reconciliar.
   Em todos os três casos o acoplamento é raso: busca pontual por id, sem leitura de campos além
   dos expostos pelo model — confirmado lendo os três services, não só por grep de import.
-- `ingestion` (`FolderAutoBindService`, `ReconciliationService`) — reconciliação e pairing
-  automático via `listByFolder`; `ReconciliationService` também chama
+- `ingestion` (`ReconciliationService`) — reconciliação via `listByFolder`; também chama
   `backfillNaturalSortKeyIfMissing` ao reencontrar um arquivo já catalogado.
-- `anime` (`AnimeTmdbFilePairingService`, `AnimeEpisodeService`) — pairing TMDB consumido nas
-  listagens; `AnimeEpisodeService` consome `listVideoFilesOrderedByNaturalSortKey` direto.
+- `anime` (`AnimeTmdbFilePairingService`, `AnimeEpisodeService`, `EpisodePairingResolutionService`)
+  — pairing TMDB consumido nas listagens; `AnimeEpisodeService` consome
+  `listVideoFilesOrderedByNaturalSortKey` direto; `EpisodePairingResolutionService` lista os
+  arquivos da pasta via `listByFolder` pra resolver o pairing (automático da ingestão e proposta
+  do portal).
 - `utils.VideoFileLocationUtils` — resolve a localização em disco (direto se `LOCAL`, via
   `VideoFileCache` se remoto) a partir do `VideoFile` e do seu `StorageProvider`.
 

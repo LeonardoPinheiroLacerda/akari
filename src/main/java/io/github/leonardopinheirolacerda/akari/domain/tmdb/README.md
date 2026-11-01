@@ -70,9 +70,12 @@ Externa:
   `TmdbEpisodeResponse` para os DTOs de contrato do pareamento.
 - `domain.anibridge.service.AnibridgeResolutionService` — usa `TmdbSeasonSummaryResponse`
   (dentro de `TmdbMappingCandidate`) para resolver o melhor candidato de binding anime↔TMDB.
+- `domain.anime.service.EpisodePairingResolutionService` — usa `getSeason` e
+  `TmdbEpisodeResponse` diretamente pra confirmar no TMDB o episódio resolvido pelo anibridge e
+  montar a metadata do pairing (pairing automático da ingestão e proposta de pairing do portal).
 - `domain.ingestion.service.FolderAutoBindService` — orquestra o binding automático de pasta
-  (chama `AnimeTmdbService`/`AnimeTmdbFilePairingService`/`AnibridgeResolutionService`, e usa
-  `TmdbEpisodeResponse` diretamente para resolver o episódio de um arquivo).
+  (chama `AnimeTmdbService`/`EpisodePairingResolutionService`/`AnimeTmdbFilePairingService`/
+  `AnibridgeResolutionService`), sem chamar o `TmdbService` direto.
 
 `utils.TmdbImageUtils` é explicitamente documentado como compartilhado entre `tmdb` e `anime`
 para garantir os mesmos tamanhos de imagem nos dois domínios.

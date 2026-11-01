@@ -1,8 +1,6 @@
-package io.github.leonardopinheirolacerda.akari.domain.ingestion.service;
+package io.github.leonardopinheirolacerda.akari.domain.anime.service;
 
 import io.github.leonardopinheirolacerda.akari.domain.anime.model.Anime;
-import io.github.leonardopinheirolacerda.akari.domain.anime.service.AnimeRelationsService;
-import io.github.leonardopinheirolacerda.akari.domain.anime.service.AnimeService;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
@@ -16,8 +14,8 @@ import java.util.Set;
  * Calcula os deslocamentos candidatos de numeração absoluta de um anime a partir da cadeia de
  * prequels da AniList — quando uma temporada continua a contagem de episódios da anterior em
  * vez de reiniciar em 1 (ex.: arquivos "14-38" de uma 2ª temporada cujo mapeamento do anibridge
- * é relativo, "1-25"). Fica em {@code ingestion}, não em {@code anime}, de propósito: é regra de
- * consumo específica do pairing TMDB, não do domínio de relações em si.
+ * é relativo, "1-25"). É regra de consumo específica do pairing TMDB, não do domínio de relações
+ * em si — por isso o único consumidor é o {@link EpisodePairingResolutionService}.
  */
 @ApplicationScoped
 public class AbsoluteEpisodeOffsetService {

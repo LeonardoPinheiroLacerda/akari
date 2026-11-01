@@ -20,8 +20,10 @@ Cada faceta bem distinta tem seu próprio par resource/service, todos compartilh
 | `AnimeRelationsResource` | `AnimeRelationsService` | grafo de relações, raízes de franquia, franquia organizada em raiz/temporadas/filmes/especiais |
 | `AnimeTmdbResource` | `AnimeTmdbService` | binding TMDB, overrides, schema de overrides |
 | `AnimeTmdbFilePairingResource` | `AnimeTmdbFilePairingService` | pairing TMDB por arquivo, schema de temporadas/episódios |
-| `AnimeTmdbProposalResource` | `AnimeTmdbProposalService` | proposta de binding TMDB a partir do anibridge, só consulta |
+| `AnimeTmdbProposalResource` | `AnimeTmdbProposalService` | propostas de binding TMDB e de pairing de episódios a partir do anibridge, só consulta |
 | `AnimeEpisodeResource` | `AnimeEpisodeService` | listagem paginada de episódios (arquivos de vídeo) do anime, em ordem natural de nome |
+
+`EpisodePairingResolutionService` e `AbsoluteEpisodeOffsetService` também não têm resource próprio: são a resolução do pairing TMDB dos arquivos de uma pasta, compartilhada entre o pairing automático da ingestão (`FolderAutoBindService`, que grava e notifica) e a proposta de pairing do portal (`AnimeTmdbProposalService`, que só devolve) — por isso moram aqui, junto do pairing, e não em `ingestion` (que já depende de `anime`; o contrário faria um ciclo de services).
 
 `AnimeOverrideService` **não tem resource próprio** — confirmado no código: é um `@ApplicationScoped` puro, sem endpoint HTTP, que resolve campo a campo qual valor prevalece (override manual do TMDB, quando setado, ou o dado cru da AniList). Existe pra não duplicar essa regra nos quatro services que montam `AnimeResponse`/`AnimeBindingSummary`/`AnimeRelationNode` a partir de `Anime`: `AnimeService` e `AnimeRelationsService` o injetam diretamente; `AnimeTmdbService`/`AnimeTmdbFilePairingService` não precisam dele porque não exibem o anime resolvido, só o estado de binding/pairing cru.
 
@@ -51,6 +53,12 @@ Eixo TMDB:
 
 Proposta de binding TMDB:
 - Propor a série/filme do TMDB pra um `anilistId` (`POST /v1/metadata/tmdb/binding-proposals`, `AnimeTmdbProposalService.proposeTmdbBinding`), sem gravar nada: o melhor candidato do anibridge (`AnibridgeResolutionService.resolveBestCandidate`, o mesmo critério do bind automático da ingestão), com o `malId` (fallback do anibridge) e o total de episódios (desempate entre candidatos) lidos da AniList (`AnilistSearchService.findById`, cache-first). Por isso funciona mesmo com o anime ainda não salvo no akari. A resposta traz a mesma ficha `details` do estado TMDB (`AnimeTmdbService.fetchDetails`), que também confirma que o `tmdbId` existe. `404` se o anime não existir na AniList, se o anibridge não tiver mapeamento pra ele ou se o `tmdbId` não existir mais no TMDB. Pra efetivar, o portal chama o `bindTmdb` com o `tmdbId`/`mediaType` propostos.
+- Propor o pairing TMDB de cada arquivo da pasta de um anime já vinculado a uma série do TMDB (`POST /v1/metadata/tmdb/file-pairing-proposals`, `AnimeTmdbProposalService.proposeTmdbFilePairing`), sem gravar nada: a mesma resolução do pairing automático (`EpisodePairingResolutionService.resolve`), devolvendo todos os arquivos com o `status` de cada um — `PAIRED` com o payload pronto pro `PUT` de `tmdb-pairing`, ou o motivo (`NO_EPISODE_NUMBER`, `NOT_MAPPED`, `AMBIGUOUS_ABSOLUTE_NUMBERING`, `NOT_FOUND_IN_TMDB`, `NO_MAPPING`, `CONFLICTING_MAPPING`). `404` se o anime não existir ou não tiver binding TMDB; `400` se o binding for de filme.
+
+Resolução do pairing TMDB (`EpisodePairingResolutionService`, sem endpoint próprio):
+- Número do episódio extraído do nome do arquivo (`ingestion.extractor.EpisodeNumberExtractor`), convertido pra temporada/episódio do TMDB pelo anibridge — só pelos segments que apontam pra série vinculada (`AnibridgeResolutionService.resolveCandidateFor`), pra nunca aplicar a numeração de um título sobre outro: sem nenhum, todos os arquivos saem `NO_MAPPING`. Segments conflitantes (`resolveSafeSegments` vazio) → `CONFLICTING_MAPPING`.
+- Fallbacks: numeração absoluta, com offsets candidatos calculados pela cadeia de prequels da AniList (`AbsoluteEpisodeOffsetService`, tentados do mais próximo ao mais distante, só quando o mapeamento cobre a temporada isolada com segurança — senão `AMBIGUOUS_ABSOLUTE_NUMBERING`); e pasta de 1 arquivo com anime de 1 episódio → episódio 1.
+- Cada episódio resolvido é confirmado no TMDB (`TmdbService.getSeason`, temporada cacheada por pasta), de onde sai a metadata do pairing; se não existir (temporada inexistente, episódio fora dela ou falha na busca) → `NOT_FOUND_IN_TMDB`, sem pairing.
 
 File pairing:
 - Ler/criar/substituir/remover o pairing TMDB (temporada, episódio, thumbnail e metadata do episódio) de um arquivo de vídeo (`getTmdbFilePairing`, `updateTmdbFilePairing`, `deleteTmdbFilePairing`).
@@ -67,7 +75,9 @@ Episódios:
 - `AnimeRelationsService` injeta `AnimeOverrideService` (resolve título/thumbnail dos nós do grafo).
 - `AnimeTmdbService` injeta `AnimeService` (busca o anime base, reusa `findOrThrow`).
 - `AnimeTmdbFilePairingService` injeta `AnimeTmdbService` (reusa `findBoundAnimeOrThrow`).
-- `AnimeTmdbProposalService` injeta `AnimeTmdbService` (reusa `fetchDetails` pra montar a ficha).
+- `AnimeTmdbProposalService` injeta `AnimeTmdbService` (reusa `fetchDetails` pra montar a ficha e `findBoundAnimeOrThrow`) e `EpisodePairingResolutionService` (resolução do pairing).
+- `EpisodePairingResolutionService` injeta `AbsoluteEpisodeOffsetService` (offsets de numeração absoluta).
+- `AbsoluteEpisodeOffsetService` injeta `AnimeService` e `AnimeRelationsService` (anda a cadeia de prequels).
 - `AnimeEpisodeService` injeta `AnimeService` (resolve o anime e a pasta).
 
 **Externas (outros domínios), por service:**
@@ -76,14 +86,15 @@ Episódios:
 - `AnimeTmdbService`: `tmdb.service.TmdbService` (detalhes, imagens, traduções), `setting.service.SettingService` (idioma preferido de backdrop/logo).
 - `AnimeTmdbFilePairingService`: `tmdb.service.TmdbService` (temporadas/episódios), `videofile.service.VideoFileService` (valida o arquivo).
 - `AnimeTmdbProposalService`: `anilist.service.AnilistSearchService` (`malId` e total de episódios), `anibridge.service.AnibridgeResolutionService` (melhor candidato TMDB).
+- `EpisodePairingResolutionService`: `anibridge.service.AnibridgeResolutionService` (candidato da série vinculada, segments, conversão de episódio), `videofile.service.VideoFileService` (arquivos da pasta), `tmdb.service.TmdbService` (temporadas/episódios), e a classe utilitária `ingestion.extractor.EpisodeNumberExtractor` (número do episódio no nome do arquivo).
 - `AnimeEpisodeService`: `videofile.service.VideoFileService` (`listVideoFilesOrderedByNaturalSortKey` — listagem em si, já com `tmdbPairing` embutido).
 - Model `Anime` referencia `mediafolder.model.MediaFolder` via `@OneToOne`.
 
-Nenhum service do domínio injeta mais de dois domínios externos ao mesmo tempo — o acoplamento alto do domínio como um todo (6 domínios externos: `anilist`, `tmdb`, `anibridge`, `mediafolder`, `videofile`, `setting`) é distribuído entre as seis facetas, não concentrado num único service.
+O acoplamento alto do domínio como um todo (7 domínios externos: `anilist`, `tmdb`, `anibridge`, `mediafolder`, `videofile`, `setting` e `ingestion`, este só pelo `EpisodeNumberExtractor`) é distribuído entre as facetas; o service mais acoplado é o `EpisodePairingResolutionService` (`anibridge`, `videofile`, `tmdb` e o extractor do `ingestion`), por concentrar a resolução do pairing.
 
 ## Módulos relacionados
 
-- **`ingestion`** é o maior consumidor externo: `FolderAutoBindService` orquestra as três etapas (bind AniList → bind TMDB → pairing de episódios) automaticamente durante a varredura de pastas, usando `AnimeService`, `AnimeTmdbService` e `AnimeTmdbFilePairingService` diretamente; `AbsoluteEpisodeOffsetService` usa `AnimeService.find` e `AnimeRelationsService.findDirectPrequelId` pra andar a cadeia de prequels; `FolderRemovalService` usa `AnimeService` pra resolver os `anilistId` antes de remover uma pasta.
+- **`ingestion`** é o maior consumidor externo: `FolderAutoBindService` orquestra as três etapas (bind AniList → bind TMDB → pairing de episódios) automaticamente durante a varredura de pastas, usando `AnimeService`, `AnimeTmdbService`, `EpisodePairingResolutionService` (resolve o pairing) e `AnimeTmdbFilePairingService` (grava) diretamente; `FolderRemovalService` usa `AnimeService` pra resolver os `anilistId` antes de remover uma pasta. No sentido contrário, `anime` usa de `ingestion` só o `extractor.EpisodeNumberExtractor` (no `EpisodePairingResolutionService`) — mesma exceção que `videofile` já tem.
 - **`mediafolder`**: `MediaFolderService.listFolders` embute `AnimeBindingSummary` via `AnimeService.getAnimeBindings`; `Anime.folder` referencia `MediaFolder`.
 - **`videofile`**: `VideoFileService.listVideoFiles`/`listVideoFilesOrderedByNaturalSortKey` embutem `TmdbFilePairingResponse` via `AnimeTmdbFilePairingService.getTmdbFilePairings`; `AnimeEpisodeService` delega a listagem de episódios inteira pro `VideoFileService.listVideoFilesOrderedByNaturalSortKey`.
 - **`anilist`** e **`tmdb`**: fontes de dados externos consumidas via seus `*SearchService`.

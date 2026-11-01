@@ -97,6 +97,46 @@ public class AnibridgeResolutionService {
     }
 
     /**
+     * Monta o candidato do anibridge pra uma série/filme do TMDB já escolhido — só os segments do
+     * anime que apontam pra esse {@code tmdbId}/{@code mediaType}. Primeiro pelo
+     * {@code anilistId}, cai pro {@code malId} se não achar nada. Diferente de
+     * {@link #resolveBestCandidate}, não escolhe entre candidatos: serve pra quem já tem o
+     * binding (ex.: pairing de episódios), pra nunca aplicar a numeração de um título sobre outro.
+     *
+     * @param anilistId id do anime na AniList
+     * @param malId id do anime no MyAnimeList, ou {@code null} se não houver
+     * @param tmdbId id da série/filme vinculado no TMDB
+     * @param mediaType tipo do binding
+     * @return o candidato com os segments desse título, ou vazio se o anibridge não mapeia o
+     *         anime pra ele
+     */
+    public Optional<TmdbMappingCandidate> resolveCandidateFor(Integer anilistId,
+                                                              Integer malId,
+                                                              Integer tmdbId,
+                                                              TmdbMediaType mediaType) {
+
+        List<MappingSegment> segments = segmentsPointingTo(
+                anibridgeMappingService.findByAnilistId(anilistId),
+                tmdbId,
+                mediaType
+        );
+
+        if (segments.isEmpty() && malId != null) {
+            segments = segmentsPointingTo(
+                    anibridgeMappingService.findByMalId(malId),
+                    tmdbId,
+                    mediaType
+            );
+        }
+
+        if (segments.isEmpty()) {
+            return Optional.empty();
+        }
+
+        return Optional.of(new TmdbMappingCandidate(tmdbId, mediaType, segments));
+    }
+
+    /**
      * Converte um número de episódio do anime pra temporada/episódio correspondente no TMDB,
      * usando o segment cujo range contém esse episódio.
      *
@@ -235,6 +275,16 @@ public class AnibridgeResolutionService {
         }
 
         return Optional.of(validSegments);
+    }
+
+    private static List<MappingSegment> segmentsPointingTo(List<MappingSegment> segments,
+                                                           Integer tmdbId,
+                                                           TmdbMediaType mediaType) {
+
+        return segments.stream()
+                .filter(segment -> segment.tmdbId.equals(tmdbId))
+                .filter(segment -> segment.tmdbMediaType == mediaType)
+                .toList();
     }
 
     /**
