@@ -44,7 +44,7 @@ Grafo de relações:
 Eixo TMDB:
 - Vincular o anime a uma série/filme do TMDB, validando a existência do id e pré-preenchendo backdrop/logo com a imagem mais votada (melhor esforço) (`bindTmdb`).
 - Remover o binding TMDB, limpando os overrides junto (`clearTmdbBinding`).
-- Ler o estado TMDB atual (binding + overrides) (`getTmdbState`).
+- Ler o estado TMDB atual (binding + overrides) (`getTmdbState`). O estado devolvido por `getTmdbState`, `bindTmdb` e `updateTmdbOverrides` traz sempre `details`, a ficha resumida da série/filme vinculado como está no TMDB (título, título original, data, temporadas/episódios, pôster e backdrop principais, sem overrides), pra conferir se o binding aponta pro título certo. A ficha é lida cache-first, sem `language` (textos no idioma padrão do TMDB, `en-US`); se o TMDB falhar, a operação falha com o erro do TMDB (`502`/`503`) — no `updateTmdbOverrides`, desfazendo a gravação dos overrides.
 - Substituir o bloco de overrides inteiro (`updateTmdbOverrides`).
 - Montar o schema de opções concretas por campo overridable: traduções de título/sinopse e galeria de imagens do TMDB (`getTmdbOverridesSchema`).
 

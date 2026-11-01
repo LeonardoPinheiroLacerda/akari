@@ -1190,12 +1190,16 @@ paths:
     get:
       tags: [AnimeTmdb]
       operationId: getTmdbState
-      summary: Estado atual do binding TMDB (binding + overrides)
+      summary: Estado atual do binding TMDB (binding + overrides + dados do TMDB)
       responses:
         '200':
           $ref: '#/components/responses/TmdbAnimeStateOk'
         '404':
           $ref: '#/components/responses/NotFound'
+        '502':
+          $ref: '#/components/responses/BadGateway'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -1250,6 +1254,10 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+        '502':
+          $ref: '#/components/responses/BadGateway'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -3934,7 +3942,8 @@ components:
 
     TmdbAnimeStateResponse:
       type: object
-      description: Estado TMDB do anime (binding + overrides)
+      description: Estado TMDB do anime (binding + overrides + dados do próprio TMDB)
+      required: [details]
       properties:
         tmdbId:
           allOf: [{ $ref: '#/components/schemas/TmdbId' }]
@@ -3949,6 +3958,78 @@ components:
         overrides:
           allOf: [{ $ref: '#/components/schemas/TmdbOverrides' }]
           nullable: true
+        details:
+          allOf: [{ $ref: '#/components/schemas/TmdbBindingDetails' }]
+          description: |
+            Dados da série ou filme vinculado, como estão no TMDB — sem overrides aplicados, pra
+            conferir se o binding aponta pro título certo. Lidos da ficha do TMDB (cache-first).
+
+    TmdbBindingDetails:
+      type: object
+      description: |
+        Ficha resumida da série (`mediaType` `TV`) ou filme (`MOVIE`) vinculado. A ficha é
+        buscada no TMDB sem `language`, então os textos (título, sinopse, gêneros) vêm no idioma
+        padrão do TMDB (`en-US`), não em `tmdb.default-language`. Campos que só existem num dos
+        tipos vêm `null` no outro.
+      properties:
+        title:
+          type: string
+          nullable: true
+          description: Nome da série (`name`) ou título do filme (`title`)
+        originalTitle:
+          type: string
+          nullable: true
+          description: Nome no idioma original (`original_name` / `original_title`)
+        originalLanguage:
+          allOf: [{ $ref: '#/components/schemas/LanguageCode' }]
+          nullable: true
+        overview:
+          type: string
+          nullable: true
+          description: Sinopse
+        releaseDate:
+          type: string
+          nullable: true
+          description: Data de estreia (`first_air_date`) ou de lançamento (`release_date`), em ISO-8601
+        status:
+          type: string
+          nullable: true
+          description: 'Status no TMDB (ex.: `Ended`, `Returning Series`, `Released`)'
+        numberOfSeasons:
+          type: integer
+          format: int32
+          nullable: true
+          description: Quantidade de temporadas; só `TV`
+        numberOfEpisodes:
+          type: integer
+          format: int32
+          nullable: true
+          description: Quantidade de episódios; só `TV`
+        runtime:
+          type: integer
+          format: int32
+          nullable: true
+          description: Duração em minutos; só `MOVIE`
+        genres:
+          type: array
+          description: Nomes dos gêneros, no idioma da ficha
+          items:
+            type: string
+        voteAverage:
+          allOf: [{ $ref: '#/components/schemas/VoteAverage' }]
+          nullable: true
+        posterPath:
+          type: string
+          nullable: true
+          description: Caminho relativo do poster principal (`poster_path` cru do TMDB)
+        posterUrl:
+          allOf: [{ $ref: '#/components/schemas/ImageUrl' }]
+          nullable: true
+          description: URL absoluta do poster principal (tamanho `w342`)
+        backdropUrl:
+          allOf: [{ $ref: '#/components/schemas/ImageUrl' }]
+          nullable: true
+          description: URL absoluta do backdrop principal (tamanho `original`)
 
     TmdbLocalizedOption:
       type: object

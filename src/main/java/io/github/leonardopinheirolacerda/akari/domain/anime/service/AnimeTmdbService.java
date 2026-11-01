@@ -1,6 +1,7 @@
 package io.github.leonardopinheirolacerda.akari.domain.anime.service;
 
 import io.github.leonardopinheirolacerda.akari.api.dto.TmdbAnimeStateResponse;
+import io.github.leonardopinheirolacerda.akari.api.dto.TmdbBindingDetails;
 import io.github.leonardopinheirolacerda.akari.api.dto.TmdbBindingRequest;
 import io.github.leonardopinheirolacerda.akari.api.dto.TmdbImageOption;
 import io.github.leonardopinheirolacerda.akari.api.dto.TmdbLocalizedOption;
@@ -19,6 +20,7 @@ import io.github.leonardopinheirolacerda.akari.domain.tmdb.client.dtos.TmdbTvDet
 import io.github.leonardopinheirolacerda.akari.domain.tmdb.service.TmdbService;
 import io.github.leonardopinheirolacerda.akari.exceptions.BusinessRuleException;
 import io.github.leonardopinheirolacerda.akari.exceptions.IntegrationException;
+import io.github.leonardopinheirolacerda.akari.exceptions.IntegrationNotConfiguredException;
 import io.github.leonardopinheirolacerda.akari.exceptions.ResourceNotFoundException;
 import io.github.leonardopinheirolacerda.akari.utils.RetryUtils;
 import io.github.leonardopinheirolacerda.akari.utils.TmdbImageUtils;
@@ -97,7 +99,8 @@ public class AnimeTmdbService {
 
         Log.infof("Anime %d vinculado ao TMDB %d com sucesso", anilistId, tmdbId);
 
-        return animeTmdbMapper.toState(anime);
+        final TmdbBindingDetails details = fetchDetails(anime.tmdbId, anime.tmdbMediaType);
+        return animeTmdbMapper.toState(anime, details);
     }
 
     /**
@@ -126,15 +129,19 @@ public class AnimeTmdbService {
     }
 
     /**
-     * Lê o estado TMDB atual do anime (binding + overrides).
+     * Lê o estado TMDB atual do anime (binding + overrides + ficha do título vinculado).
      *
      * @param anilistId id do anime na AniList
      * @return o estado TMDB
-     * @throws ResourceNotFoundException se o anime não existir ou não tiver binding TMDB
+     * @throws ResourceNotFoundException se o anime não existir, não tiver binding TMDB ou o
+     *                                     {@code tmdbId} não existir mais no TMDB
+     * @throws IntegrationException se a busca da ficha no TMDB falhar
+     * @throws IntegrationNotConfiguredException se {@code tmdb.api-key} estiver vazio e a ficha
+     *                                           não estiver em cache
      */
     public TmdbAnimeStateResponse getTmdbState(Integer anilistId) {
         final Anime anime = findBoundAnimeOrThrow(anilistId);
-        return animeTmdbMapper.toState(anime);
+        return animeTmdbMapper.toState(anime, fetchDetails(anime.tmdbId, anime.tmdbMediaType));
     }
 
     /**
@@ -144,7 +151,11 @@ public class AnimeTmdbService {
      * @param anilistId id do anime na AniList
      * @param tmdbOverrides novo estado de overrides
      * @return o estado TMDB atualizado
-     * @throws ResourceNotFoundException se o anime não existir ou não tiver binding TMDB
+     * @throws ResourceNotFoundException se o anime não existir, não tiver binding TMDB ou o
+     *                                     {@code tmdbId} não existir mais no TMDB
+     * @throws IntegrationException se a busca da ficha no TMDB falhar (desfaz a gravação)
+     * @throws IntegrationNotConfiguredException se {@code tmdb.api-key} estiver vazio e a ficha
+     *                                           não estiver em cache (desfaz a gravação)
      */
     @Transactional
     public TmdbAnimeStateResponse updateTmdbOverrides(Integer anilistId, TmdbOverrides tmdbOverrides) {
@@ -158,7 +169,7 @@ public class AnimeTmdbService {
         anime.overrideBackdropPath = tmdbOverrides.getBackdropPath();
         anime.overrideLogoPath = tmdbOverrides.getLogoPath();
 
-        return animeTmdbMapper.toState(anime);
+        return animeTmdbMapper.toState(anime, fetchDetails(anime.tmdbId, anime.tmdbMediaType));
     }
 
     /**
@@ -225,6 +236,27 @@ public class AnimeTmdbService {
         }
 
         return anime;
+    }
+
+    /**
+     * Lê a ficha da série ou do filme no TMDB (cache-first) e converte pro resumo do contrato.
+     *
+     * @param tmdbId id da série/filme no TMDB
+     * @param mediaType se o binding é série ({@code TV}) ou filme ({@code MOVIE})
+     * @return a ficha resumida, sem overrides aplicados
+     * @throws ResourceNotFoundException se o {@code tmdbId} não existir mais no TMDB
+     * @throws IntegrationException se a chamada ao TMDB falhar
+     * @throws IntegrationNotConfiguredException se {@code tmdb.api-key} estiver vazio e a ficha
+     *                                           não estiver em cache
+     */
+    private TmdbBindingDetails fetchDetails(Integer tmdbId, TmdbMediaType mediaType) {
+        if (mediaType == TmdbMediaType.TV) {
+            final TmdbTvDetailsResponse tvDetails = tmdbService.getTvDetails(tmdbId, false);
+            return animeTmdbMapper.toDetails(tvDetails);
+        }
+
+        final TmdbMovieDetailsResponse movieDetails = tmdbService.getMovieDetails(tmdbId, false);
+        return animeTmdbMapper.toDetails(movieDetails);
     }
 
     /**
