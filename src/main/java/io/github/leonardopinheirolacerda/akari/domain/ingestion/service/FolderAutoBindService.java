@@ -35,6 +35,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.stream.Collectors;
 
 /**
  * Liga uma pasta automaticamente: busca/vincula AniList, resolve/vincula TMDB via anibridge, e
@@ -288,7 +291,9 @@ public class FolderAutoBindService {
                 : anibridgeResolutionService.restrictToFullSeasonCoverage(safeSegments.get(), anime.episodes);
 
         int paired = 0;
+        int missingInTmdb = 0;
         boolean ambiguousAbsoluteNumbering = false;
+        final Set<Integer> missingTmdbSeasons = new TreeSet<>();
 
         for (VideoFile videoFile : videoFiles) {
             final OptionalInt episodeNumber = EpisodeNumberExtractor.extract(videoFile.name);
@@ -339,17 +344,27 @@ public class FolderAutoBindService {
                     folderName
             );
 
+            if (episode.isEmpty()) {
+                missingInTmdb++;
+
+                if (resolved.get().seasonNumber() != null) {
+                    missingTmdbSeasons.add(resolved.get().seasonNumber());
+                }
+
+                continue;
+            }
+
             final TmdbFilePairingRequest tmdbFilePairingRequest = new TmdbFilePairingRequest()
                     .seasonNumber(resolved.get().seasonNumber())
                     .episodeNumber(resolved.get().tmdbEpisode())
-                    .thumbnailPath(episode.map(TmdbEpisodeResponse::stillPath).orElse(null))
-                    .episodeName(episode.map(TmdbEpisodeResponse::name).orElse(null))
-                    .episodeOverview(episode.map(TmdbEpisodeResponse::overview).orElse(null))
-                    .episodeAirDate(episode.map(TmdbEpisodeResponse::airDate).orElse(null))
-                    .episodeRuntime(episode.map(TmdbEpisodeResponse::runtime).orElse(null))
-                    .episodeVoteAverage(episode.map(TmdbEpisodeResponse::voteAverage).orElse(null))
-                    .episodeVoteCount(episode.map(TmdbEpisodeResponse::voteCount).orElse(null))
-                    .episodeType(episode.map(TmdbEpisodeResponse::episodeType).orElse(null));
+                    .thumbnailPath(episode.get().stillPath())
+                    .episodeName(episode.get().name())
+                    .episodeOverview(episode.get().overview())
+                    .episodeAirDate(episode.get().airDate())
+                    .episodeRuntime(episode.get().runtime())
+                    .episodeVoteAverage(episode.get().voteAverage())
+                    .episodeVoteCount(episode.get().voteCount())
+                    .episodeType(episode.get().episodeType());
 
             animeTmdbFilePairingService.updateTmdbFilePairing(videoFile.id, tmdbFilePairingRequest);
 
@@ -363,6 +378,20 @@ public class FolderAutoBindService {
                     "Numeração absoluta detectada, mas o mapeamento do anibridge não cobre a temporada "
                             + "isolada com segurança — os arquivos que dependiam dessa correção não "
                             + "foram pareados",
+                    folderId,
+                    coverImageOf(anime));
+        }
+
+        if (missingInTmdb > 0) {
+            final String seasons = missingTmdbSeasons.stream()
+                    .map(String::valueOf)
+                    .collect(Collectors.joining(", "));
+
+            notificationService.notify(
+                    NotificationLevel.WARNING,
+                    folderName,
+                    "%d arquivos não foram pareados: o mapeamento do anibridge aponta pra episódios que não existem no TMDB %d (temporada %s)"
+                            .formatted(missingInTmdb, anime.tmdbId, seasons),
                     folderId,
                     coverImageOf(anime));
         }
@@ -384,10 +413,12 @@ public class FolderAutoBindService {
     }
 
     /**
-     * Busca o {@code stillPath} (thumbnail padrão do TMDB) do episódio resolvido. Cacheia a
-     * temporada inteira por pasta — evita uma chamada por arquivo quando vários episódios caem
-     * na mesma temporada. Falha aqui nunca aborta o pairing — sem thumbnail, o arquivo ainda é
-     * pareado, só sem imagem (igual um pairing manual que não preencheu esse campo).
+     * Busca no TMDB o episódio resolvido pelo anibridge, de onde sai a metadata do pairing
+     * (thumbnail, nome, sinopse etc.). Cacheia a temporada inteira por pasta — evita uma chamada
+     * por arquivo quando vários episódios caem na mesma temporada. Vazio se a temporada não
+     * existir no TMDB (o anibridge pode estar dessincronizado dele), se a busca falhar ou se o
+     * episódio não estiver na temporada — nesses casos quem chama não pareia o arquivo, pra ele
+     * aparecer como pendente em vez de pareado sem metadata.
      */
     private Optional<TmdbEpisodeResponse> resolveEpisode(Integer tmdbId,
                                                          ResolvedEpisode resolved,
