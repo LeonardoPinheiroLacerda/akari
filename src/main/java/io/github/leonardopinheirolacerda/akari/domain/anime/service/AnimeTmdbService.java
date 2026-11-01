@@ -85,12 +85,9 @@ public class AnimeTmdbService {
         final TmdbMediaType mediaType = tmdbBindingRequest.getMediaType();
         final Integer tmdbId = tmdbBindingRequest.getTmdbId();
 
-        // Valida existência de ID no tmdb
-        if (mediaType == TmdbMediaType.TV) {
-            tmdbService.getTvDetails(tmdbId, false);
-        } else {
-            tmdbService.getMovieDetails(tmdbId, false);
-        }
+        // A ficha também valida a existência do id no TMDB (404 se não existir) — lida uma vez só,
+        // antes de gravar, e reaproveitada na resposta.
+        final TmdbBindingDetails details = fetchDetails(tmdbId, mediaType);
 
         anime.tmdbId = tmdbId;
         anime.tmdbMediaType = mediaType;
@@ -100,7 +97,6 @@ public class AnimeTmdbService {
 
         Log.infof("Anime %d vinculado ao TMDB %d com sucesso", anilistId, tmdbId);
 
-        final TmdbBindingDetails details = fetchDetails(anime.tmdbId, anime.tmdbMediaType);
         return animeTmdbMapper.toState(anime, details);
     }
 
