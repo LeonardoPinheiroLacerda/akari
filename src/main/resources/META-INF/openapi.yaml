@@ -702,9 +702,11 @@ paths:
       operationId: startPlaybackSession
       summary: Inicia uma sessão de transcode
       description: |
-        Inicia o transcode da mídia (referenciada por `fileId`) com o perfil, faixa
-        de áudio e, opcionalmente, faixa de legenda escolhidos. Gera e devolve o `sessionId`
-        (UUID) que identifica a sessão, junto do endereço da playlist `m3u8`.
+        Inicia o transcode da mídia (referenciada por `fileId`) com o perfil e as faixas de
+        áudio e legenda escolhidos. Cada faixa não informada sai das preferências
+        `playback.default.*`, de forma independente (ver `StartPlaybackSessionRequest`). Gera e
+        devolve o `sessionId` (UUID) que identifica a sessão, junto do endereço da playlist
+        `m3u8` e das faixas ativas (`audioTrackIndex`/`subtitleTrackIndex`).
 
         Responde `404` se o vídeo é de provider remoto e ainda não terminou de baixar no cache.
         Responde `500` com `TRANSCODE_FAILED` se o `ffmpeg` sair com erro logo depois de subir,
@@ -2929,7 +2931,7 @@ components:
     StartPlaybackSessionRequest:
       type: object
       description: Parâmetros para iniciar uma sessão de transcode
-      required: [fileId, profile, audioTrackIndex]
+      required: [fileId, profile]
       properties:
         fileId:
           $ref: '#/components/schemas/FileId'
@@ -2939,9 +2941,14 @@ components:
           type: integer
           format: int32
           minimum: 0
+          nullable: true
           description: |
             Posição (0-based) da faixa no array `audio` do `GET /v1/mediaprobe/files/{fileId}` —
             **não** o campo `index` da faixa, que é o índice global do stream no arquivo.
+
+            Ausente/`null` usa o áudio padrão das preferências: a primeira faixa no idioma
+            `playback.default.audio-language`; sem faixa nesse idioma, a marcada como padrão no
+            arquivo, senão a primeira.
         subtitleTrackIndex:
           type: integer
           format: int32
@@ -2951,7 +2958,19 @@ components:
             Posição (0-based) da faixa no array `subtitles` do `GET /v1/mediaprobe/files/{fileId}`
             — **não** o campo `index` da faixa. Legendas SRT viram faixa WebVTT soft
             (selecionável no player); ASS e demais formatos são queimados no vídeo (hardsub).
-            Ausente/`null` reproduz sem legenda.
+
+            Ausente/`null` usa a legenda padrão das preferências: a primeira faixa no idioma
+            `playback.default.subtitle-language`, forçada ou completa conforme
+            `playback.default.subtitle-forced` (forçada = flag `forced` do arquivo ou título com
+            `forced`, `forçada`, `forcada`, `signs` ou `songs`, sem diferenciar maiúsculas); sem
+            faixa desse tipo, a primeira do idioma; sem faixa no idioma, reproduz sem legenda.
+            Para reproduzir sem legenda, use `subtitleDisabled`.
+        subtitleDisabled:
+          type: boolean
+          default: false
+          description: |
+            `true` reproduz sem legenda, ignorando `subtitleTrackIndex` e a legenda padrão das
+            preferências.
 
     SeekRequest:
       type: object
@@ -2980,7 +2999,8 @@ components:
           minimum: 0
           description: |
             Posição (0-based) da faixa no array `audio` do `GET /v1/mediaprobe/files/{fileId}` —
-            **não** o campo `index` da faixa. Mesma semântica de `StartPlaybackSessionRequest`.
+            **não** o campo `index` da faixa. Obrigatório aqui: a troca de faixas não usa as
+            preferências `playback.default.*`.
         subtitleTrackIndex:
           type: integer
           format: int32
@@ -2988,16 +3008,33 @@ components:
           nullable: true
           description: |
             Posição (0-based) da faixa no array `subtitles` do `GET /v1/mediaprobe/files/{fileId}`
-            — **não** o campo `index` da faixa. Ausente/`null` reproduz sem legenda. Mesma
-            semântica de `StartPlaybackSessionRequest`.
+            — **não** o campo `index` da faixa. Ausente/`null` reproduz sem legenda — diferente
+            do `StartPlaybackSessionRequest`, aqui não há legenda padrão.
 
     PlaybackSessionResponse:
       type: object
       description: Sessão de playback recém-iniciada ou reposicionada
-      required: [sessionId, playlistUrl, startOffsetSeconds]
+      required: [sessionId, playlistUrl, startOffsetSeconds, audioTrackIndex]
       properties:
         sessionId:
           $ref: '#/components/schemas/SessionId'
+        audioTrackIndex:
+          type: integer
+          format: int32
+          minimum: 0
+          description: |
+            Faixa de áudio ativa na sessão — posição (0-based) no array `audio` do
+            `GET /v1/mediaprobe/files/{fileId}`. É a faixa pedida pelo cliente ou, quando o
+            request não informou, a padrão das preferências.
+        subtitleTrackIndex:
+          type: integer
+          format: int32
+          minimum: 0
+          nullable: true
+          description: |
+            Faixa de legenda ativa na sessão — posição (0-based) no array `subtitles` do
+            `GET /v1/mediaprobe/files/{fileId}`; `null` = sem legenda. É a faixa pedida pelo
+            cliente ou, quando o request não informou, a padrão das preferências.
         playlistUrl:
           type: string
           description: |

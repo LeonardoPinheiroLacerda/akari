@@ -22,7 +22,8 @@ AniList, cache, playback).
   `getTmdbApiKey`, `isTmdbConfigured`, `getTmdbDefaultLanguage`, `getTmdbImageLogoLanguage`,
   `getTmdbImageBackdropLanguage`, `isTmdbIncludeAdult`, `getCacheMaxSizeBytes`, `getCacheDir`,
   `getPlaybackTranscodeHardwareAcceleration`, `getPlaybackSessionHeartbeatTtl`,
-  `getPlaybackWorkBaseDir`.
+  `getPlaybackWorkBaseDir`, `getPlaybackDefaultAudioLanguage`,
+  `getPlaybackDefaultSubtitleLanguage`, `isPlaybackDefaultSubtitleForced`.
 
 ## Dependências internas e externas
 
@@ -38,7 +39,7 @@ AniList, cache, playback).
 - `anilist` (`AnilistSearchService`) — cache TTL.
 - `cache` (`CacheService`, `CacheQueueProcessorService`) — diretório e tamanho máximo do cache.
 - `playback` (`PlaybackService`) — aceleração de hardware, heartbeat TTL, diretório de
-  trabalho.
+  trabalho, faixas de áudio/legenda padrão do início de sessão.
 - `mediaprobe` (`MediaProbeService`) — lê `getCacheDir()` para resolver o cache local de vídeo.
 - `ingestion` (`IngestionService`) — lê `isTmdbConfigured()` como precheck antes de etapas que
   dependem do TMDB.
@@ -70,7 +71,7 @@ AniList, cache, playback).
 
 ## Arquivos críticos
 
-- `service/SettingService.java` — concentra os ~13 getters tipados que acoplam todo o resto do
+- `service/SettingService.java` — concentra os ~16 getters tipados que acoplam todo o resto do
   sistema a este domínio; `updateSetting` tem a lógica de flush documentada como necessária por
   efeito colateral do `@UpdateTimestamp`.
 

@@ -46,14 +46,19 @@ não há tabela compartilhada entre domínios além das FKs explícitas abaixo.
   tem backfill, mas não dentro da migration — `ReconciliationService` (domínio `ingestion`)
   recalcula a chave de qualquer arquivo que a reencontre sem ela numa nova varredura; linha que
   não passar por reconciliação de novo continua `NULL` indefinidamente.
+- **V17** — insere três preferências novas em `setting` (`playback.default.audio-language`,
+  `playback.default.subtitle-language`, `playback.default.subtitle-forced`) — mesmo padrão de
+  seed do V3, incremental.
 
-## Seed de `setting` (V3 + V10)
+## Seed de `setting` (V3 + V10 + V17)
 
 A tabela `setting` nasce com um conjunto fixo de chaves já inseridas (não é só DDL vazio):
 `cache.max-size-bytes`, `anilist.cache.ttl`, `tmdb.cache.ttl`, `tmdb.api-key` (secret, vazio),
 `tmdb.default-language`, `tmdb.include-adult`, `playback.transcode.hardware-acceleration`,
-`playback.session.heartbeat-ttl`, `cache.dir`, `playback.work.base-dir`, e depois (V10)
-`tmdb.image.logo-language`, `tmdb.image.backdrop-language`. **Nova preferência que o código passa a
+`playback.session.heartbeat-ttl`, `cache.dir`, `playback.work.base-dir`, depois (V10)
+`tmdb.image.logo-language`, `tmdb.image.backdrop-language` e (V17)
+`playback.default.audio-language`, `playback.default.subtitle-language`,
+`playback.default.subtitle-forced`. **Nova preferência que o código passa a
 ler via um getter tipado de `SettingService` precisa de uma migration de seed correspondente** —
 sem isso, o valor não existe na tabela e o getter falha em runtime no primeiro uso (não no boot;
 ver observação equivalente no `README.md` de `domain/setting/`).

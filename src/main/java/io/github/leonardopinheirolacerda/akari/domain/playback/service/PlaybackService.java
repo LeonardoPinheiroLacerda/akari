@@ -51,8 +51,10 @@ import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.UUID;
 import java.util.regex.Pattern;
+import java.util.stream.IntStream;
 
 /**
  * Sessões de reprodução de mídia: inicia, reposiciona, troca faixas e encerra transcodes HLS
@@ -78,6 +80,20 @@ public class PlaybackService {
      * esteja mais longe que ela.
      */
     private static final double COPY_SEEK_PAST_KEYFRAME_SECONDS = 0.15;
+
+    /**
+     * Termos que, no título da faixa de legenda (case-insensitive), marcam ela como forçada na
+     * escolha da legenda padrão — muitos releases não preenchem a flag {@code forced} do
+     * container e identificam a faixa forçada só pelo título (ex.: {@code "Forçada"},
+     * {@code "Signs & Songs"}).
+     */
+    private static final List<String> FORCED_SUBTITLE_TITLE_TERMS = List.of(
+            "forced",
+            "forçada",
+            "forcada",
+            "signs",
+            "songs"
+    );
 
     /**
      * Quanto tempo esperar, logo depois de subir o ffmpeg, pra confirmar que ele não falhou de
@@ -147,6 +163,10 @@ public class PlaybackService {
     /**
      * Inicia uma nova sessão de transcode HLS.
      *
+     * <p>Cada faixa ausente no request sai das preferências {@code playback.default.*}, de forma
+     * independente: sem {@code audioTrackIndex}, o áudio padrão; sem {@code subtitleTrackIndex},
+     * a legenda padrão — a menos que {@code subtitleDisabled} peça pra reproduzir sem legenda.
+     *
      * @param request arquivo, profile e faixas de áudio/legenda escolhidas
      * @return a sessão recém-criada, com {@code startOffsetSeconds=0}
      * @throws ResourceNotFoundException se o {@code fileId} não existir no catalog, ou se o
@@ -171,7 +191,12 @@ public class PlaybackService {
         );
         final MediaInfoResponse mediaInfo = mediaProbeService.getMediaProbe(videoFile.id);
 
-        validateTrackBounds(mediaInfo, request.getAudioTrackIndex(), request.getSubtitleTrackIndex());
+        final Integer audioTrackIndex = request.getAudioTrackIndex() == null
+                ? resolveDefaultAudioTrackIndex(mediaInfo)
+                : request.getAudioTrackIndex();
+        final Integer subtitleTrackIndex = resolveSubtitleTrackIndex(request, mediaInfo);
+
+        validateTrackBounds(mediaInfo, audioTrackIndex, subtitleTrackIndex);
 
         final HlsTranscodeSpec spec = resolveSpec(profile, mediaInfo, videoFile.id);
 
@@ -184,8 +209,8 @@ public class PlaybackService {
                 inputFile,
                 workDir,
                 0.0,
-                request.getAudioTrackIndex(),
-                request.getSubtitleTrackIndex(),
+                audioTrackIndex,
+                subtitleTrackIndex,
                 mediaInfo,
                 spec
         );
@@ -196,8 +221,8 @@ public class PlaybackService {
         session.sessionId = sessionId;
         session.videoFile = videoFile;
         session.profile = profile.name();
-        session.audioTrackIndex = request.getAudioTrackIndex();
-        session.subtitleTrackIndex = request.getSubtitleTrackIndex();
+        session.audioTrackIndex = audioTrackIndex;
+        session.subtitleTrackIndex = subtitleTrackIndex;
         session.ffmpegPid = jobId;
         session.workDir = workDir.toString();
         session.startOffsetSeconds = 0.0;
@@ -626,6 +651,96 @@ public class PlaybackService {
             case QUEUED, DOWNLOADING -> FileAvailabilityStatus.DOWNLOADING;
             case FAILED -> FileAvailabilityStatus.NEEDS_DOWNLOAD;
         };
+    }
+
+    /**
+     * Primeira faixa de áudio no idioma {@code playback.default.audio-language}; sem nenhuma,
+     * a marcada como padrão no arquivo, senão a primeira.
+     */
+    private Integer resolveDefaultAudioTrackIndex(MediaInfoResponse mediaInfo) {
+        final List<AudioTrack> audioTracks = mediaInfo.getAudio();
+        final String language = settingService.getPlaybackDefaultAudioLanguage();
+
+        final OptionalInt languageMatch = IntStream.range(0, audioTracks.size())
+                .filter(i -> matchesLanguage(audioTracks.get(i).getLanguage(), language))
+                .findFirst();
+
+        if (languageMatch.isPresent()) {
+            return languageMatch.getAsInt();
+        }
+
+        return IntStream.range(0, audioTracks.size())
+                .filter(i -> Boolean.TRUE.equals(audioTracks.get(i).getDefaultTrack()))
+                .findFirst()
+                .orElse(0);
+    }
+
+    /**
+     * Faixa de legenda da sessão: {@code null} (sem legenda) com {@code subtitleDisabled}, a do
+     * request quando informada, senão a padrão das preferências.
+     */
+    private Integer resolveSubtitleTrackIndex(StartPlaybackSessionRequest request,
+                                              MediaInfoResponse mediaInfo) {
+
+        if (Boolean.TRUE.equals(request.getSubtitleDisabled())) {
+            return null;
+        }
+
+        if (request.getSubtitleTrackIndex() != null) {
+            return request.getSubtitleTrackIndex();
+        }
+
+        return resolveDefaultSubtitleTrackIndex(mediaInfo);
+    }
+
+    /**
+     * Faixa de legenda no idioma {@code playback.default.subtitle-language}: a primeira forçada ou
+     * completa conforme {@code playback.default.subtitle-forced} (ver {@link #isForcedSubtitle});
+     * sem nenhuma desse tipo, a primeira do idioma — o idioma pesa mais que o tipo. {@code null}
+     * (sem legenda) se nenhuma faixa estiver no idioma.
+     */
+    private Integer resolveDefaultSubtitleTrackIndex(MediaInfoResponse mediaInfo) {
+        final List<SubtitleTrack> subtitleTracks = mediaInfo.getSubtitles();
+        final String language = settingService.getPlaybackDefaultSubtitleLanguage();
+        final boolean forced = settingService.isPlaybackDefaultSubtitleForced();
+
+        final List<Integer> languageMatches = IntStream.range(0, subtitleTracks.size())
+                .filter(i -> matchesLanguage(subtitleTracks.get(i).getLanguage(), language))
+                .boxed()
+                .toList();
+
+        if (languageMatches.isEmpty()) {
+            return null;
+        }
+
+        return languageMatches.stream()
+                .filter(i -> isForcedSubtitle(subtitleTracks.get(i)) == forced)
+                .findFirst()
+                .orElse(languageMatches.get(0));
+    }
+
+    /**
+     * Faixa forçada pela flag {@code forced} do arquivo ou, sem ela, por um dos
+     * {@link #FORCED_SUBTITLE_TITLE_TERMS} no título.
+     */
+    private boolean isForcedSubtitle(SubtitleTrack track) {
+        if (Boolean.TRUE.equals(track.getForced())) {
+            return true;
+        }
+
+        if (track.getTitle() == null) {
+            return false;
+        }
+
+        final String title = track.getTitle()
+                .toLowerCase(Locale.ROOT);
+
+        return FORCED_SUBTITLE_TITLE_TERMS.stream()
+                .anyMatch(title::contains);
+    }
+
+    private boolean matchesLanguage(String trackLanguage, String language) {
+        return trackLanguage != null && trackLanguage.equalsIgnoreCase(language);
     }
 
     private void validateTrackBounds(MediaInfoResponse mediaInfo, Integer audioTrackIndex, Integer subtitleTrackIndex) {

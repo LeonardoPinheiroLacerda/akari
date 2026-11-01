@@ -209,6 +209,39 @@ public class SettingService {
         return findOrThrow("playback.work.base-dir").value;
     }
 
+    /**
+     * Lê a preferência {@code playback.default.audio-language}.
+     *
+     * @return o idioma (tag {@code language} do arquivo, ex. {@code jpn}) da faixa de áudio
+     *         escolhida quando o cliente inicia uma sessão sem informar o áudio
+     * @throws ResourceNotFoundException se a preferência não existir
+     */
+    public String getPlaybackDefaultAudioLanguage() {
+        return findOrThrow("playback.default.audio-language").value;
+    }
+
+    /**
+     * Lê a preferência {@code playback.default.subtitle-language}.
+     *
+     * @return o idioma (tag {@code language} do arquivo, ex. {@code por}) da faixa de legenda
+     *         escolhida quando o cliente inicia uma sessão sem informar a legenda
+     * @throws ResourceNotFoundException se a preferência não existir
+     */
+    public String getPlaybackDefaultSubtitleLanguage() {
+        return findOrThrow("playback.default.subtitle-language").value;
+    }
+
+    /**
+     * Lê a preferência {@code playback.default.subtitle-forced}.
+     *
+     * @return {@code true} se a legenda padrão preferida é a forçada; {@code false} pra
+     *         completa — só desempata entre faixas do mesmo idioma
+     * @throws ResourceNotFoundException se a preferência não existir
+     */
+    public boolean isPlaybackDefaultSubtitleForced() {
+        return Boolean.parseBoolean(findOrThrow("playback.default.subtitle-forced").value);
+    }
+
     private Setting findOrThrow(String key) {
         return Setting.find(key)
                 .orElseThrow(() -> {
