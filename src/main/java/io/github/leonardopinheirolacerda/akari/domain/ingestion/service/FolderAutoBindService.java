@@ -6,8 +6,10 @@ import io.github.leonardopinheirolacerda.akari.api.dto.AnimeBindingRequest;
 import io.github.leonardopinheirolacerda.akari.api.dto.AnimeReviewStatus;
 import io.github.leonardopinheirolacerda.akari.api.dto.NotificationLevel;
 import io.github.leonardopinheirolacerda.akari.api.dto.TmdbBindingRequest;
+import io.github.leonardopinheirolacerda.akari.api.dto.TmdbFilePairingProposal;
 import io.github.leonardopinheirolacerda.akari.api.dto.TmdbFilePairingProposalStatus;
 import io.github.leonardopinheirolacerda.akari.api.dto.TmdbMediaType;
+import io.github.leonardopinheirolacerda.akari.domain.anibridge.model.ResolvedEpisode;
 import io.github.leonardopinheirolacerda.akari.domain.anibridge.model.TmdbMappingCandidate;
 import io.github.leonardopinheirolacerda.akari.domain.anibridge.service.AnibridgeResolutionService;
 import io.github.leonardopinheirolacerda.akari.domain.anilist.service.AnilistSearchService;
@@ -17,6 +19,7 @@ import io.github.leonardopinheirolacerda.akari.domain.anime.service.AnimeOverrid
 import io.github.leonardopinheirolacerda.akari.domain.anime.service.AnimeService;
 import io.github.leonardopinheirolacerda.akari.domain.anime.service.AnimeTmdbFilePairingService;
 import io.github.leonardopinheirolacerda.akari.domain.anime.service.AnimeTmdbService;
+import io.github.leonardopinheirolacerda.akari.domain.anime.service.EpisodePairingComparisonService;
 import io.github.leonardopinheirolacerda.akari.domain.anime.service.EpisodePairingResolutionService;
 import io.github.leonardopinheirolacerda.akari.domain.notification.service.NotificationService;
 import io.github.leonardopinheirolacerda.akari.exceptions.IntegrationException;
@@ -25,9 +28,12 @@ import io.github.leonardopinheirolacerda.akari.utils.RetryUtils;
 import io.quarkus.logging.Log;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -72,6 +78,9 @@ public class FolderAutoBindService {
 
     @Inject
     EpisodePairingResolutionService episodePairingResolutionService;
+
+    @Inject
+    EpisodePairingComparisonService episodePairingComparisonService;
 
     @Inject
     NotificationService notificationService;
@@ -230,19 +239,44 @@ public class FolderAutoBindService {
                 .orElse(anime);
     }
 
+    /**
+     * Pareia os episódios da pasta pelo anibridge, gravando só o que o portal deixaria marcado
+     * numa proposta: arquivo sem par gravado ({@code NEW}) com episódio que nenhum outro arquivo
+     * usa. Arquivo que já tem par — manual ou de uma ingestão anterior — nunca é alterado, mesmo
+     * que o anibridge resolva outro episódio pra ele. O {@code reviewStatus} e as notificações
+     * consideram pareado tanto o arquivo que já tinha par quanto o recém-gravado.
+     */
     private void pairEpisodes(Integer folderId, String folderName, Anime anime) {
+        final Map<Integer, ResolvedEpisode> currentEpisodes = episodePairingComparisonService.findCurrentEpisodes(folderId);
+
         final List<FilePairingResolution> resolutions = episodePairingResolutionService.resolve(
                 anime,
                 folderId,
                 folderName
         );
 
-        if (hasStatus(resolutions, TmdbFilePairingProposalStatus.NO_MAPPING)) {
-            animeService.updateReviewStatusIfNotReviewed(anime.anilistId, AnimeReviewStatus.PARTIAL);
-            return;
+        final List<TmdbFilePairingProposal> proposals = episodePairingComparisonService.compare(resolutions, currentEpisodes);
+
+        final Set<Integer> pairedFileIds = new HashSet<>(currentEpisodes.keySet());
+
+        for (TmdbFilePairingProposal proposal : proposals) {
+            if (!proposal.getSelectedByDefault()) {
+                continue;
+            }
+
+            animeTmdbFilePairingService.updateTmdbFilePairing(proposal.getFileId(), proposal.getPairing());
+
+            pairedFileIds.add(proposal.getFileId());
         }
 
-        if (hasStatus(resolutions, TmdbFilePairingProposalStatus.CONFLICTING_MAPPING)) {
+        final List<FilePairingResolution> unpaired = resolutions.stream()
+                .filter(resolution -> !pairedFileIds.contains(resolution.videoFile().id))
+                .toList();
+
+        final boolean mappingUnusable = hasStatus(resolutions, TmdbFilePairingProposalStatus.NO_MAPPING)
+                || hasStatus(resolutions, TmdbFilePairingProposalStatus.CONFLICTING_MAPPING);
+
+        if (hasStatus(unpaired, TmdbFilePairingProposalStatus.CONFLICTING_MAPPING)) {
             notificationService.notify(
                     NotificationLevel.WARNING,
                     folderName,
@@ -250,23 +284,9 @@ public class FolderAutoBindService {
                             + "pareamento automático não tentado",
                     folderId,
                     coverImageOf(anime));
-            animeService.updateReviewStatusIfNotReviewed(anime.anilistId, AnimeReviewStatus.PARTIAL);
-            return;
         }
 
-        int paired = 0;
-
-        for (FilePairingResolution resolution : resolutions) {
-            if (resolution.status() != TmdbFilePairingProposalStatus.PAIRED) {
-                continue;
-            }
-
-            animeTmdbFilePairingService.updateTmdbFilePairing(resolution.videoFile().id, resolution.pairing());
-
-            paired++;
-        }
-
-        if (hasStatus(resolutions, TmdbFilePairingProposalStatus.AMBIGUOUS_ABSOLUTE_NUMBERING)) {
+        if (hasStatus(unpaired, TmdbFilePairingProposalStatus.AMBIGUOUS_ABSOLUTE_NUMBERING)) {
             notificationService.notify(
                     NotificationLevel.WARNING,
                     folderName,
@@ -277,7 +297,7 @@ public class FolderAutoBindService {
                     coverImageOf(anime));
         }
 
-        final List<FilePairingResolution> missingInTmdb = resolutions.stream()
+        final List<FilePairingResolution> missingInTmdb = unpaired.stream()
                 .filter(resolution -> resolution.status() == TmdbFilePairingProposalStatus.NOT_FOUND_IN_TMDB)
                 .toList();
 
@@ -299,16 +319,16 @@ public class FolderAutoBindService {
                     coverImageOf(anime));
         }
 
-        if (paired < resolutions.size()) {
+        if (!unpaired.isEmpty() && !mappingUnusable) {
             notificationService.notify(
                     NotificationLevel.WARNING,
                     folderName,
-                    "%d de %d arquivos pareados".formatted(paired, resolutions.size()),
+                    "%d de %d arquivos pareados".formatted(resolutions.size() - unpaired.size(), resolutions.size()),
                     folderId,
                     coverImageOf(anime));
         }
 
-        final AnimeReviewStatus reviewStatus = paired == resolutions.size()
+        final AnimeReviewStatus reviewStatus = unpaired.isEmpty()
                 ? AnimeReviewStatus.PENDING_REVIEW
                 : AnimeReviewStatus.PARTIAL;
 

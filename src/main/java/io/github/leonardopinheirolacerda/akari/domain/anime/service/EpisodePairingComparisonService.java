@@ -7,6 +7,7 @@ import io.github.leonardopinheirolacerda.akari.domain.anibridge.model.ResolvedEp
 import io.github.leonardopinheirolacerda.akari.domain.anime.model.FilePairingResolution;
 import io.github.leonardopinheirolacerda.akari.domain.anime.model.TmdbFilePairing;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.transaction.Transactional;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -18,7 +19,9 @@ import java.util.stream.Collectors;
 
 /**
  * Compara a resolução de pairing de cada arquivo com o par gravado nele e monta a proposta do
- * portal: par atual, {@code change}, quem já usa o episódio proposto e a pré-seleção.
+ * portal: par atual, {@code change}, quem já usa o episódio proposto e a pré-seleção. O pairing
+ * automático da ingestão usa a mesma comparação e grava só as propostas pré-selecionadas —
+ * nunca altera um arquivo que já tem par.
  *
  * <p>Não sabe qual estratégia gerou as resoluções ({@link EpisodePairingResolutionService} ou
  * {@link EpisodeContinuityResolutionService}) — a regra é a mesma pras duas e pra qualquer
@@ -36,9 +39,13 @@ public class EpisodePairingComparisonService {
      * Lê os pares gravados dos arquivos da pasta — só os que têm temporada e episódio
      * preenchidos, que é o que conta como par pra comparação e pra âncora da continuidade.
      *
+     * <p>{@code @Transactional} mesmo sendo leitura: também é chamado pelo pairing automático da
+     * ingestão, que roda numa thread virtual sem transação nem request context.
+     *
      * @param folderId pasta do anime
      * @return temporada/episódio gravados, por {@code fileId}; arquivos sem par não aparecem
      */
+    @Transactional
     public Map<Integer, ResolvedEpisode> findCurrentEpisodes(Integer folderId) {
         return TmdbFilePairing.findByFolderId(folderId)
                 .stream()
