@@ -11,10 +11,10 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Rastreia, em memória, os processos {@code ffmpeg} vivos de cada sessão de playback: se ainda
- * estão de pé, se o encerramento foi pedido pelo backend (seek, troca de faixa, expiração) e as
- * últimas linhas do stderr — pra diagnosticar uma morte inesperada sem depender do diretório de
- * trabalho, que é apagado na limpeza.
+ * Rastreia, em memória, os processos {@code ffmpeg} de cada sessão de playback: se ainda estão de
+ * pé, como terminaram (concluído com código {@code 0} ou falha), se o encerramento foi pedido pelo
+ * backend (seek, troca de faixa, expiração) e as últimas linhas do stderr — pra diagnosticar uma
+ * falha sem depender do diretório de trabalho, que é apagado na limpeza.
  *
  * <p>Estado local desta instância da aplicação, não persistido — uma sessão iniciada antes de um
  * reinício do processo akari deixa de ser rastreada, caindo de volta no comportamento de "ainda
@@ -28,8 +28,8 @@ public class TranscodeProcessRegistry {
 
     /**
      * Começa a rastrear um processo {@code ffmpeg} recém-iniciado: drena o stderr dele num thread
-     * dedicado (evita travar o processo quando o pipe enche) e loga o encerramento, esperado ou
-     * não, quando ele sair.
+     * dedicado (evita travar o processo quando o pipe enche) e loga o encerramento quando ele sair
+     * — pedido pelo backend, concluído com sucesso ou falha.
      *
      * @param sessionId sessão dona do processo
      * @param process processo recém-iniciado pelo {@code FfmpegClient}
@@ -81,22 +81,25 @@ public class TranscodeProcessRegistry {
     }
 
     /**
-     * Diz se o processo rastreado desta sessão morreu sem ter sido pedido pelo backend — o sinal
-     * de que o transcode falhou e nunca vai gerar a playlist.
+     * Diz se o processo rastreado desta sessão terminou com falha sem ter sido pedido pelo
+     * backend — o sinal de que o transcode não vai gerar o que falta. Terminar com código
+     * {@code 0} é conclusão normal (o transcode inteiro já foi escrito), não falha.
      *
      * @param sessionId sessão a consultar
-     * @return {@code true} se há um processo rastreado, ele já morreu e {@link #markStoppedByBackend}
-     *         não foi chamado antes de morrer; {@code false} nos demais casos
+     * @return {@code true} se há um processo rastreado, ele já terminou com código de saída
+     *         diferente de {@code 0} (ou por sinal) e {@link #markStoppedByBackend} não foi
+     *         chamado antes; {@code false} nos demais casos — inclusive processo ainda rodando ou
+     *         concluído com sucesso
      */
     public boolean hasFailedUnexpectedly(UUID sessionId) {
         final TrackedTranscodeProcess entry = tracked.get(sessionId);
 
-        return entry != null && !entry.process.isAlive() && !entry.stoppedByBackend;
+        return entry != null && entry.exitedWithFailure() && !entry.stoppedByBackend;
     }
 
     /**
      * Registra, uma única vez por sessão, que a playlist continua ausente com o processo já
-     * morto — evita repetir o mesmo aviso a cada requisição de playlist da sessão.
+     * terminado com falha — evita repetir o mesmo aviso a cada requisição de playlist da sessão.
      *
      * @param sessionId sessão cuja playlist nunca apareceu
      */
@@ -105,7 +108,7 @@ public class TranscodeProcessRegistry {
 
         if (entry != null && !entry.missingPlaylistLogged) {
             entry.missingPlaylistLogged = true;
-            Log.warnf("Sessão de playback %s: ffmpeg encerrado e a playlist nunca foi gerada", sessionId);
+            Log.warnf("Sessão de playback %s: ffmpeg falhou e a playlist nunca foi gerada", sessionId);
         }
     }
 
@@ -138,7 +141,12 @@ public class TranscodeProcessRegistry {
             return;
         }
 
-        Log.errorf("ffmpeg da sessão %s (pid %d) terminou inesperadamente, código de saída %d", sessionId, pid, exitCode);
+        if (exitCode == 0) {
+            Log.infof("ffmpeg da sessão %s (pid %d) concluiu o transcode, código de saída 0", sessionId, pid);
+            return;
+        }
+
+        Log.errorf("ffmpeg da sessão %s (pid %d) falhou, código de saída %d", sessionId, pid, exitCode);
 
         final List<String> stderrTail = entry.stderrTailSnapshot();
 

@@ -80,7 +80,7 @@ public class PlaybackService {
     private static final double COPY_SEEK_PAST_KEYFRAME_SECONDS = 0.15;
 
     /**
-     * Quanto tempo esperar, logo depois de subir o ffmpeg, pra confirmar que ele não morreu de
+     * Quanto tempo esperar, logo depois de subir o ffmpeg, pra confirmar que ele não falhou de
      * cara (filtro inválido, codec sem suporte) — detectado aqui em vez de só na primeira
      * requisição de playlist, pra responder o erro já no {@code POST} que iniciou/reiniciou o
      * transcode.
@@ -157,8 +157,8 @@ public class PlaybackService {
      * @throws IntegrationNotConfiguredException se {@code playback.work.base-dir} não estiver
      *         configurado
      * @throws IntegrationException se o ffmpeg falhar ao iniciar
-     * @throws TranscodeFailedException se o ffmpeg morrer logo depois de subir, antes de
-     *         confirmar que o transcode começou
+     * @throws TranscodeFailedException se o ffmpeg falhar (código de saída diferente de
+     *         {@code 0}) logo depois de subir, antes de confirmar que o transcode começou
      */
     @Transactional
     public PlaybackSessionResponse startPlaybackSession(StartPlaybackSessionRequest request) {
@@ -223,7 +223,8 @@ public class PlaybackService {
      * @return a sessão atualizada (mesmo {@code sessionId}, possivelmente novo
      *         {@code startOffsetSeconds} se houve reinício)
      * @throws ResourceNotFoundException se a sessão não existir ou já tiver expirado
-     * @throws TranscodeFailedException se o reinício do ffmpeg morrer logo depois de subir
+     * @throws TranscodeFailedException se o reinício do ffmpeg falhar (código de saída
+     *         diferente de {@code 0}) logo depois de subir
      */
     @Transactional
     public PlaybackSessionResponse seekPlaybackSession(UUID sessionId, SeekRequest request) {
@@ -260,7 +261,8 @@ public class PlaybackService {
      * @return a sessão atualizada (mesmo {@code sessionId}, novo {@code startOffsetSeconds})
      * @throws ResourceNotFoundException se a sessão não existir ou já tiver expirado
      * @throws BusinessRuleException se os novos índices de faixa não existirem no arquivo
-     * @throws TranscodeFailedException se o reinício do ffmpeg morrer logo depois de subir
+     * @throws TranscodeFailedException se o reinício do ffmpeg falhar (código de saída
+     *         diferente de {@code 0}) logo depois de subir
      */
     @Transactional
     public PlaybackSessionResponse switchPlaybackSessionTracks(UUID sessionId, SwitchTracksRequest request) {
@@ -286,7 +288,7 @@ public class PlaybackService {
      *         ainda não estiver pronta e o processo ainda estiver rodando (transcode ainda não
      *         produziu o primeiro segmento, ou o master ainda não lista nenhuma variante) — o
      *         cliente deve continuar tentando
-     * @throws TranscodeFailedException se o ffmpeg já tiver morrido sem ter sido pedido pelo
+     * @throws TranscodeFailedException se o ffmpeg já tiver falhado sem ter sido pedido pelo
      *         backend — essa playlist nunca vai ser gerada, o cliente deve parar de tentar
      */
     public String getPlaybackPlaylist(UUID sessionId) {
@@ -566,11 +568,11 @@ public class PlaybackService {
             throw new IntegrationException(e.getMessage(), e);
         }
 
-        if (diedWithinStartupGrace(sessionId)) {
+        if (failedWithinStartupGrace(sessionId)) {
             transcodeProcessRegistry.forget(sessionId);
             playbackWorkspaceService.delete(workDir);
             throw new TranscodeFailedException(
-                    "O transcode da sessão " + sessionId + " falhou ao iniciar (ffmpeg encerrou logo após subir)");
+                    "O transcode da sessão " + sessionId + " falhou ao iniciar (ffmpeg saiu com erro logo após subir)");
         }
 
         return pid;
@@ -579,20 +581,18 @@ public class PlaybackService {
     /**
      * Espera {@value #FFMPEG_STARTUP_GRACE} pelo processo recém-iniciado, checando com
      * {@value #FFMPEG_STARTUP_POLL_INTERVAL} de intervalo — sai mais rápido se o processo já
-     * morreu, pra não atrasar o {@code POST} em caso de falha.
+     * terminou, pra não atrasar o {@code POST}. Terminar dentro da janela só é falha com código
+     * de saída diferente de {@code 0}: com o vídeo copiado, o remux de um trecho curto (ex.: seek
+     * perto do fim) termina com sucesso em menos de 1s, já com a playlist completa escrita.
      */
-    private boolean diedWithinStartupGrace(UUID sessionId) {
+    private boolean failedWithinStartupGrace(UUID sessionId) {
         final long deadline = System.nanoTime() + FFMPEG_STARTUP_GRACE.toNanos();
 
-        while (System.nanoTime() < deadline) {
-            if (!transcodeProcessRegistry.isAlive(sessionId)) {
-                return true;
-            }
-
+        while (System.nanoTime() < deadline && transcodeProcessRegistry.isAlive(sessionId)) {
             sleepQuietly(FFMPEG_STARTUP_POLL_INTERVAL);
         }
 
-        return !transcodeProcessRegistry.isAlive(sessionId);
+        return transcodeProcessRegistry.hasFailedUnexpectedly(sessionId);
     }
 
     private void sleepQuietly(Duration duration) {

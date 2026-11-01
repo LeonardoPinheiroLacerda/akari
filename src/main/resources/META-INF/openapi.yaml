@@ -707,8 +707,9 @@ paths:
         (UUID) que identifica a sessão, junto do endereço da playlist `m3u8`.
 
         Responde `404` se o vídeo é de provider remoto e ainda não terminou de baixar no cache.
-        Responde `500` com `TRANSCODE_FAILED` se o `ffmpeg` morrer logo depois de subir, antes
-        de confirmar que o transcode começou — nesse caso a sessão não é criada.
+        Responde `500` com `TRANSCODE_FAILED` se o `ffmpeg` sair com erro logo depois de subir,
+        antes de confirmar que o transcode começou — nesse caso a sessão não é criada. Terminar
+        com sucesso logo depois de subir (remux curto) não é falha.
       requestBody:
         $ref: '#/components/requestBodies/StartPlaybackSessionRequestBody'
       responses:
@@ -792,8 +793,9 @@ paths:
         devolve a media playlist da rendition única. Responde `404` se a sessão não existe,
         expirou ou ainda não produziu playlist (incluindo um master playlist que ainda não lista
         nenhuma variante) — nesse caso o cliente deve continuar tentando.
-        Responde `500` com `TRANSCODE_FAILED` se o `ffmpeg` já morreu e essa playlist nunca vai
-        ser gerada — nesse caso o cliente deve parar de tentar e mostrar erro.
+        Responde `500` com `TRANSCODE_FAILED` se o `ffmpeg` já saiu com erro e essa playlist
+        nunca vai ser gerada — nesse caso o cliente deve parar de tentar e mostrar erro. Uma
+        sessão cujo `ffmpeg` já concluiu com sucesso continua servindo a playlist normalmente.
 
         O header `X-Playback-Heartbeat-Ttl-Seconds` informa, em segundos, o TTL do heartbeat que o
         cliente deve respeitar — é o mesmo prazo devolvido no corpo do endpoint de heartbeat. O
@@ -2248,8 +2250,8 @@ components:
         - `INTEGRATION_NOT_CONFIGURED` (503): uma preferência obrigatória está sem valor —
           o admin precisa configurá-la em
           `PUT /v1/settings/{key}`.
-        - `TRANSCODE_FAILED` (500): o transcode de uma sessão de playback morreu antes de gerar
-          a playlist (ou depois de já ter gerado) e não vai se recuperar — o cliente deve parar
+        - `TRANSCODE_FAILED` (500): o transcode de uma sessão de playback saiu com erro antes de
+          gerar a playlist (ou depois de já ter gerado) e não vai se recuperar — o cliente deve parar
           de tentar e mostrar erro, diferente do `RESOURCE_NOT_FOUND` de "ainda não gerada".
         - `INTERNAL_ERROR` (500): erro inesperado no servidor.
       enum:
