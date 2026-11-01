@@ -122,6 +122,26 @@ public class FfmpegClient {
     }
 
     /**
+     * Diz se o transcode vai copiar o vídeo (remux, sem recodificar) — mesma decisão que o
+     * {@link #buildCommand} toma pro {@code -c:v}.
+     *
+     * <p>Com o vídeo copiado, o {@code -ss} de entrada não corta no instante pedido: o ffmpeg só
+     * consegue começar no keyframe onde a busca do demuxer cai — que segue o índice do container,
+     * então não é necessariamente o último keyframe antes do instante.
+     *
+     * @param video spec de vídeo escolhida pela estratégia; {@code null} copia
+     * @param mediaInfo probe do arquivo, pra resolver o codec da legenda
+     * @param subtitleTrackIndex faixa de legenda escolhida; {@code null} se nenhuma
+     * @return {@code true} se o vídeo sai copiado — {@code COPY} só cede pra encode quando a
+     *         legenda escolhida exige burn-in
+     */
+    public boolean copiesVideo(VideoTranscode video, MediaInfoResponse mediaInfo, Integer subtitleTrackIndex) {
+        final SubtitleMode subtitleMode = resolveSubtitleMode(mediaInfo, subtitleTrackIndex);
+
+        return copiesVideo(video, subtitleMode);
+    }
+
+    /**
      * Monta os argumentos do comando {@code ffmpeg} pro transcode HLS, sem efeito colateral —
      * separado de {@link #start} pra ser testável isoladamente.
      *
@@ -406,7 +426,7 @@ public class FfmpegClient {
         final String videoMapTarget = appendVideoFilterGraph(args, params.mediaInfo(), subtitlePlan, resolution, "v0");
 
         appendStreamMapping(args, videoMapTarget, params.audioTrackIndex(), subtitlePlan);
-        appendVideo(args, spec.video(), resolution, subtitlePlan, params.hwAccel(), keyframeFrames);
+        appendVideo(args, spec.video(), resolution, subtitlePlan, params.hwAccel(), keyframeFrames, params.mediaInfo());
         appendAudio(args, spec.audio(), params.mediaInfo(), params.audioTrackIndex());
         appendSubtitleGroup(args, subtitlePlan);
         appendMuxer(args, spec.hls(), params.workDir(), subtitlePlan.isSoft());
@@ -420,26 +440,36 @@ public class FfmpegClient {
      */
     private SubtitlePlan resolveSubtitlePlan(FfmpegStartParams params, double startOffsetSeconds) {
         final Integer subtitleTrackIndex = params.subtitleTrackIndex();
-        final String subtitleCodec = subtitleCodec(params.mediaInfo(), subtitleTrackIndex);
+        final SubtitleMode subtitleMode = resolveSubtitleMode(params.mediaInfo(), subtitleTrackIndex);
+
+        return switch (subtitleMode) {
+            case NONE -> new SubtitlePlan(SubtitleMode.NONE, null, null);
+            case SOFT, BURN_IMAGE -> new SubtitlePlan(subtitleMode, subtitleTrackIndex, null);
+            case BURN_TEXT -> new SubtitlePlan(
+                    SubtitleMode.BURN_TEXT,
+                    subtitleTrackIndex,
+                    burnSubtitleFilter(params.inputFile(), subtitleTrackIndex, startOffsetSeconds));
+        };
+    }
+
+    private SubtitleMode resolveSubtitleMode(MediaInfoResponse mediaInfo, Integer subtitleTrackIndex) {
+        final String subtitleCodec = subtitleCodec(mediaInfo, subtitleTrackIndex);
 
         if (subtitleTrackIndex == null || subtitleCodec == null) {
-            return new SubtitlePlan(SubtitleMode.NONE, null, null);
+            return SubtitleMode.NONE;
         }
 
         final String normalizedCodec = subtitleCodec.toLowerCase(Locale.ROOT);
 
         if (SRT_CODECS.contains(normalizedCodec)) {
-            return new SubtitlePlan(SubtitleMode.SOFT, subtitleTrackIndex, null);
+            return SubtitleMode.SOFT;
         }
 
         if (IMAGE_SUBTITLE_CODECS.contains(normalizedCodec)) {
-            return new SubtitlePlan(SubtitleMode.BURN_IMAGE, subtitleTrackIndex, null);
+            return SubtitleMode.BURN_IMAGE;
         }
 
-        return new SubtitlePlan(
-                SubtitleMode.BURN_TEXT,
-                subtitleTrackIndex,
-                burnSubtitleFilter(params.inputFile(), subtitleTrackIndex, startOffsetSeconds));
+        return SubtitleMode.BURN_TEXT;
     }
 
     /**
@@ -567,13 +597,13 @@ public class FfmpegClient {
                              Resolution resolution,
                              SubtitlePlan subtitlePlan,
                              HwAccel hwAccel,
-                             Integer keyframeFrames) {
+                             Integer keyframeFrames,
+                             MediaInfoResponse mediaInfo) {
 
-        final boolean needsBurn = subtitlePlan.mode() == SubtitleMode.BURN_TEXT || subtitlePlan.isBurnImage();
-
-        if (video == null || (video.mode() == TranscodeMode.COPY && !needsBurn)) {
+        if (copiesVideo(video, subtitlePlan.mode())) {
             args.add("-c:v");
             args.add("copy");
+            appendCopiedVideoBitrate(args, mediaInfo);
             return;
         }
 
@@ -590,6 +620,38 @@ public class FfmpegClient {
 
         args.add("-vf");
         args.add(videoFilter(resolution, subtitlePlan.burnFilter()));
+    }
+
+    /**
+     * {@code -b:v} com o bitrate do probe no vídeo copiado — no copy não recodifica nada, só
+     * preenche o {@code bit_rate} do stream de saída. O muxer HLS calcula o {@code BANDWIDTH} do
+     * master playlist a partir dele enquanto o transcode roda; sem bitrate (comum em Matroska,
+     * que não informa por faixa), escreve o master sem o {@code #EXT-X-STREAM-INF} e só o
+     * completa no fim do remux, com a banda medida. Usa o bitrate do container (inclui o áudio):
+     * só serve pra esse primeiro {@code BANDWIDTH}, que o ffmpeg substitui pela banda medida no
+     * fim, e superestimar não atrapalha — o {@code BANDWIDTH} é o pico da variante.
+     */
+    private void appendCopiedVideoBitrate(List<String> args, MediaInfoResponse mediaInfo) {
+        final Long bitRate = mediaInfo.getContainer() != null
+                ? mediaInfo.getContainer().getBitRate()
+                : null;
+
+        if (bitRate == null) {
+            return;
+        }
+
+        args.add("-b:v");
+        args.add(String.valueOf(bitRate));
+    }
+
+    /**
+     * {@code true} se o vídeo sai copiado: sem spec de vídeo, ou {@code COPY} com uma legenda que
+     * não exige burn-in.
+     */
+    private boolean copiesVideo(VideoTranscode video, SubtitleMode subtitleMode) {
+        final boolean needsBurn = subtitleMode == SubtitleMode.BURN_TEXT || subtitleMode == SubtitleMode.BURN_IMAGE;
+
+        return video == null || (video.mode() == TranscodeMode.COPY && !needsBurn);
     }
 
     /** {@code -preset}/{@code -tune}: compartilhado entre rendition única e cada variante do ABR. */

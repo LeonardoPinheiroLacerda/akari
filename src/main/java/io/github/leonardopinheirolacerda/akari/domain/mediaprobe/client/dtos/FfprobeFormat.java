@@ -6,7 +6,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 /**
  * Bloco {@code format} da saída do {@code ffprobe}.
  *
- * <p>{@code duration}/{@code size}/{@code bitRate} ficam {@code String} porque o ffprobe os
+ * <p>{@code duration}/{@code size}/{@code bitRate}/{@code startTime} ficam {@code String} porque o ffprobe os
  * emite entre aspas no JSON — a conversão pra tipo numérico só acontece no mapeamento pro DTO
  * de resposta do contrato. {@code @JsonIgnoreProperties(ignoreUnknown = true)} tolera campos
  * novos entre versões do ffprobe.
@@ -16,6 +16,8 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  * @param duration duração em segundos, como string
  * @param size tamanho do arquivo em bytes, como string
  * @param bitRate taxa de bits do container em bits/segundo, como string
+ * @param startTime timestamp do início do arquivo, em segundos, como string — {@code 0} na
+ *                  maioria dos containers, mas não em MPEG-TS
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record FfprobeFormat(
@@ -23,6 +25,7 @@ public record FfprobeFormat(
         @JsonProperty("format_long_name") String formatLongName,
         String duration,
         String size,
-        @JsonProperty("bit_rate") String bitRate
+        @JsonProperty("bit_rate") String bitRate,
+        @JsonProperty("start_time") String startTime
 ) {
 }

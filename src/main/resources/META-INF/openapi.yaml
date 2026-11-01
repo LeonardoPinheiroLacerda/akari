@@ -732,9 +732,10 @@ paths:
       summary: Reposiciona o transcode de uma sessão
       description: |
         Reposiciona o transcode de uma sessão já iniciada para o instante informado. A playlist
-        `m3u8` passa a refletir a nova posição. Responde `404` se a sessão não existe ou já
-        expirou. Responde `500` com `TRANSCODE_FAILED` se o reinício do `ffmpeg` falhar logo
-        depois de subir.
+        `m3u8` passa a refletir a nova posição, a partir do `startOffsetSeconds` devolvido (que,
+        com o vídeo copiado sem recodificar, é um keyframe em ou antes da posição pedida). Responde
+        `404` se a sessão não existe ou já expirou. Responde `500` com `TRANSCODE_FAILED` se o
+        reinício do `ffmpeg` falhar logo depois de subir.
       requestBody:
         $ref: '#/components/requestBodies/SeekRequestBody'
       responses:
@@ -789,7 +790,8 @@ paths:
         transcode produz um master playlist (ABR com várias resoluções, ou legenda soft), é ele que
         é devolvido — e ele referencia os variant playlists `stream_N.m3u8`. Caso contrário,
         devolve a media playlist da rendition única. Responde `404` se a sessão não existe,
-        expirou ou ainda não produziu playlist — nesse caso o cliente deve continuar tentando.
+        expirou ou ainda não produziu playlist (incluindo um master playlist que ainda não lista
+        nenhuma variante) — nesse caso o cliente deve continuar tentando.
         Responde `500` com `TRANSCODE_FAILED` se o `ffmpeg` já morreu e essa playlist nunca vai
         ser gerada — nesse caso o cliente deve parar de tentar e mostrar erro.
 
@@ -3007,7 +3009,11 @@ components:
             Posição de mídia, em segundos, que corresponde ao início da playlist (`currentTime 0`). O
             cliente mapeia a posição local com base nela (`currentTime = alvo - startOffsetSeconds`) e
             recarrega a source quando ela muda entre chamadas de seek (indicando que o transcode
-            reiniciou num novo offset). `0` no início da mídia.
+            reiniciou num novo offset). `0` no início da mídia. Quando o reinício (seek ou troca de
+            faixas) copia o vídeo sem recodificar, o transcode só consegue começar num keyframe:
+            o valor é o instante desse keyframe, em ou antes da posição pedida (podendo ficar até
+            um GOP, alguns segundos, antes), e não a própria posição. Recodificando, é a posição
+            pedida.
 
     M3u8Playlist:
       type: string

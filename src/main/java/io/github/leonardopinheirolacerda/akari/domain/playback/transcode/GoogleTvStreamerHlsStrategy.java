@@ -63,7 +63,7 @@ public class GoogleTvStreamerHlsStrategy implements HlsTranscodeStrategy {
                         2.0,
                         null),
                 new AudioTranscode(TranscodeMode.COPY, AudioCodec.AAC, 160, null),
-                new HlsOptions(4, HlsSegmentType.FMP4, HlsPlaylistType.EVENT, 0, null)
+                new HlsOptions(4, HlsSegmentType.FMP4, HlsPlaylistType.EVENT, 0, Set.of(HlsFlag.TEMP_FILE))
         );
     }
 

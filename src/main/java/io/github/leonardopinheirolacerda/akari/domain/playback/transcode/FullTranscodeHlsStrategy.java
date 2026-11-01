@@ -4,6 +4,7 @@ import io.github.leonardopinheirolacerda.akari.api.dto.MediaInfoResponse;
 import io.github.leonardopinheirolacerda.akari.domain.playback.transcode.spec.AudioCodec;
 import io.github.leonardopinheirolacerda.akari.domain.playback.transcode.spec.AudioTranscode;
 import io.github.leonardopinheirolacerda.akari.domain.playback.transcode.spec.EncodePreset;
+import io.github.leonardopinheirolacerda.akari.domain.playback.transcode.spec.HlsFlag;
 import io.github.leonardopinheirolacerda.akari.domain.playback.transcode.spec.HlsOptions;
 import io.github.leonardopinheirolacerda.akari.domain.playback.transcode.spec.HlsPlaylistType;
 import io.github.leonardopinheirolacerda.akari.domain.playback.transcode.spec.HlsSegmentType;
@@ -45,7 +46,7 @@ public class FullTranscodeHlsStrategy implements HlsTranscodeStrategy {
         return new HlsTranscodeSpec(
                 new VideoTranscode(TranscodeMode.ENCODE, VideoCodec.H264, null, EncodePreset.VERYFAST, null, 2.0, null),
                 new AudioTranscode(TranscodeMode.ENCODE, AudioCodec.AAC, 160, null),
-                new HlsOptions(4, HlsSegmentType.TS, HlsPlaylistType.EVENT, 0, null)
+                new HlsOptions(4, HlsSegmentType.TS, HlsPlaylistType.EVENT, 0, Set.of(HlsFlag.TEMP_FILE))
         );
     }
 

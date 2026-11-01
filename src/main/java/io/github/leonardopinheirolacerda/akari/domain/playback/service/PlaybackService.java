@@ -68,6 +68,17 @@ public class PlaybackService {
 
     private static final double SEEK_WINDOW_TOLERANCE_SECONDS = 0.5;
 
+    private static final String MASTER_PLAYLIST_NAME = "master.m3u8";
+
+    /**
+     * Quanto o {@code -ss} passa do keyframe alvo quando o vídeo é copiado. Com B-frames, o
+     * ffmpeg busca {@code 3/23}s (~130 ms) antes do {@code -ss} — um {@code -ss} exatamente no
+     * keyframe cairia no keyframe anterior do índice, um GOP inteiro antes. Passando dessa folga,
+     * a busca cai no keyframe alvo com ou sem B-frames, desde que o próximo keyframe do índice
+     * esteja mais longe que ela.
+     */
+    private static final double COPY_SEEK_PAST_KEYFRAME_SECONDS = 0.15;
+
     /**
      * Quanto tempo esperar, logo depois de subir o ffmpeg, pra confirmar que ele não morreu de
      * cara (filtro inválido, codec sem suporte) — detectado aqui em vez de só na primeira
@@ -272,16 +283,18 @@ public class PlaybackService {
      * @return a playlist {@code master.m3u8} (sessão com legenda soft) ou {@code index.m3u8}
      *         (demais casos), como texto
      * @throws ResourceNotFoundException se a sessão não existir, tiver expirado, ou a playlist
-     *         ainda não tiver sido escrita e o processo ainda estiver rodando (transcode ainda
-     *         não produziu o primeiro segmento) — o cliente deve continuar tentando
+     *         ainda não estiver pronta e o processo ainda estiver rodando (transcode ainda não
+     *         produziu o primeiro segmento, ou o master ainda não lista nenhuma variante) — o
+     *         cliente deve continuar tentando
      * @throws TranscodeFailedException se o ffmpeg já tiver morrido sem ter sido pedido pelo
      *         backend — essa playlist nunca vai ser gerada, o cliente deve parar de tentar
      */
     public String getPlaybackPlaylist(UUID sessionId) {
         final PlaybackSession session = findActiveOrThrow(sessionId);
         final Path playlistFile = resolveClientPlaylistFile(session);
+        final Optional<String> playlist = readPlaylist(sessionId, playlistFile);
 
-        if (!Files.isRegularFile(playlistFile)) {
+        if (playlist.isEmpty() || isMasterWithoutVariant(playlistFile, playlist.get())) {
             if (transcodeProcessRegistry.hasFailedUnexpectedly(sessionId)) {
                 transcodeProcessRegistry.logMissingPlaylistOnce(sessionId);
                 throw new TranscodeFailedException("O transcode desta sessão falhou antes de gerar a playlist");
@@ -290,11 +303,7 @@ public class PlaybackService {
             throw new ResourceNotFoundException("A playlist desta sessão ainda não foi gerada");
         }
 
-        try {
-            return Files.readString(playlistFile);
-        } catch (IOException e) {
-            throw new IntegrationException("Falha ao ler a playlist da sessão " + sessionId, e);
-        }
+        return playlist.get();
     }
 
     /**
@@ -449,6 +458,18 @@ public class PlaybackService {
         final Profile profile = resolveProfile(session.profile);
         final HlsTranscodeSpec spec = resolveSpec(profile, mediaInfo, videoFile.id);
 
+        final Optional<Double> copiedVideoKeyframe = findCopiedVideoKeyframe(
+                videoFile.id,
+                positionSeconds,
+                spec,
+                mediaInfo,
+                subtitleTrackIndex
+        );
+        final Double startOffsetSeconds = copiedVideoKeyframe.orElse(positionSeconds);
+        final Double seekSeconds = copiedVideoKeyframe
+                .map(keyframe -> keyframe + COPY_SEEK_PAST_KEYFRAME_SECONDS)
+                .orElse(positionSeconds);
+
         terminateAndCleanup(session);
 
         final Path workDir = createWorkDir(session.sessionId);
@@ -457,7 +478,7 @@ public class PlaybackService {
                 videoFile.id,
                 inputFile,
                 workDir,
-                positionSeconds,
+                seekSeconds,
                 audioTrackIndex,
                 subtitleTrackIndex,
                 mediaInfo,
@@ -466,13 +487,48 @@ public class PlaybackService {
 
         session.ffmpegPid = jobId;
         session.processStartedAt = OffsetDateTime.now();
-        session.startOffsetSeconds = positionSeconds;
+        session.startOffsetSeconds = startOffsetSeconds;
         session.audioTrackIndex = audioTrackIndex;
         session.subtitleTrackIndex = subtitleTrackIndex;
 
-        Log.infof("Sessão de playback %s reiniciada no instante %s", session.sessionId, positionSeconds);
+        Log.infof(
+                "Sessão de playback %s reiniciada no instante %s (pedido: %s)",
+                session.sessionId,
+                startOffsetSeconds,
+                positionSeconds
+        );
 
         return session;
+    }
+
+    /**
+     * Keyframe em que o transcode reiniciado de fato começa quando o vídeo é copiado; vazio se o
+     * vídeo for recodificado (o {@code -ss} corta exatamente no instante pedido) ou se nenhum
+     * keyframe for encontrado. Copiando, o ffmpeg só consegue começar no keyframe onde a busca
+     * do demuxer cai — e é esse keyframe que precisa virar o {@code startOffsetSeconds}, já que o
+     * cliente calcula a posição como {@code startOffsetSeconds + currentTime}.
+     */
+    private Optional<Double> findCopiedVideoKeyframe(Integer fileId,
+                                                     Double positionSeconds,
+                                                     HlsTranscodeSpec spec,
+                                                     MediaInfoResponse mediaInfo,
+                                                     Integer subtitleTrackIndex) {
+
+        if (positionSeconds <= 0 || !ffmpegClient.copiesVideo(spec.video(), mediaInfo, subtitleTrackIndex)) {
+            return Optional.empty();
+        }
+
+        final Optional<Double> keyframeSeconds = mediaProbeService.findSeekKeyframe(fileId, positionSeconds);
+
+        if (keyframeSeconds.isEmpty()) {
+            Log.warnf(
+                    "Nenhum keyframe encontrado ao buscar o instante %s do arquivo %d; o seek copiando o vídeo usa o instante pedido",
+                    positionSeconds,
+                    fileId
+            );
+        }
+
+        return keyframeSeconds;
     }
 
     private Long startFfmpeg(UUID sessionId,
@@ -610,13 +666,38 @@ public class PlaybackService {
     }
 
     private Path resolveClientPlaylistFile(PlaybackSession session) {
-        final Path masterPlaylist = Path.of(session.workDir, "master.m3u8");
+        final Path masterPlaylist = Path.of(session.workDir, MASTER_PLAYLIST_NAME);
 
         if (Files.isRegularFile(masterPlaylist)) {
             return masterPlaylist;
         }
 
         return Path.of(session.workDir, "index.m3u8");
+    }
+
+    /** Conteúdo da playlist; vazio se o ffmpeg ainda não tiver escrito o arquivo. */
+    private Optional<String> readPlaylist(UUID sessionId, Path playlistFile) {
+        if (!Files.isRegularFile(playlistFile)) {
+            return Optional.empty();
+        }
+
+        try {
+            return Optional.of(Files.readString(playlistFile));
+        } catch (IOException e) {
+            throw new IntegrationException("Falha ao ler a playlist da sessão " + sessionId, e);
+        }
+    }
+
+    /**
+     * {@code true} se for o master playlist da sessão ainda sem nenhuma variante — o que o
+     * ffmpeg escreve enquanto nenhum stream tem bitrate (ver
+     * {@link HlsPlaylistParser#hasVariantStream}), que não pode ser servido.
+     */
+    private boolean isMasterWithoutVariant(Path playlistFile, String playlist) {
+        final String fileName = playlistFile.getFileName()
+                .toString();
+
+        return MASTER_PLAYLIST_NAME.equals(fileName) && !HlsPlaylistParser.hasVariantStream(playlist);
     }
 
     private Path resolveDurationPlaylistFile(PlaybackSession session) {

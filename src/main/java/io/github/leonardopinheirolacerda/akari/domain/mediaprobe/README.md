@@ -11,8 +11,10 @@ de vídeo já disponível em disco, executando `ffprobe` sob demanda. Expõe `GE
 Dado o id de um `VideoFile` do catalog, resolver onde o arquivo físico está acessível (direto,
 se o provider for `LOCAL`; via cache local, se for remoto e o download já tiver terminado),
 invocar `ffprobe -show_format -show_streams -show_chapters` sobre ele e traduzir a saída JSON
-crua para o DTO de resposta do contrato (`MediaInfoResponse`). É stateless: nada é persistido,
-cada chamada roda o probe do zero.
+crua para o DTO de resposta do contrato (`MediaInfoResponse`). Também acha, para o `playback`,
+o keyframe de vídeo em que a leitura do arquivo começa ao buscar um instante (base do
+`startOffsetSeconds` quando o vídeo é copiado). É stateless: nada é persistido, cada chamada
+roda o probe do zero.
 
 ## Funcionalidades existentes
 
@@ -22,6 +24,9 @@ cada chamada roda o probe do zero.
   (`startSeconds`/`endSeconds`/`title`, na ordem do arquivo, exatamente como o ffprobe os lista
   — sem fundir, reordenar ou corrigir sobreposições entre capítulos; lista vazia se o arquivo
   não tiver capítulos, nunca `null`).
+- Keyframe de seek (`MediaProbeService.findSeekKeyframe`, sem endpoint próprio): o primeiro
+  keyframe lido depois de o `ffprobe` buscar o instante pelo índice do container — o mesmo ponto
+  onde um remux com `-ss` de entrada começa. Ver seção de fluxos.
 - `VideoTrack.sampleAspectRatio` expõe a SAR crua do ffprobe ao lado de `displayAspectRatio`
   (ex.: um vídeo anamórfico 960x720 com SAR `4:3` e DAR `16:9`) — útil pra diagnosticar vídeo
   anamórfico sem rodar `ffprobe` manualmente.
@@ -52,7 +57,8 @@ cada chamada roda o probe do zero.
 ## Módulos relacionados
 
 - `domain/playback` (`PlaybackService`) — único consumidor de `mediaprobe` hoje; usa os
-  metadados extraídos (ex.: streams disponíveis) para decidir o transcode.
+  metadados extraídos (ex.: streams disponíveis) para decidir o transcode e o keyframe de seek
+  para alinhar o `startOffsetSeconds` quando o vídeo é copiado.
 - `domain/storageprovider` — fornece o client que resolve o arquivo físico (não há dependência
   no sentido inverso).
 - `domain/videofile`, `domain/setting` — fornecem o `VideoFile` e a preferência `cache.dir`
@@ -64,6 +70,9 @@ cada chamada roda o probe do zero.
   lógica própria.
 - `service/MediaProbeService.getMediaProbe(Integer fileId)` — ponto de entrada programático
   (usado por `PlaybackService`).
+- `service/MediaProbeService.findSeekKeyframe(Integer fileId, Double positionSeconds)` — keyframe
+  de vídeo em que a leitura do arquivo começa ao buscar o instante (usado pelo seek do
+  `PlaybackService` quando o vídeo é copiado).
 
 ## Fluxos importantes
 
@@ -92,10 +101,20 @@ cada chamada roda o probe do zero.
    helpers `@Named` já usados pelas faixas. Todo parsing não-trivial delega pra
    `FfprobeValueParser`.
 
+**`findSeekKeyframe(fileId, positionSeconds)`:** resolve o arquivo como no probe e roda
+`FfprobeClient.probeVideoPackets`: `ffprobe -select_streams v:0 -read_intervals +pos%+10
+-show_entries format=start_time:packet=pts_time,flags`. O `-read_intervals` busca para trás pelo
+mesmo índice do container que o `-ss` de entrada do ffmpeg usa, então o primeiro pacote com flag
+`K` lido é o keyframe onde um remux com seek começaria — que não é necessariamente o último
+keyframe antes do instante (no Matroska, os `Cues` podem não listar keyframes de corte de cena).
+A janela é relativa ao `start_time` do container, mas o `pts_time` sai absoluto: o service
+desconta o `start_time` (não-zero em MPEG-TS) e arredonda no microssegundo.
+
 ## Arquivos críticos
 
 - `service/MediaProbeService.java` — orquestra resolução de arquivo + probe + mapeamento.
-- `client/FfprobeClient.java` — execução do processo `ffprobe` e parsing do JSON de saída.
+- `client/FfprobeClient.java` — execução do processo `ffprobe` e parsing do JSON de saída (probe
+  completo e pacotes de vídeo de uma janela).
 - `mapper/MediaProbeMapper.java` — conversão para o DTO do contrato, incluindo partição de
   streams por tipo.
 - `parser/FfprobeValueParser.java` — todas as conversões de valor cru (string→número, frame

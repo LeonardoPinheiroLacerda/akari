@@ -2,6 +2,7 @@ package io.github.leonardopinheirolacerda.akari.domain.mediaprobe.client;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.leonardopinheirolacerda.akari.domain.mediaprobe.client.dtos.FfprobeOutput;
+import io.github.leonardopinheirolacerda.akari.domain.mediaprobe.client.dtos.FfprobePacketsOutput;
 import io.quarkus.logging.Log;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -12,10 +13,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Invoca o binário {@code ffprobe} sobre um arquivo de vídeo e parseia a saída JSON.
+ * Invoca o binário {@code ffprobe} sobre um arquivo de vídeo e parseia a saída JSON — o probe
+ * completo do arquivo ou os pacotes de vídeo de uma janela de tempo.
  *
  * <p>A saída do processo é redirecionada pra um arquivo temporário em vez de lida do pipe de
  * stdout: mídia com muitas faixas gera JSON maior que o buffer do pipe (~64KB), e ler o pipe só
@@ -51,10 +54,63 @@ public class FfprobeClient {
      *         JSON válido
      */
     public FfprobeOutput probe(Path file) {
+        final List<String> command = List.of(
+                ffprobeBinary,
+                "-v", "quiet",
+                "-print_format", "json",
+                "-show_format",
+                "-show_streams",
+                "-show_chapters",
+                file.toString()
+        );
+
+        Log.infof("Executando ffprobe sobre %s", file);
+
+        return run(command, FfprobeOutput.class);
+    }
+
+    /**
+     * Lista os pacotes da primeira faixa de vídeo numa janela de tempo do arquivo, com o
+     * {@code start_time} do container — o suficiente pra achar os keyframes da janela.
+     *
+     * <p>A janela é relativa ao início do arquivo ({@code -read_intervals +A%+B}), mas o
+     * {@code pts_time} de cada pacote sai absoluto: quem chama desconta o {@code start_time}.
+     * O ffprobe busca o início da janela no keyframe mais próximo, então os primeiros pacotes
+     * podem vir um pouco antes ou depois de {@code fromSeconds}.
+     *
+     * <p>Assume que o arquivo existe — a checagem de existência é responsabilidade de quem
+     * chama.
+     *
+     * @param file arquivo de vídeo já resolvido em disco
+     * @param fromSeconds início da janela, em segundos a partir do início do arquivo
+     * @param durationSeconds duração da janela, em segundos
+     * @return o {@code start_time} do container e os pacotes de vídeo da janela
+     * @throws FfprobeException se o binário não puder ser iniciado, o processo não responder
+     *         dentro do timeout, terminar com código de saída não-zero, ou a saída não for um
+     *         JSON válido
+     */
+    public FfprobePacketsOutput probeVideoPackets(Path file, Double fromSeconds, Double durationSeconds) {
+        final String readInterval = "+" + formatSeconds(fromSeconds) + "%+" + formatSeconds(durationSeconds);
+        final List<String> command = List.of(
+                ffprobeBinary,
+                "-v", "quiet",
+                "-print_format", "json",
+                "-select_streams", "v:0",
+                "-read_intervals", readInterval,
+                "-show_entries", "format=start_time:packet=pts_time,flags",
+                file.toString()
+        );
+
+        Log.infof("Executando ffprobe sobre %s pra listar os pacotes de vídeo em %s", file, readInterval);
+
+        return run(command, FfprobePacketsOutput.class);
+    }
+
+    private <T> T run(List<String> command, Class<T> outputType) {
         final Path outputFile = createOutputFile();
 
         try {
-            return runProbe(file, outputFile);
+            return runProbe(command, outputFile, outputType);
         } finally {
             deleteQuietly(outputFile);
         }
@@ -68,22 +124,10 @@ public class FfprobeClient {
         }
     }
 
-    private FfprobeOutput runProbe(Path file, Path outputFile) {
-        final List<String> command = List.of(
-                ffprobeBinary,
-                "-v", "quiet",
-                "-print_format", "json",
-                "-show_format",
-                "-show_streams",
-                "-show_chapters",
-                file.toString()
-        );
-
+    private <T> T runProbe(List<String> command, Path outputFile, Class<T> outputType) {
         final ProcessBuilder processBuilder = new ProcessBuilder(command)
                 .redirectOutput(ProcessBuilder.Redirect.to(outputFile.toFile()))
                 .redirectError(ProcessBuilder.Redirect.DISCARD);
-
-        Log.infof("Executando ffprobe sobre %s", file);
 
         final Process process = start(processBuilder);
 
@@ -94,7 +138,7 @@ public class FfprobeClient {
         }
 
         try {
-            return objectMapper.readValue(outputFile.toFile(), FfprobeOutput.class);
+            return objectMapper.readValue(outputFile.toFile(), outputType);
         } catch (IOException e) {
             throw new FfprobeException("Saída do ffprobe não é um JSON válido", e);
         }
@@ -125,6 +169,10 @@ public class FfprobeClient {
             process.destroyForcibly();
             throw new FfprobeException("ffprobe não respondeu em " + timeout);
         }
+    }
+
+    private String formatSeconds(Double seconds) {
+        return String.format(Locale.ROOT, "%.3f", seconds);
     }
 
     private void deleteQuietly(Path outputFile) {

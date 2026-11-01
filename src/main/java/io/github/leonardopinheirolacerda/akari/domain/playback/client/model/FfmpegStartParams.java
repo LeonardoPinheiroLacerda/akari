@@ -18,8 +18,11 @@ import java.util.UUID;
  *             vencedora
  * @param inputFile arquivo de vídeo de origem, já resolvido em disco
  * @param workDir diretório onde a playlist e os segmentos desta sessão serão escritos
- * @param startOffsetSeconds instante de início do transcode, em segundos a partir do início da
- *                           mídia; {@code 0} transcodifica do começo
+ * @param startOffsetSeconds valor do {@code -ss} de entrada, em segundos a partir do início da
+ *                           mídia; {@code 0} transcodifica do começo. Recodificando o vídeo, é o
+ *                           instante onde o transcode começa; copiando, é o keyframe alvo mais
+ *                           uma folga ({@code PlaybackService}), e o transcode começa no keyframe
+ *                           — não é o {@code startOffsetSeconds} da sessão
  * @param audioTrackIndex posição (0-based) da faixa de áudio entre as faixas de áudio do arquivo
  *                        — o {@code -map} do ffmpeg resolve esse specifier sozinho, sem tradução
  *                        pro índice global do stream
