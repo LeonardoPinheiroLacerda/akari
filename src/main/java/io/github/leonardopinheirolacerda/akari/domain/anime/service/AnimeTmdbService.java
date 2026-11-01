@@ -10,6 +10,7 @@ import io.github.leonardopinheirolacerda.akari.api.dto.TmdbOverrides;
 import io.github.leonardopinheirolacerda.akari.api.dto.TmdbOverridesSchema;
 import io.github.leonardopinheirolacerda.akari.domain.anime.mapper.AnimeTmdbMapper;
 import io.github.leonardopinheirolacerda.akari.domain.anime.model.Anime;
+import io.github.leonardopinheirolacerda.akari.domain.anime.model.TmdbFilePairing;
 import io.github.leonardopinheirolacerda.akari.domain.setting.service.SettingService;
 import io.github.leonardopinheirolacerda.akari.domain.tmdb.client.dtos.TmdbImageResponse;
 import io.github.leonardopinheirolacerda.akari.domain.tmdb.client.dtos.TmdbImagesResponse;
@@ -104,7 +105,9 @@ public class AnimeTmdbService {
     }
 
     /**
-     * Remove o binding TMDB do anime; os overrides caem junto.
+     * Remove o binding TMDB do anime, junto com os overrides e os pairings TMDB dos arquivos da
+     * pasta — os pairings apontam pra temporadas/episódios do título desvinculado e ficariam
+     * errados num novo binding.
      *
      * @param anilistId id do anime na AniList
      * @throws ResourceNotFoundException se o anime não existir ou não tiver binding TMDB
@@ -125,7 +128,9 @@ public class AnimeTmdbService {
         anime.overrideBackdropPath = null;
         anime.overrideLogoPath = null;
 
-        Log.infof("Binding TMDB do anime %d removido com sucesso", anilistId);
+        final long deletedPairings = TmdbFilePairing.deleteByFolderId(anime.folder.id);
+
+        Log.infof("Binding TMDB do anime %d removido com sucesso (%d pairings apagados)", anilistId, deletedPairings);
     }
 
     /**

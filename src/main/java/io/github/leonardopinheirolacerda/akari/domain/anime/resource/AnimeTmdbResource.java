@@ -41,7 +41,7 @@ public class AnimeTmdbResource implements AnimeTmdbApi {
 
     /**
      * {@code DELETE /v1/metadata/animes/{anilistId}/tmdb/binding} — remove o binding TMDB do
-     * anime; os overrides caem junto.
+     * anime, junto com os overrides e os pairings TMDB dos arquivos da pasta.
      *
      * @param anilistId id do anime na AniList
      * @throws ResourceNotFoundException (traduzida em 404) se o anime não existir ou não tiver

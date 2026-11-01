@@ -74,4 +74,18 @@ public class TmdbFilePairing extends PanacheEntityBase {
                 .list();
     }
 
+
+    /**
+     * Apaga os pairings de todos os arquivos de vídeo de uma pasta.
+     *
+     * @param folderId id da pasta no catalog
+     * @return quantos pairings foram apagados
+     */
+    public static long deleteByFolderId(Integer folderId) {
+        return TmdbFilePairing.delete(
+                "fileId in (select videoFile.id from VideoFile videoFile where videoFile.folder.id = ?1)",
+                folderId
+        );
+    }
+
 }

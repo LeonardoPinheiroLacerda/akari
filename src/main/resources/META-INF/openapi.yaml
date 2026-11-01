@@ -1243,7 +1243,14 @@ paths:
     delete:
       tags: [AnimeTmdb]
       operationId: clearTmdbBinding
-      summary: Remove binding TMDB (overrides caem por cascata)
+      summary: Remove binding TMDB, junto com os overrides e os pairings dos episódios
+      description: |
+        Remove o binding TMDB do anime e limpa junto tudo que dependia dele: os overrides
+        (título, sinopse, pôster, backdrop e logo) e os pairings TMDB de todos os arquivos da
+        pasta do anime — eles apontam pra temporadas/episódios do título desvinculado e ficariam
+        errados num novo binding. Um novo `POST .../tmdb/binding` volta a pré-preencher backdrop e
+        logo; os pairings precisam ser refeitos (manualmente, pela proposta de pairing ou numa
+        nova ingestão).
       responses:
         '204':
           $ref: '#/components/responses/TmdbBindingDeleted'
