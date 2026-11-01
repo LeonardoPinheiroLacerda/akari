@@ -224,7 +224,8 @@ public class SettingService {
      * Lê a preferência {@code playback.default.subtitle-language}.
      *
      * @return o idioma (tag {@code language} do arquivo, ex. {@code por}) da faixa de legenda
-     *         escolhida quando o cliente inicia uma sessão sem informar a legenda
+     *         escolhida quando o cliente inicia uma sessão sem informar a legenda; {@code null}
+     *         ou em branco se o padrão for sem legenda
      * @throws ResourceNotFoundException se a preferência não existir
      */
     public String getPlaybackDefaultSubtitleLanguage() {

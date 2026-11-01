@@ -697,11 +697,17 @@ public class PlaybackService {
      * Faixa de legenda no idioma {@code playback.default.subtitle-language}: a primeira forçada ou
      * completa conforme {@code playback.default.subtitle-forced} (ver {@link #isForcedSubtitle});
      * sem nenhuma desse tipo, a primeira do idioma — o idioma pesa mais que o tipo. {@code null}
-     * (sem legenda) se nenhuma faixa estiver no idioma.
+     * (sem legenda) se nenhuma faixa estiver no idioma, ou se o idioma não estiver configurado —
+     * é assim que o admin define "sem legenda" como padrão.
      */
     private Integer resolveDefaultSubtitleTrackIndex(MediaInfoResponse mediaInfo) {
-        final List<SubtitleTrack> subtitleTracks = mediaInfo.getSubtitles();
         final String language = settingService.getPlaybackDefaultSubtitleLanguage();
+
+        if (language == null || language.isBlank()) {
+            return null;
+        }
+
+        final List<SubtitleTrack> subtitleTracks = mediaInfo.getSubtitles();
         final boolean forced = settingService.isPlaybackDefaultSubtitleForced();
 
         final List<Integer> languageMatches = IntStream.range(0, subtitleTracks.size())
