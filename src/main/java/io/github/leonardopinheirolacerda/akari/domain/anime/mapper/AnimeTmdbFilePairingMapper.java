@@ -1,5 +1,6 @@
 package io.github.leonardopinheirolacerda.akari.domain.anime.mapper;
 
+import io.github.leonardopinheirolacerda.akari.api.dto.TmdbFilePairingRequest;
 import io.github.leonardopinheirolacerda.akari.api.dto.TmdbFilePairingResponse;
 import io.github.leonardopinheirolacerda.akari.api.dto.TmdbFilePairingSchema;
 import io.github.leonardopinheirolacerda.akari.api.dto.TmdbFilePairingSchemaEpisode;
@@ -21,6 +22,23 @@ public interface AnimeTmdbFilePairingMapper {
 
     @Mapping(target = "thumbnailPreviewUrl", expression = "java(TmdbImageUtils.thumbnail(pairing.thumbnailPath))")
     TmdbFilePairingResponse toResponse(TmdbFilePairing pairing);
+
+    /**
+     * Pairing de um arquivo com a metadata de um episódio do TMDB — único ponto que traduz o
+     * episódio pros campos do pairing, usado pela proposta (anibridge e continuidade) e pelo
+     * pairing automático da ingestão.
+     *
+     * @param episode episódio do TMDB, como vem de {@code GET /3/tv/{id}/season/{n}}
+     * @return o pairing com temporada/episódio, still como thumbnail e o resto da metadata
+     */
+    @Mapping(target = "thumbnailPath", source = "stillPath")
+    @Mapping(target = "episodeName", source = "name")
+    @Mapping(target = "episodeOverview", source = "overview")
+    @Mapping(target = "episodeAirDate", source = "airDate")
+    @Mapping(target = "episodeRuntime", source = "runtime")
+    @Mapping(target = "episodeVoteAverage", source = "voteAverage")
+    @Mapping(target = "episodeVoteCount", source = "voteCount")
+    TmdbFilePairingRequest toPairingRequest(TmdbEpisodeResponse episode);
 
     default TmdbFilePairingSchema toSchema(List<TmdbSeasonResponse> seasons) {
         final List<TmdbFilePairingSchemaSeason> seasonList = seasons

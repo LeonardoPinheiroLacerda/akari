@@ -85,6 +85,20 @@ public class VideoFile extends PanacheEntityBase {
     }
 
     /**
+     * Busca todos os arquivos de uma pasta, sem paginação, na ordem natural dos nomes — a mesma
+     * da listagem de episódios ({@code naturalSortKey}, depois {@code id}); arquivos sem
+     * {@code naturalSortKey} vão para o fim.
+     *
+     * @param folderId id da pasta no catalog
+     * @return os arquivos da pasta, em ordem natural
+     */
+    public static List<VideoFile> findByFolderIdOrderedByNaturalSortKey(Integer folderId) {
+        return VideoFile
+                .find("FROM VideoFile vf WHERE vf.folder.id = ?1 ORDER BY vf.naturalSortKey NULLS LAST, vf.id", folderId)
+                .list();
+    }
+
+    /**
      * Pagina os arquivos de uma pasta.
      *
      * @param folderId id da pasta no catalog

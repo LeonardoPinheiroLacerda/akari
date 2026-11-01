@@ -26,8 +26,11 @@ inteiro de arquivos de uma pasta, usada na reconciliação e no pairing automát
   sem `naturalSortKey` calculado vai para o fim.
 - Enriquecimento cross-domain em ambas as listagens: cada arquivo da página recebe
   `tmdbPairing` (via `AnimeTmdbFilePairingService.getTmdbFilePairings`).
-- `listByFolder`: lista completa sem paginação, usada pela ingestão para reconciliação e
-  pairing automático, a partir de contextos sem transação ambiente.
+- `listByFolder`: lista completa sem paginação, usada pela reconciliação da ingestão, a partir
+  de contextos sem transação ambiente.
+- `listByFolderOrderedByNaturalSortKey`: lista completa sem paginação, na mesma ordem natural da
+  listagem de episódios (`naturalSortKey NULLS LAST`, depois `id`); usada pelas resoluções de
+  pairing do `anime` (anibridge, inclusive no pairing automático da ingestão, e continuidade).
 - `backfillNaturalSortKeyIfMissing`: preenche `naturalSortKey` de um arquivo já catalogado que
   ainda não tem uma (arquivo ingerido antes dessa coluna existir); usado pela reconciliação ao
   reencontrar o arquivo numa nova varredura. Não recalcula se já tiver uma.
@@ -61,11 +64,12 @@ inteiro de arquivos de uma pasta, usada na reconciliação e no pairing automát
   dos expostos pelo model — confirmado lendo os três services, não só por grep de import.
 - `ingestion` (`ReconciliationService`) — reconciliação via `listByFolder`; também chama
   `backfillNaturalSortKeyIfMissing` ao reencontrar um arquivo já catalogado.
-- `anime` (`AnimeTmdbFilePairingService`, `AnimeEpisodeService`, `EpisodePairingResolutionService`)
-  — pairing TMDB consumido nas listagens; `AnimeEpisodeService` consome
-  `listVideoFilesOrderedByNaturalSortKey` direto; `EpisodePairingResolutionService` lista os
-  arquivos da pasta via `listByFolder` pra resolver o pairing (automático da ingestão e proposta
-  do portal).
+- `anime` (`AnimeTmdbFilePairingService`, `AnimeEpisodeService`, `EpisodePairingResolutionService`,
+  `EpisodeContinuityResolutionService`) — pairing TMDB consumido nas listagens;
+  `AnimeEpisodeService` consome `listVideoFilesOrderedByNaturalSortKey` direto; as duas
+  resoluções de pairing (anibridge — automático da ingestão e proposta do portal — e
+  continuidade) listam os arquivos da pasta via `listByFolderOrderedByNaturalSortKey`, sem
+  paginação e na mesma ordem natural da listagem de episódios.
 - `utils.VideoFileLocationUtils` — resolve a localização em disco (direto se `LOCAL`, via
   `VideoFileCache` se remoto) a partir do `VideoFile` e do seu `StorageProvider`.
 
@@ -90,8 +94,9 @@ inteiro de arquivos de uma pasta, usada na reconciliação e no pairing automát
   em ordem natural de nome) → mapeiam a página para DTO → buscam pairings TMDB em lote pelos
   `fileId`s da página → setam `tmdbPairing` em cada item (`null` quando não pareado) — mesmo
   helper privado (`toPageWithPairings`) nos dois casos.
-- `listByFolder`: leitura sem paginação, anotada `@Transactional` mesmo sendo leitura — segundo
-  o javadoc do método, porque é chamada de contextos sem transação ambiente (ingestão).
+- `listByFolder`/`listByFolderOrderedByNaturalSortKey`: leitura sem paginação, anotadas
+  `@Transactional` mesmo sendo leitura — segundo o javadoc dos métodos, porque são chamadas de
+  contextos sem transação ambiente (ingestão).
 - `backfillNaturalSortKeyIfMissing`: no-op se o arquivo já tem `naturalSortKey`; senão calcula
   via `naturalSortKeyOf(name)`, mesmo helper privado usado em `createVideoFile`/
   `updateVideoFile`. Não busca nada — recebe a entidade já carregada pelo chamador.

@@ -6,6 +6,7 @@ import io.github.leonardopinheirolacerda.akari.domain.anibridge.model.MappingSeg
 import io.github.leonardopinheirolacerda.akari.domain.anibridge.model.ResolvedEpisode;
 import io.github.leonardopinheirolacerda.akari.domain.anibridge.model.TmdbMappingCandidate;
 import io.github.leonardopinheirolacerda.akari.domain.anibridge.service.AnibridgeResolutionService;
+import io.github.leonardopinheirolacerda.akari.domain.anime.mapper.AnimeTmdbFilePairingMapper;
 import io.github.leonardopinheirolacerda.akari.domain.anime.model.Anime;
 import io.github.leonardopinheirolacerda.akari.domain.anime.model.FilePairingResolution;
 import io.github.leonardopinheirolacerda.akari.domain.ingestion.extractor.EpisodeNumberExtractor;
@@ -53,6 +54,9 @@ public class EpisodePairingResolutionService {
     @Inject
     TmdbService tmdbService;
 
+    @Inject
+    AnimeTmdbFilePairingMapper animeTmdbFilePairingMapper;
+
     /**
      * Resolve o pairing de cada arquivo de vídeo da pasta do anime.
      *
@@ -66,10 +70,10 @@ public class EpisodePairingResolutionService {
      * @param folderId pasta do anime — passada à parte pra não depender do lazy load de
      *                 {@code anime.folder} (a ingestão roda fora de request)
      * @param folderName nome da pasta, só pra log
-     * @return um resultado por arquivo da pasta, sem ordem garantida
+     * @return um resultado por arquivo da pasta, na ordem natural dos nomes
      */
     public List<FilePairingResolution> resolve(Anime anime, Integer folderId, String folderName) {
-        final List<VideoFile> videoFiles = videoFileService.listByFolder(folderId);
+        final List<VideoFile> videoFiles = videoFileService.listByFolderOrderedByNaturalSortKey(folderId);
 
         final Optional<TmdbMappingCandidate> candidate = anibridgeResolutionService.resolveCandidateFor(
                 anime.anilistId,
@@ -143,7 +147,7 @@ public class EpisodePairingResolutionService {
 
             if (resolved.isEmpty()) {
                 final TmdbFilePairingProposalStatus status = unresolvedStatus(episodeNumber, offsetNeededButIneligible);
-                resolutions.add(new FilePairingResolution(videoFile, status, null, null));
+                resolutions.add(new FilePairingResolution(videoFile, status, null, null, null, null));
                 continue;
             }
 
@@ -160,28 +164,22 @@ public class EpisodePairingResolutionService {
                         videoFile,
                         TmdbFilePairingProposalStatus.NOT_FOUND_IN_TMDB,
                         resolved.get(),
+                        null,
+                        null,
                         null
                 ));
                 continue;
             }
 
-            final TmdbFilePairingRequest pairing = new TmdbFilePairingRequest()
-                    .seasonNumber(resolved.get().seasonNumber())
-                    .episodeNumber(resolved.get().tmdbEpisode())
-                    .thumbnailPath(episode.get().stillPath())
-                    .episodeName(episode.get().name())
-                    .episodeOverview(episode.get().overview())
-                    .episodeAirDate(episode.get().airDate())
-                    .episodeRuntime(episode.get().runtime())
-                    .episodeVoteAverage(episode.get().voteAverage())
-                    .episodeVoteCount(episode.get().voteCount())
-                    .episodeType(episode.get().episodeType());
+            final TmdbFilePairingRequest pairing = animeTmdbFilePairingMapper.toPairingRequest(episode.get());
 
             resolutions.add(new FilePairingResolution(
                     videoFile,
                     TmdbFilePairingProposalStatus.PAIRED,
                     resolved.get(),
-                    pairing
+                    pairing,
+                    null,
+                    null
             ));
         }
 
@@ -190,7 +188,7 @@ public class EpisodePairingResolutionService {
 
     private List<FilePairingResolution> withStatus(List<VideoFile> videoFiles, TmdbFilePairingProposalStatus status) {
         return videoFiles.stream()
-                .map(videoFile -> new FilePairingResolution(videoFile, status, null, null))
+                .map(videoFile -> new FilePairingResolution(videoFile, status, null, null, null, null))
                 .toList();
     }
 

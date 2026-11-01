@@ -76,6 +76,18 @@ public class TmdbFilePairing extends PanacheEntityBase {
 
 
     /**
+     * Busca os pairings gravados dos arquivos de vídeo de uma pasta.
+     *
+     * @param folderId id da pasta no catalog
+     * @return os pairings existentes; arquivos sem pairing não aparecem
+     */
+    public static List<TmdbFilePairing> findByFolderId(Integer folderId) {
+        return TmdbFilePairing
+                .find("fileId in (select videoFile.id from VideoFile videoFile where videoFile.folder.id = ?1)", folderId)
+                .list();
+    }
+
+    /**
      * Apaga os pairings de todos os arquivos de vídeo de uma pasta.
      *
      * @param folderId id da pasta no catalog

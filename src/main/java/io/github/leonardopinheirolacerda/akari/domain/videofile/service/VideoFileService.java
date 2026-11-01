@@ -193,6 +193,20 @@ public class VideoFileService {
     }
 
     /**
+     * Lista todos os arquivos de uma pasta, sem paginação, na ordem natural dos nomes (a mesma
+     * da listagem de episódios). Usado pela resolução de pairing de episódios, que roda tanto em
+     * request quanto na ingestão (sem transação ambiente) — por isso é {@code @Transactional}
+     * mesmo sendo leitura.
+     *
+     * @param folderId id da pasta no catalog
+     * @return os arquivos da pasta, em ordem natural
+     */
+    @Transactional
+    public List<VideoFile> listByFolderOrderedByNaturalSortKey(Integer folderId) {
+        return VideoFile.findByFolderIdOrderedByNaturalSortKey(folderId);
+    }
+
+    /**
      * Preenche a chave de ordenação natural de um arquivo já catalogado, se ainda não tiver
      * uma — usado pela reconciliação ao reencontrar, numa nova varredura, um arquivo ingerido
      * antes dessa coluna existir. Arquivo que já tem a chave não é recalculado.

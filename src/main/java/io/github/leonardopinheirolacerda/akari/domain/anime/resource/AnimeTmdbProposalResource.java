@@ -7,13 +7,14 @@ import io.github.leonardopinheirolacerda.akari.api.dto.TmdbFilePairingProposalRe
 import io.github.leonardopinheirolacerda.akari.api.dto.TmdbFilePairingProposalResponse;
 import io.github.leonardopinheirolacerda.akari.domain.anime.service.AnimeTmdbProposalService;
 import io.github.leonardopinheirolacerda.akari.exceptions.BusinessRuleException;
+import io.github.leonardopinheirolacerda.akari.exceptions.IntegrationException;
 import io.github.leonardopinheirolacerda.akari.exceptions.ResourceNotFoundException;
 import jakarta.inject.Inject;
 
 /**
- * Implementa {@link AnimeTmdbProposalApi} — propostas de binding TMDB e de pairing de episódios a
- * partir do anibridge, em {@code /v1/metadata/tmdb/binding-proposals} e
- * {@code /v1/metadata/tmdb/file-pairing-proposals}.
+ * Implementa {@link AnimeTmdbProposalApi} — propostas de binding TMDB (pelo anibridge) e de
+ * pairing de episódios (pelo anibridge ou por continuidade), em
+ * {@code /v1/metadata/tmdb/binding-proposals} e {@code /v1/metadata/tmdb/file-pairing-proposals}.
  *
  * <p>Só traduz HTTP ↔ service, sem lógica própria: toda regra fica no
  * {@link AnimeTmdbProposalService}.
@@ -40,13 +41,17 @@ public class AnimeTmdbProposalResource implements AnimeTmdbProposalApi {
 
     /**
      * {@code POST /v1/metadata/tmdb/file-pairing-proposals} — propõe o pairing TMDB de cada
-     * arquivo da pasta do anime, sem gravar nada.
+     * arquivo da pasta do anime pela estratégia pedida ({@code ANIBRIDGE}, padrão, ou
+     * {@code CONTINUITY}), comparada com o par gravado de cada arquivo, sem gravar nada.
      *
-     * @param tmdbFilePairingProposalRequest anime cujos arquivos devem receber a proposta
-     * @return a proposta por arquivo, com {@code 200 OK}
+     * @param tmdbFilePairingProposalRequest anime cujos arquivos devem receber a proposta, e a
+     *                                       estratégia
+     * @return a proposta por arquivo, na ordem natural dos nomes, com {@code 200 OK}
      * @throws ResourceNotFoundException (traduzida em 404) se o anime não existir ou não tiver
      *         binding TMDB
      * @throws BusinessRuleException (traduzida em 400) se o binding TMDB for de filme
+     * @throws IntegrationException (traduzida em 502) se a estrutura da série não puder ser lida
+     *         do TMDB na {@code CONTINUITY}
      */
     @Override
     public TmdbFilePairingProposalResponse proposeTmdbFilePairing(TmdbFilePairingProposalRequest tmdbFilePairingProposalRequest) {

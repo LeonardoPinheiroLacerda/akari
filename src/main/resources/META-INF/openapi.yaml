@@ -155,10 +155,11 @@ tags:
     description: Pairing TMDB por arquivo de vídeo (temporada, episódio, thumbnail)
   - name: AnimeTmdbProposal
     description: |
-      Propostas de binding TMDB e de pairing de episódios, a partir do dataset do anibridge.
+      Propostas de binding TMDB (pelo anibridge) e de pairing de episódios (pelo anibridge ou
+      por continuidade).
 
-      Ajudam o portal a ligar um anime ao TMDB pelo mesmo critério que a ingestão usa
-      automaticamente. Só consultam — nada é gravado:
+      Ajudam o portal a ligar um anime ao TMDB e a parear os episódios. Só consultam — nada é
+      gravado:
 
       - `POST /v1/metadata/tmdb/binding-proposals` — dado o `anilistId` selecionado, propõe a
         série/filme do TMDB, junto da ficha do título pra conferência. Pra efetivar, o portal
@@ -166,8 +167,10 @@ tags:
         `mediaType` propostos.
       - `POST /v1/metadata/tmdb/file-pairing-proposals` — dado o `anilistId` de um anime já
         vinculado à pasta e a uma série do TMDB, propõe a temporada/episódio de cada arquivo da
-        pasta exatamente como o pairing automático faria. Pra efetivar, o portal manda o
-        `pairing` de cada arquivo em `PUT /v1/metadata/files/{fileId}/tmdb-pairing`.
+        pasta: pelo anibridge, exatamente como o pairing automático faria (`ANIBRIDGE`), ou pelo
+        episódio seguinte ao do arquivo pareado anterior (`CONTINUITY`), comparando com o par
+        gravado de cada arquivo. Pra efetivar, o portal manda o `pairing` de cada arquivo em
+        `PUT /v1/metadata/files/{fileId}/tmdb-pairing`.
   - name: Setting
     description: |
       Preferências do admin.
@@ -1301,23 +1304,39 @@ paths:
     post:
       tags: [AnimeTmdbProposal]
       operationId: proposeTmdbFilePairing
-      summary: Propõe o pairing TMDB dos arquivos de um anime a partir do anibridge
+      summary: Propõe o pairing TMDB dos arquivos de um anime (anibridge ou continuidade)
       description: |
         Propõe a temporada/episódio do TMDB pra cada arquivo de vídeo da pasta do anime, sem
-        gravar nada. O anime precisa estar vinculado à pasta e a uma série do TMDB.
+        gravar nada. O anime precisa estar vinculado à pasta e a uma série do TMDB. A
+        `strategy` escolhe como a proposta é calculada (`ANIBRIDGE` quando ausente):
 
-        É a mesma resolução do pairing automático da ingestão: o número do episódio sai do nome
-        do arquivo, e o anibridge (snapshot local) converte pra temporada/episódio do TMDB — com
-        fallback de numeração absoluta (offset calculado pela cadeia de prequels) e de pasta com
-        um único episódio. Só valem os mapeamentos do anibridge que apontam pra série vinculada:
-        se o binding foi feito pra outra série, nada é proposto (`NO_MAPPING`). Cada episódio
-        resolvido é confirmado no TMDB, de onde sai a metadata do `pairing`.
+        - `ANIBRIDGE` — a mesma resolução do pairing automático da ingestão: o número do
+          episódio sai do nome do arquivo, e o anibridge (snapshot local) converte pra
+          temporada/episódio do TMDB — com fallback de numeração absoluta (offset calculado pela
+          cadeia de prequels) e de pasta com um único episódio. Só valem os mapeamentos do
+          anibridge que apontam pra série vinculada: se o binding foi feito pra outra série,
+          nada é proposto (`NO_MAPPING`). Cada episódio resolvido é confirmado no TMDB.
+        - `CONTINUITY` — não consulta o anibridge: parte dos pairings já gravados na pasta e da
+          estrutura da série no TMDB, então funciona justamente quando o anibridge não mapeia o
+          anime. Cada arquivo sem par recebe o episódio seguinte ao do arquivo pareado anterior
+          (na ordem natural dos nomes); o arquivo recém-proposto vira a âncora do próximo. No fim
+          de uma temporada, segue no primeiro episódio da próxima temporada da série, pelo
+          número. A temporada 0 (especiais) é tratada como qualquer outra: uma âncora nela
+          continua dentro dela e, no fim, segue pra temporada 1; como vem antes de todas, nunca é
+          a próxima de outra temporada. Arquivo que já tem par é âncora e sai `PAIRED` com o
+          próprio par (`change` = `SAME`).
 
-        A resposta traz todos os arquivos da pasta (sem ordem garantida), com o `status` de cada
-        um — pareado ou o motivo de não ter proposta.
+        A resposta traz todos os arquivos da pasta, na ordem natural dos nomes (a mesma da
+        listagem de episódios), com o `status` de cada um, o par atual do arquivo
+        (`currentSeasonNumber`/`currentEpisodeNumber`), a comparação da proposta com ele
+        (`change`), quem já usa o episódio proposto (`usedByFileId`) e se a proposta deve vir
+        marcada no portal (`selectedByDefault`). Pra gravar o que o admin revisou, o portal manda
+        o `pairing` de cada arquivo em `PUT /v1/metadata/files/{fileId}/tmdb-pairing`.
 
-        Responde `404` se o anime não existir ou não tiver binding TMDB, e `400` se o binding for
-        de filme (filme não tem pairing de episódio).
+        Responde `404` se o anime não existir ou não tiver binding TMDB, `400` se o binding for
+        de filme (filme não tem pairing de episódio), e `502`/`503` se a estrutura da série não
+        puder ser lida do TMDB na `CONTINUITY` (na `ANIBRIDGE`, falha do TMDB vira
+        `NOT_FOUND_IN_TMDB` no arquivo).
       requestBody:
         $ref: '#/components/requestBodies/TmdbFilePairingProposalRequestBody'
       responses:
@@ -1327,6 +1346,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+        '502':
+          $ref: '#/components/responses/BadGateway'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
         '500':
@@ -4381,25 +4402,66 @@ components:
       properties:
         anilistId:
           $ref: '#/components/schemas/AnilistId'
+        strategy:
+          $ref: '#/components/schemas/TmdbFilePairingStrategy'
+
+    TmdbFilePairingStrategy:
+      type: string
+      default: ANIBRIDGE
+      description: |
+        Como a proposta de pairing é calculada.
+
+        - `ANIBRIDGE` — número do episódio extraído do nome do arquivo, convertido pelo
+          anibridge pra temporada/episódio da série vinculada (o mesmo do pairing automático da
+          ingestão).
+        - `CONTINUITY` — episódio seguinte ao do arquivo pareado anterior, pela estrutura da
+          série no TMDB; não consulta o anibridge.
+      enum:
+        - ANIBRIDGE
+        - CONTINUITY
+
+    TmdbFilePairingChange:
+      type: string
+      description: |
+        Comparação da proposta com o par atual do arquivo.
+
+        - `NEW` — o arquivo não tem par gravado.
+        - `SAME` — a proposta é igual ao par gravado.
+        - `REPLACE` — a proposta substituiria um par gravado diferente.
+      enum:
+        - NEW
+        - SAME
+        - REPLACE
 
     TmdbFilePairingProposalStatus:
       type: string
       description: |
-        Resultado da proposta pra um arquivo.
+        Resultado da proposta pra um arquivo. Entre colchetes, a estratégia em que o status
+        aparece.
 
-        - `PAIRED` — episódio resolvido e confirmado no TMDB; `pairing` traz o payload pronto.
-        - `NO_EPISODE_NUMBER` — não deu pra extrair um número de episódio do nome do arquivo.
-        - `NOT_MAPPED` — o número extraído não cai em nenhum mapeamento do anibridge pra série
-          vinculada.
-        - `AMBIGUOUS_ABSOLUTE_NUMBERING` — o arquivo usa numeração absoluta, mas o mapeamento do
-          anibridge não cobre a temporada isolada com segurança pra aplicar o offset.
-        - `NOT_FOUND_IN_TMDB` — o anibridge resolveu `seasonNumber`/`episodeNumber`, mas o
-          episódio não existe no TMDB (temporada inexistente, episódio fora da temporada, ou a
-          busca no TMDB falhou) — o anibridge pode estar dessincronizado do TMDB.
-        - `NO_MAPPING` — o anibridge não tem mapeamento do anime pra série vinculada (vale pra
-          todos os arquivos).
-        - `CONFLICTING_MAPPING` — o mapeamento do anibridge pra série vinculada tem temporadas
-          conflitantes e não é usado (vale pra todos os arquivos).
+        - `PAIRED` [`ANIBRIDGE`, `CONTINUITY`] — há proposta: `seasonNumber`/`episodeNumber`
+          resolvidos e confirmados no TMDB. Na `ANIBRIDGE` pode vir com `usedByFileId` (episódio
+          já usado por outro arquivo); na `CONTINUITY` esse caso vira `EPISODE_IN_USE`.
+        - `NO_EPISODE_NUMBER` [`ANIBRIDGE`] — não deu pra extrair um número de episódio do nome
+          do arquivo.
+        - `NOT_MAPPED` [`ANIBRIDGE`] — o número extraído não cai em nenhum mapeamento do
+          anibridge pra série vinculada.
+        - `AMBIGUOUS_ABSOLUTE_NUMBERING` [`ANIBRIDGE`] — o arquivo usa numeração absoluta, mas o
+          mapeamento do anibridge não cobre a temporada isolada com segurança pra aplicar o
+          offset.
+        - `NOT_FOUND_IN_TMDB` [`ANIBRIDGE`] — o anibridge resolveu `seasonNumber`/`episodeNumber`,
+          mas o episódio não existe no TMDB (temporada inexistente, episódio fora da temporada,
+          ou a busca no TMDB falhou) — o anibridge pode estar dessincronizado do TMDB.
+        - `NO_MAPPING` [`ANIBRIDGE`] — o anibridge não tem mapeamento do anime pra série
+          vinculada (vale pra todos os arquivos).
+        - `CONFLICTING_MAPPING` [`ANIBRIDGE`] — o mapeamento do anibridge pra série vinculada tem
+          temporadas conflitantes e não é usado (vale pra todos os arquivos).
+        - `NO_ANCHOR` [`CONTINUITY`] — não há arquivo pareado antes deste na pasta.
+        - `END_OF_SERIES` [`CONTINUITY`] — não há episódio seguinte ao da âncora (fim da última
+          temporada da série).
+        - `EPISODE_IN_USE` [`CONTINUITY`] — o episódio seguinte já está gravado em outro arquivo
+          ou foi proposto antes pra outro arquivo nesta mesma proposta (`usedByFileId`). Não vem
+          pré-selecionado; o arquivo continua sendo a âncora do próximo.
       enum:
         - PAIRED
         - NO_EPISODE_NUMBER
@@ -4408,11 +4470,14 @@ components:
         - NOT_FOUND_IN_TMDB
         - NO_MAPPING
         - CONFLICTING_MAPPING
+        - NO_ANCHOR
+        - END_OF_SERIES
+        - EPISODE_IN_USE
 
     TmdbFilePairingProposal:
       type: object
       description: Proposta de pairing de um arquivo de vídeo
-      required: [fileId, fileName, status]
+      required: [fileId, fileName, status, selectedByDefault]
       properties:
         fileId:
           $ref: '#/components/schemas/FileId'
@@ -4426,21 +4491,55 @@ components:
           format: int32
           nullable: true
           description: |
-            Temporada do TMDB resolvida pelo anibridge; preenchida em `PAIRED` e
+            Temporada do TMDB proposta; preenchida em `PAIRED` e `EPISODE_IN_USE`, e em
             `NOT_FOUND_IN_TMDB` (aí mostra pra onde o anibridge apontou)
         episodeNumber:
           type: integer
           format: int32
           nullable: true
           description: |
-            Episódio do TMDB resolvido pelo anibridge; preenchido em `PAIRED` e
-            `NOT_FOUND_IN_TMDB`
+            Episódio do TMDB proposto; preenchido nos mesmos status que `seasonNumber`
+        currentSeasonNumber:
+          type: integer
+          format: int32
+          nullable: true
+          description: Temporada do par gravado hoje pro arquivo; `null` se ele não tem par
+        currentEpisodeNumber:
+          type: integer
+          format: int32
+          nullable: true
+          description: Episódio do par gravado hoje pro arquivo; `null` se ele não tem par
+        change:
+          allOf: [{ $ref: '#/components/schemas/TmdbFilePairingChange' }]
+          nullable: true
+          description: |
+            Comparação da proposta com o par atual; `null` quando não há proposta (qualquer
+            status fora `PAIRED` e `EPISODE_IN_USE`)
+        selectedByDefault:
+          type: boolean
+          description: |
+            Se a proposta deve vir marcada no portal: `change` = `NEW` e episódio sem uso por
+            outro arquivo (`usedByFileId` `null`). Vale igual pras duas estratégias e pra
+            qualquer temporada, inclusive a 0.
+        basedOnFileId:
+          allOf: [{ $ref: '#/components/schemas/FileId' }]
+          nullable: true
+          description: |
+            Arquivo âncora de onde a proposta continua (o pareado anterior na pasta); só na
+            `CONTINUITY`, em `PAIRED` e `EPISODE_IN_USE` de arquivo sem par próprio
+        usedByFileId:
+          allOf: [{ $ref: '#/components/schemas/FileId' }]
+          nullable: true
+          description: |
+            Outro arquivo que já usa o episódio proposto — com o par gravado, ou proposto antes
+            dele nesta mesma proposta (na ordem da lista); `null` se ninguém usa
         pairing:
           allOf: [{ $ref: '#/components/schemas/TmdbFilePairingRequest' }]
           nullable: true
           description: |
             Payload pronto pra `PUT /v1/metadata/files/{fileId}/tmdb-pairing`, com a metadata do
-            episódio no TMDB (thumbnail, nome, sinopse etc.); só preenchido em `PAIRED`
+            episódio proposto no TMDB (thumbnail, nome, sinopse etc.); preenchido em `PAIRED` e
+            `EPISODE_IN_USE` quando o episódio existe no TMDB
 
     TmdbFilePairingProposalResponse:
       type: object
@@ -4454,7 +4553,7 @@ components:
           description: Série do TMDB vinculada ao anime, base da proposta
         files:
           type: array
-          description: Todos os arquivos de vídeo da pasta do anime, sem ordem garantida
+          description: Todos os arquivos de vídeo da pasta do anime, na ordem natural dos nomes
           items:
             $ref: '#/components/schemas/TmdbFilePairingProposal'
 

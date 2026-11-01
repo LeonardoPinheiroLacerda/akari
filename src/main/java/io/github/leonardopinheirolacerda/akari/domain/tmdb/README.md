@@ -73,6 +73,9 @@ Externa:
 - `domain.anime.service.EpisodePairingResolutionService` — usa `getSeason` e
   `TmdbEpisodeResponse` diretamente pra confirmar no TMDB o episódio resolvido pelo anibridge e
   montar a metadata do pairing (pairing automático da ingestão e proposta de pairing do portal).
+- `domain.anime.service.EpisodeContinuityResolutionService` — usa `getTvDetails` (temporadas
+  regulares) e `getSeason` pra achar o episódio seguinte ao da âncora na proposta por
+  continuidade.
 - `domain.ingestion.service.FolderAutoBindService` — orquestra o binding automático de pasta
   (chama `AnimeTmdbService`/`EpisodePairingResolutionService`/`AnimeTmdbFilePairingService`/
   `AnibridgeResolutionService`), sem chamar o `TmdbService` direto.
