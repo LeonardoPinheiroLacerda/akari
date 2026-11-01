@@ -153,6 +153,15 @@ tags:
     description: Binding TMDB e overrides do anime
   - name: AnimeTmdbFilePairing
     description: Pairing TMDB por arquivo de vídeo (temporada, episódio, thumbnail)
+  - name: AnimeTmdbProposal
+    description: |
+      Proposta de binding TMDB pra um anime da AniList, a partir do dataset do anibridge.
+
+      Ajuda o portal a vincular um anime ao TMDB: dado o `anilistId` selecionado, propõe a
+      série/filme do TMDB pelo mesmo critério que a ingestão usa no bind automático, junto da
+      ficha do título no TMDB pra conferência. Só consulta — nada é gravado; pra efetivar, o
+      portal chama `POST /v1/metadata/animes/{anilistId}/tmdb/binding` com o `tmdbId` e o
+      `mediaType` propostos.
   - name: Setting
     description: |
       Preferências do admin.
@@ -1237,6 +1246,44 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /v1/metadata/tmdb/binding-proposals:
+    post:
+      tags: [AnimeTmdbProposal]
+      operationId: proposeTmdbBinding
+      summary: Propõe o binding TMDB de um anime a partir do anibridge
+      description: |
+        Propõe a série ou filme do TMDB pro anime da AniList informado, sem gravar nada. Funciona
+        mesmo que o anime ainda não esteja salvo no akari (ex.: logo depois de selecionar o título
+        da AniList no portal).
+
+        A proposta é o melhor candidato do dataset do anibridge (snapshot local, atualizado de
+        hora em hora) pro `anilistId` — com fallback pelo id do MyAnimeList, lido da AniList —, o
+        mesmo critério do bind automático da ingestão: entre vários candidatos, prefere o que não
+        tem sobreposição de episódios nem cobre mais episódios do que o anime tem, e desempata
+        pela cobertura. O candidato é confirmado no TMDB, e a resposta traz a ficha do título
+        (`details`) pra o admin conferir antes de vincular.
+
+        O anibridge pode estar dessincronizado do TMDB (ex.: apontar uma temporada que o título
+        não tem); a ficha (`numberOfSeasons`, título, pôster) é o que permite perceber isso.
+
+        Responde `404` se o anime não existir na AniList, se o anibridge não tiver mapeamento pra
+        ele, ou se o `tmdbId` proposto não existir mais no TMDB.
+      requestBody:
+        $ref: '#/components/requestBodies/TmdbBindingProposalRequestBody'
+      responses:
+        '200':
+          $ref: '#/components/responses/TmdbBindingProposalOk'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '502':
+          $ref: '#/components/responses/BadGateway'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /v1/metadata/animes/{anilistId}/tmdb/overrides:
     parameters:
       - $ref: '#/components/parameters/AnilistIdPathParam'
@@ -1776,6 +1823,13 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/TmdbBindingRequest'
+    TmdbBindingProposalRequestBody:
+      description: Anime da AniList pra propor o binding TMDB
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/TmdbBindingProposalRequest'
     TmdbOverridesRequestBody:
       description: Payload de overrides
       required: true
@@ -2075,6 +2129,12 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/AnimeFranchiseResponse'
+    TmdbBindingProposalOk:
+      description: Proposta de binding TMDB
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/TmdbBindingProposalResponse'
     TmdbAnimeStateOk:
       description: Estado TMDB atual
       content:
@@ -3903,6 +3963,32 @@ components:
           $ref: '#/components/schemas/TmdbId'
         mediaType:
           $ref: '#/components/schemas/TmdbMediaType'
+
+    TmdbBindingProposalRequest:
+      type: object
+      description: Anime da AniList pra propor o binding TMDB
+      required: [anilistId]
+      properties:
+        anilistId:
+          $ref: '#/components/schemas/AnilistId'
+
+    TmdbBindingProposalResponse:
+      type: object
+      description: |
+        Série ou filme do TMDB proposto pro anime, pelo mapeamento do anibridge. `tmdbId` e
+        `mediaType` são exatamente o payload de `POST /v1/metadata/animes/{anilistId}/tmdb/binding`.
+      required: [tmdbId, mediaType, details]
+      properties:
+        tmdbId:
+          $ref: '#/components/schemas/TmdbId'
+        mediaType:
+          $ref: '#/components/schemas/TmdbMediaType'
+        details:
+          allOf: [{ $ref: '#/components/schemas/TmdbBindingDetails' }]
+          description: |
+            Ficha do título proposto, como está no TMDB — mesma ficha devolvida no estado do
+            binding (`TmdbAnimeStateResponse.details`), pra conferir se a proposta aponta pro
+            título certo antes de vincular.
 
     TmdbOverrides:
       type: object

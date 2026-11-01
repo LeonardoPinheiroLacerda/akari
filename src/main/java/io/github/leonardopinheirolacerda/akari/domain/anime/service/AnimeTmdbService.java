@@ -241,6 +241,9 @@ public class AnimeTmdbService {
     /**
      * Lê a ficha da série ou do filme no TMDB (cache-first) e converte pro resumo do contrato.
      *
+     * <p>Público pra {@code AnimeTmdbProposalService} montar a mesma ficha na proposta de
+     * binding, sem duplicar a escolha entre série e filme.
+     *
      * @param tmdbId id da série/filme no TMDB
      * @param mediaType se o binding é série ({@code TV}) ou filme ({@code MOVIE})
      * @return a ficha resumida, sem overrides aplicados
@@ -249,7 +252,7 @@ public class AnimeTmdbService {
      * @throws IntegrationNotConfiguredException se {@code tmdb.api-key} estiver vazio e a ficha
      *                                           não estiver em cache
      */
-    private TmdbBindingDetails fetchDetails(Integer tmdbId, TmdbMediaType mediaType) {
+    public TmdbBindingDetails fetchDetails(Integer tmdbId, TmdbMediaType mediaType) {
         if (mediaType == TmdbMediaType.TV) {
             final TmdbTvDetailsResponse tvDetails = tmdbService.getTvDetails(tmdbId, false);
             return animeTmdbMapper.toDetails(tvDetails);

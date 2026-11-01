@@ -60,9 +60,12 @@ Resolve também ambiguidade quando o dataset aponta mais de um candidato TMDB pr
 
 ## Módulos relacionados
 
-- **`domain.ingestion`** (`FolderAutoBindService`) — único consumidor real do anibridge. Usa
+- **`domain.ingestion`** (`FolderAutoBindService`) — maior consumidor do anibridge. Usa
   `AnibridgeResolutionService` pra resolver o candidato TMDB de um anime recém-vinculado e pra
   parear episódio a episódio dos arquivos de uma pasta.
+- **`domain.anime`** (`AnimeTmdbProposalService`) — usa
+  `AnibridgeResolutionService.resolveBestCandidate` pra propor o binding TMDB de um anime no
+  portal (`POST /v1/metadata/tmdb/binding-proposals`), sem gravar nada.
 - **`domain.tmdb`** — dependência de saída do `AnibridgeResolutionService` (confirmação de
   temporadas existentes).
 - **`domain.anilist`** — não é dependência direta de código, mas semanticamente adjacente: o
@@ -71,13 +74,15 @@ Resolve também ambiguidade quando o dataset aponta mais de um candidato TMDB pr
 
 ## Pontos de entrada
 
-Nenhum endpoint HTTP — domínio puramente interno, não aparece em `openapi.yaml` nem tem `resource/`.
+Nenhum endpoint HTTP próprio — o domínio não tem `resource/`. A única exposição do dataset por HTTP é indireta, pela proposta de binding TMDB do domínio `anime` (`POST /v1/metadata/tmdb/binding-proposals`).
 Os pontos de entrada são:
 - `AnibridgeScheduler` — boot (`@Observes StartupEvent`) e `@Scheduled(every = "1h")`, aciona
   `AnibridgeService.refresh()`.
 - `AnibridgeResolutionService` (API pública do domínio pra quem precisa resolver mapeamento) e,
-  secundariamente, `AnibridgeMappingService` (busca crua) — injetados hoje só por
-  `FolderAutoBindService` (domínio `ingestion`).
+  secundariamente, `AnibridgeMappingService` (busca crua) — injetados por
+  `FolderAutoBindService` (domínio `ingestion`); `AnibridgeResolutionService` também por
+  `AnimeTmdbProposalService` (domínio `anime`), que expõe a proposta de binding por HTTP — o
+  próprio `anibridge` continua sem `resource/`.
 
 ## Fluxos importantes
 

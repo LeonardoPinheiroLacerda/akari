@@ -53,12 +53,13 @@ Traduzir a GraphQL da AniList (query `Page(page, perPage).media(search, type: AN
 
 ## Módulos relacionados
 
-- **`domain.anime`** (`AnimeService`, `AnimeRelationsService`, `AnimeMapper`) — maior consumidor
+- **`domain.anime`** (`AnimeService`, `AnimeRelationsService`, `AnimeTmdbProposalService`, `AnimeMapper`) — maior consumidor
   interno do domínio. `AnimeService` usa `AnilistSearchService.findById` pra buscar metadata ao
   vincular (`bindAnimeToFolder`) e sincronizar (`syncAnime`) um anime; `AnimeMapper.applyAnilistData`
   aplica o `AnilistMediaResponse` cru no model `Anime`. `AnimeRelationsService` usa `findById`
   recursivamente pra seguir o grafo de relações (`relations.edges`) da AniList e montar
-  `AnimeRelation`.
+  `AnimeRelation`. `AnimeTmdbProposalService` usa `findById` pra ler `idMal` e `episodes` ao propor
+  o binding TMDB pelo anibridge.
 - **`domain.ingestion`** (`FolderAutoBindService`) — usa `AnilistSearchService.search` pra achar
   candidato de anime a partir do nome da pasta durante o auto-bind.
 - **`domain.cache`** — infraestrutura de cache consumida pelo service (não o contrário).
