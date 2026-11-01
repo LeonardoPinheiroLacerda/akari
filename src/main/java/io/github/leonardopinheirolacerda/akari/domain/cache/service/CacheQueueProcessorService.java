@@ -1,8 +1,9 @@
 package io.github.leonardopinheirolacerda.akari.domain.cache.service;
 
+import io.github.leonardopinheirolacerda.akari.api.dto.CacheEvent;
+import io.github.leonardopinheirolacerda.akari.api.dto.CacheEventType;
 import io.github.leonardopinheirolacerda.akari.api.dto.CacheStatus;
 import io.github.leonardopinheirolacerda.akari.domain.cache.model.VideoFileCache;
-import io.github.leonardopinheirolacerda.akari.domain.cache.sse.CacheEvent;
 import io.github.leonardopinheirolacerda.akari.domain.cache.sse.CacheEventBroadcaster;
 import io.github.leonardopinheirolacerda.akari.domain.setting.service.SettingService;
 import io.github.leonardopinheirolacerda.akari.domain.storageprovider.model.StorageProvider;
@@ -99,14 +100,15 @@ public class CacheQueueProcessorService {
             final RcloneDownloadStatsRequest request = new RcloneDownloadStatsRequest("job/" + row.jobId);
             final RcloneDownloadStatsResponse stats = rcloneClient.getTransferProgress(request);
 
-            final CacheEvent progress = CacheEvent.progress(
-                    row.id,
-                    stats.bytes(),
-                    stats.totalBytes(),
-                    stats.speed(),
-                    stats.eta(),
-                    stats.getPercentage()
-            );
+            final CacheEvent progress = new CacheEvent()
+                    .type(CacheEventType.PROGRESS)
+                    .id(row.id)
+                    .status(CacheStatus.DOWNLOADING)
+                    .bytes(stats.bytes())
+                    .totalBytes(stats.totalBytes())
+                    .speed(stats.speed())
+                    .eta(stats.eta())
+                    .percentage(stats.getPercentage());
 
             cacheEventBroadcaster.publish(progress);
 
@@ -137,7 +139,10 @@ public class CacheQueueProcessorService {
 
                 Log.infof("Download da linha %s concluído", row.id);
 
-                final CacheEvent completed = CacheEvent.completed(row.id);
+                final CacheEvent completed = new CacheEvent()
+                        .type(CacheEventType.COMPLETED)
+                        .id(row.id)
+                        .status(CacheStatus.COMPLETED);
                 cacheEventBroadcaster.publish(completed);
 
             } else {
@@ -146,7 +151,11 @@ public class CacheQueueProcessorService {
 
                 Log.warnf("Download da linha %s falhou: %s", row.id, response.error());
 
-                final CacheEvent failed = CacheEvent.failed(row.id, response.error());
+                final CacheEvent failed = new CacheEvent()
+                        .type(CacheEventType.FAILED)
+                        .id(row.id)
+                        .status(CacheStatus.FAILED)
+                        .errorMessage(response.error());
                 cacheEventBroadcaster.publish(failed);
             }
         }
@@ -191,7 +200,11 @@ public class CacheQueueProcessorService {
 
             row.status = CacheStatus.FAILED;
 
-            final CacheEvent failed = CacheEvent.failed(row.id, "Falha ao iniciar o download no rclone");
+            final CacheEvent failed = new CacheEvent()
+                    .type(CacheEventType.FAILED)
+                    .id(row.id)
+                    .status(CacheStatus.FAILED)
+                    .errorMessage("Falha ao iniciar o download no rclone");
             cacheEventBroadcaster.publish(failed);
 
             return;
@@ -202,7 +215,12 @@ public class CacheQueueProcessorService {
 
         Log.infof("Download da linha %s iniciado (job rclone %d)", row.id, jobId);
 
-        cacheEventBroadcaster.publish(CacheEvent.started(row.id));
+        final CacheEvent started = new CacheEvent()
+                .type(CacheEventType.STARTED)
+                .id(row.id)
+                .status(CacheStatus.DOWNLOADING);
+
+        cacheEventBroadcaster.publish(started);
     }
 
     private void evictForIncoming(Long incomingSizeBytes, String cacheDir) {
@@ -234,7 +252,9 @@ public class CacheQueueProcessorService {
 
             Log.infof("Linha %s removida do cache por eviction LRU", victimId);
 
-            final CacheEvent evicted = CacheEvent.evicted(victimId);
+            final CacheEvent evicted = new CacheEvent()
+                    .type(CacheEventType.EVICTED)
+                    .id(victimId);
             cacheEventBroadcaster.publish(evicted);
         }
 

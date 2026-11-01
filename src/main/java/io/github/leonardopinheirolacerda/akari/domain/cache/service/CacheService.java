@@ -1,5 +1,7 @@
 package io.github.leonardopinheirolacerda.akari.domain.cache.service;
 
+import io.github.leonardopinheirolacerda.akari.api.dto.CacheEvent;
+import io.github.leonardopinheirolacerda.akari.api.dto.CacheEventType;
 import io.github.leonardopinheirolacerda.akari.api.dto.CacheItem;
 import io.github.leonardopinheirolacerda.akari.api.dto.CacheItemPage;
 import io.github.leonardopinheirolacerda.akari.api.dto.CacheQueueRequest;
@@ -7,7 +9,6 @@ import io.github.leonardopinheirolacerda.akari.api.dto.CacheStatus;
 import io.github.leonardopinheirolacerda.akari.api.dto.StorageProviderType;
 import io.github.leonardopinheirolacerda.akari.domain.cache.mapper.CacheMapper;
 import io.github.leonardopinheirolacerda.akari.domain.cache.model.VideoFileCache;
-import io.github.leonardopinheirolacerda.akari.domain.cache.sse.CacheEvent;
 import io.github.leonardopinheirolacerda.akari.domain.cache.sse.CacheEventBroadcaster;
 import io.github.leonardopinheirolacerda.akari.domain.setting.service.SettingService;
 import io.github.leonardopinheirolacerda.akari.domain.storageprovider.provider.client.RcloneClient;
@@ -121,7 +122,10 @@ public class CacheService {
 
         Log.infof("Arquivo %d enfileirado no cache (linha %s)", videoFile.id, row.id);
 
-        final CacheEvent queued = CacheEvent.queued(row.id);
+        final CacheEvent queued = new CacheEvent()
+                .type(CacheEventType.QUEUED)
+                .id(row.id)
+                .status(CacheStatus.QUEUED);
         cacheEventBroadcaster.publish(queued);
 
         return cacheMapper.toItem(row, videoFileMapper);
@@ -211,9 +215,13 @@ public class CacheService {
 
         Log.infof("Linha %s removida (era %s)", id, status);
 
-        final CacheEvent event = status == CacheStatus.COMPLETED
-                ? CacheEvent.deleted(id)
-                : CacheEvent.cancelled(id);
+        final CacheEventType eventType = status == CacheStatus.COMPLETED
+                ? CacheEventType.DELETED
+                : CacheEventType.CANCELLED;
+
+        final CacheEvent event = new CacheEvent()
+                .type(eventType)
+                .id(id);
 
         cacheEventBroadcaster.publish(event);
     }

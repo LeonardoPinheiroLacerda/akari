@@ -1,12 +1,13 @@
 package io.github.leonardopinheirolacerda.akari.domain.notification.service;
 
+import io.github.leonardopinheirolacerda.akari.api.dto.NotificationEvent;
+import io.github.leonardopinheirolacerda.akari.api.dto.NotificationEventType;
 import io.github.leonardopinheirolacerda.akari.api.dto.NotificationLevel;
 import io.github.leonardopinheirolacerda.akari.api.dto.NotificationPage;
 import io.github.leonardopinheirolacerda.akari.api.dto.NotificationResponse;
 import io.github.leonardopinheirolacerda.akari.api.dto.UnreadCountResponse;
 import io.github.leonardopinheirolacerda.akari.domain.notification.mapper.NotificationMapper;
 import io.github.leonardopinheirolacerda.akari.domain.notification.model.Notification;
-import io.github.leonardopinheirolacerda.akari.domain.notification.sse.NotificationEvent;
 import io.github.leonardopinheirolacerda.akari.domain.notification.sse.NotificationEventBroadcaster;
 import io.github.leonardopinheirolacerda.akari.model.PageResult;
 import io.quarkus.logging.Log;
@@ -115,7 +116,9 @@ public class NotificationService {
 
         final NotificationResponse notificationResponse = notificationMapper.toResponse(notification);
 
-        final NotificationEvent created = NotificationEvent.created(notificationResponse);
+        final NotificationEvent created = new NotificationEvent()
+                .type(NotificationEventType.NEW)
+                .notification(notificationResponse);
         notificationEventBroadcaster.publish(created);
 
         Log.infof("Notificação %s criada: %s", level, message);

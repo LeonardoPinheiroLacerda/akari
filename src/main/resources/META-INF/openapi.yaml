@@ -71,8 +71,10 @@ tags:
       eviction LRU.
 
       O acompanhamento de progresso em tempo real é feito por um stream SSE em
-      `/v1/cache/events` — **não modelado neste contrato** (o gerador `jaxrs-spec` não
-      descreve Server-Sent Events); é servido por um resource code-first.
+      `GET /v1/cache/events`. O endpoint **não é descrito em `paths`** (o gerador `jaxrs-spec`
+      não descreve Server-Sent Events) e é servido por um resource code-first, mas o payload de
+      cada mensagem é o schema `CacheEvent` (tipos em `CacheEventType`) — ver a descrição dele
+      pros campos de cada tipo e o ciclo de vida da conexão.
   - name: MediaProbe
     description: |
       Probe de metadados de mídia via ffprobe.
@@ -167,10 +169,11 @@ tags:
       (falhas de integração com storage provider/AniList/TMDB e problemas de qualidade do
       auto-bind/pairing); nenhum outro domínio emite notificação ainda.
 
-      O push em tempo real é um stream SSE em `/v1/notifications/events`, no mesmo molde do
-      `/v1/cache/events`: **não é modelado neste contrato** (o gerador `jaxrs-spec` não descreve
-      Server-Sent Events) e é servido por um resource code-first. Emite um evento sempre que uma
-      notificação nova é criada.
+      O push em tempo real é um stream SSE em `GET /v1/notifications/events`, no mesmo molde do
+      `/v1/cache/events`: o endpoint **não é descrito em `paths`** (o gerador `jaxrs-spec` não
+      descreve Server-Sent Events) e é servido por um resource code-first. Emite um evento sempre
+      que uma notificação nova é criada; o payload de cada mensagem é o schema
+      `NotificationEvent` (tipos em `NotificationEventType`).
 
 paths:
 
@@ -2651,6 +2654,119 @@ components:
               items:
                 $ref: '#/components/schemas/CacheItem'
 
+    CacheEventType:
+      type: string
+      description: |
+        Tipo de um evento do stream SSE `GET /v1/cache/events`. É também o `event:` (nome) da
+        mensagem SSE, então o cliente pode tanto registrar um listener por nome
+        (`addEventListener('PROGRESS', ...)`) quanto ler o campo `type` do payload.
+
+        - `SNAPSHOT` — primeiro evento de quem se inscreve com algo ativo na fila: traz em
+          `items` as linhas `QUEUED`/`DOWNLOADING` daquele momento. A conexão continua aberta.
+        - `IDLE` — não há nada ativo na fila. Enviado como primeiro (e único) evento de quem se
+          inscreve com a fila vazia, ou a todos os inscritos quando a fila termina de drenar. O
+          servidor **fecha a conexão logo depois** — o cliente não deve reconectar sozinho, só
+          quando voltar a ter algo a acompanhar (ex.: depois de um `POST` que enfileira).
+        - `QUEUED` — uma linha entrou na fila (nova, ou reaproveitada de um `FAILED`).
+        - `STARTED` — uma linha começou a baixar.
+        - `PROGRESS` — progresso periódico do download em andamento.
+        - `COMPLETED` — uma linha terminou de baixar; o arquivo já pode tocar.
+        - `FAILED` — uma linha falhou (erro do rclone, ou arquivo removido do catalog antes do
+          início); pode ser reenfileirada.
+        - `EVICTED` — uma linha foi removida pela eviction LRU pra abrir espaço a outro
+          download.
+        - `CANCELLED` — uma linha `QUEUED`/`DOWNLOADING` foi cancelada e removida.
+        - `DELETED` — uma linha `COMPLETED` teve o arquivo apagado manualmente e foi removida.
+      enum:
+        - SNAPSHOT
+        - IDLE
+        - QUEUED
+        - STARTED
+        - PROGRESS
+        - COMPLETED
+        - FAILED
+        - EVICTED
+        - CANCELLED
+        - DELETED
+
+    CacheEvent:
+      type: object
+      description: |
+        Payload (`data:`, JSON) de cada mensagem do stream SSE `GET /v1/cache/events` — o
+        endpoint não é descrito em `paths` (Server-Sent Events não é modelável pelo gerador
+        `jaxrs-spec`), só este payload.
+
+        O stream é aberto com `EventSource` (`GET`, `Accept: text/event-stream`) e acompanha a
+        fila do cache em tempo real. Cada mensagem tem `event:` igual ao `type` e o `data:` com
+        este objeto. Os campos preenchidos dependem do `type`; os demais vêm `null`:
+
+        | `type` | Campos preenchidos |
+        |---|---|
+        | `SNAPSHOT` | `items` |
+        | `IDLE` | nenhum |
+        | `QUEUED` | `id`, `status` = `QUEUED` |
+        | `STARTED` | `id`, `status` = `DOWNLOADING` |
+        | `PROGRESS` | `id`, `status` = `DOWNLOADING`, `bytes`, `totalBytes`, `speed`, `eta`, `percentage` |
+        | `COMPLETED` | `id`, `status` = `COMPLETED` |
+        | `FAILED` | `id`, `status` = `FAILED`, `errorMessage` |
+        | `EVICTED` / `CANCELLED` / `DELETED` | `id` (a linha já não existe mais) |
+
+        Pra acompanhar um arquivo específico, correlacione o `id` com o `cacheItemId` de
+        `GET /v1/playback/files/{fileId}/availability` ou com o `id` devolvido ao enfileirar.
+      required: [type]
+      properties:
+        type:
+          $ref: '#/components/schemas/CacheEventType'
+        id:
+          allOf: [{ $ref: '#/components/schemas/CacheItemId' }]
+          nullable: true
+          description: |
+            Linha do cache a que o evento se refere; `null` em `SNAPSHOT` e `IDLE`
+        status:
+          allOf: [{ $ref: '#/components/schemas/CacheStatus' }]
+          nullable: true
+          description: |
+            Status da linha no momento do evento; `null` em `SNAPSHOT`, `IDLE`, `EVICTED`,
+            `CANCELLED` e `DELETED`
+        errorMessage:
+          type: string
+          nullable: true
+          description: Motivo da falha, pronto pra exibir; só preenchido em `FAILED`
+        bytes:
+          type: integer
+          format: int64
+          nullable: true
+          description: Bytes já transferidos; só preenchido em `PROGRESS`
+        totalBytes:
+          type: integer
+          format: int64
+          nullable: true
+          description: Total esperado de bytes; só preenchido em `PROGRESS`
+        speed:
+          type: number
+          format: double
+          nullable: true
+          description: Velocidade instantânea, em bytes por segundo; só preenchido em `PROGRESS`
+        eta:
+          type: integer
+          format: int64
+          nullable: true
+          description: |
+            Segundos restantes estimados; só em `PROGRESS`, e mesmo nele pode vir `null`
+            enquanto o rclone ainda não consegue estimar
+        percentage:
+          type: number
+          format: double
+          nullable: true
+          description: Percentual concluído, de `0.0` a `100.0`; só preenchido em `PROGRESS`
+        items:
+          type: array
+          nullable: true
+          description: |
+            Linhas `QUEUED`/`DOWNLOADING` no momento da inscrição; só preenchido em `SNAPSHOT`
+          items:
+            $ref: '#/components/schemas/CacheItem'
+
     # ---------- mediaprobe ----------
     MediaContainer:
       type: object
@@ -4200,3 +4316,36 @@ components:
         count:
           type: integer
           format: int32
+
+    NotificationEventType:
+      type: string
+      description: |
+        Tipo de um evento do stream SSE `GET /v1/notifications/events`. É também o `event:`
+        (nome) da mensagem SSE, então o cliente pode tanto registrar um listener por nome
+        (`addEventListener('NEW', ...)`) quanto ler o campo `type` do payload.
+
+        - `NEW` — uma notificação acabou de ser criada.
+      enum:
+        - NEW
+
+    NotificationEvent:
+      type: object
+      description: |
+        Payload (`data:`, JSON) de cada mensagem do stream SSE `GET /v1/notifications/events` —
+        o endpoint não é descrito em `paths` (Server-Sent Events não é modelável pelo gerador
+        `jaxrs-spec`), só este payload.
+
+        O stream é aberto com `EventSource` (`GET`, `Accept: text/event-stream`) e fica aberto
+        indefinidamente, sem evento inicial: a primeira mensagem só chega quando uma notificação
+        nova é criada. Cada mensagem tem `event:` igual ao `type` e o `data:` com este objeto. O
+        stream só avisa de notificações novas — o histórico e a contagem de não-lidas continuam
+        em `GET /v1/notifications` e `GET /v1/notifications/unread-count`; um cliente que
+        reconecta depois de uma queda deve recarregar por eles o que pode ter perdido.
+      required: [type, notification]
+      properties:
+        type:
+          $ref: '#/components/schemas/NotificationEventType'
+        notification:
+          allOf: [{ $ref: '#/components/schemas/NotificationResponse' }]
+          description: |
+            A notificação recém-criada, no mesmo formato da listagem — sempre com `read = false`

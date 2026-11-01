@@ -12,9 +12,10 @@ import jakarta.ws.rs.sse.Sse;
 import jakarta.ws.rs.sse.SseEventSink;
 
 /**
- * Stream SSE de notificações novas — não modelado no contrato OpenAPI (o gerador jaxrs-spec não
- * descreve Server-Sent Events), por isso é code-first, no mesmo molde de
- * {@code CacheEventResource}.
+ * Stream SSE de notificações novas — o endpoint não é descrito em {@code paths} do contrato
+ * OpenAPI (o gerador jaxrs-spec não descreve Server-Sent Events), por isso é code-first, no mesmo
+ * molde de {@code CacheEventResource}. O payload de cada evento é o DTO gerado
+ * {@code NotificationEvent} (schema do contrato).
  */
 @ApplicationScoped
 @Path("/v1/notifications/events")

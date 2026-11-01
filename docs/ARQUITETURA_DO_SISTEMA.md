@@ -55,9 +55,13 @@ O sistema tem 13 domínios de negócio hoje: `storageprovider`, `ingestion`, `me
 - **Exceção tipada → resposta padronizada**: toda exceção de negócio estende `AppException`
   (status HTTP + `ApiErrorCode` fixos); `@ServerExceptionMapper`s em `exceptions/mapper/`
   convertem para o shape `ApiError` do contrato.
-- **SSE code-first fora do contrato**: streams de eventos em tempo real (ex.: progresso de
-  cache) não são modelados no OpenAPI (o gerador `jaxrs-spec` não descreve SSE) — são resources
-  JAX-RS escritos à mão, fora do fluxo `*Api` gerado.
+- **SSE: endpoint code-first, payload contract-first**: os endpoints de streams de eventos em
+  tempo real (ex.: progresso de cache) não são descritos em `paths` (o gerador `jaxrs-spec` não
+  descreve SSE) — são resources JAX-RS escritos à mão, fora do fluxo `*Api` gerado. O payload
+  de cada mensagem, porém, é schema em `components` do `openapi.yaml` (`CacheEvent`,
+  `NotificationEvent` e os enums de tipo), gerado como DTO igual a qualquer outro, mesmo sem
+  nenhum path que o referencie: é por ele que os clients (via orval) tipam as mensagens, e a
+  descrição do schema é a documentação do stream. Payload SSE nunca é escrito à mão.
 
 ## Regras arquiteturais
 

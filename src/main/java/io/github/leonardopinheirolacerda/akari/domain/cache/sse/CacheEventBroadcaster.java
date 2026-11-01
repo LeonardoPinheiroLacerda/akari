@@ -1,5 +1,7 @@
 package io.github.leonardopinheirolacerda.akari.domain.cache.sse;
 
+import io.github.leonardopinheirolacerda.akari.api.dto.CacheEvent;
+import io.github.leonardopinheirolacerda.akari.api.dto.CacheEventType;
 import io.github.leonardopinheirolacerda.akari.api.dto.CacheItem;
 import io.quarkus.logging.Log;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -41,7 +43,7 @@ public class CacheEventBroadcaster {
         this.sse = sse;
 
         if (activeSnapshot.isEmpty()) {
-            final OutboundSseEvent outboundEvent = toOutboundEvent(CacheEvent.idle());
+            final OutboundSseEvent outboundEvent = toOutboundEvent(idleEvent());
 
             sink.send(outboundEvent);
             sink.close();
@@ -49,7 +51,9 @@ public class CacheEventBroadcaster {
             return;
         }
 
-        final CacheEvent snapshot = CacheEvent.snapshot(activeSnapshot);
+        final CacheEvent snapshot = new CacheEvent()
+                .type(CacheEventType.SNAPSHOT)
+                .items(activeSnapshot);
         final OutboundSseEvent outboundEvent = toOutboundEvent(snapshot);
 
         sink.send(outboundEvent);
@@ -97,7 +101,7 @@ public class CacheEventBroadcaster {
             return;
         }
 
-        final OutboundSseEvent idleEvent = toOutboundEvent(CacheEvent.idle());
+        final OutboundSseEvent idleEvent = toOutboundEvent(idleEvent());
 
         sinks.forEach(sink -> {
             try {
@@ -121,9 +125,14 @@ public class CacheEventBroadcaster {
         return !sinks.isEmpty();
     }
 
+    private CacheEvent idleEvent() {
+        return new CacheEvent()
+                .type(CacheEventType.IDLE);
+    }
+
     private OutboundSseEvent toOutboundEvent(CacheEvent event) {
         return sse.newEventBuilder()
-                .name(event.type().name())
+                .name(event.getType().name())
                 .mediaType(MediaType.APPLICATION_JSON_TYPE)
                 .data(CacheEvent.class, event)
                 .build();

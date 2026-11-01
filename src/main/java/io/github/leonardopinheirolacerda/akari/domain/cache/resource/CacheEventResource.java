@@ -16,8 +16,10 @@ import jakarta.ws.rs.sse.SseEventSink;
 import java.util.List;
 
 /**
- * Stream SSE de progresso do cache de vídeo — não modelado no contrato OpenAPI (o gerador
- * jaxrs-spec não descreve Server-Sent Events), por isso é code-first.
+ * Stream SSE de progresso do cache de vídeo — o endpoint não é descrito em {@code paths} do
+ * contrato OpenAPI (o gerador jaxrs-spec não descreve Server-Sent Events), por isso é
+ * code-first. O payload de cada evento, porém, é o DTO gerado {@code CacheEvent} (schema do
+ * contrato).
  */
 @ApplicationScoped
 @Path("/v1/cache/events")

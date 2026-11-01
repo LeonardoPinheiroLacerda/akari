@@ -1,5 +1,6 @@
 package io.github.leonardopinheirolacerda.akari.domain.notification.sse;
 
+import io.github.leonardopinheirolacerda.akari.api.dto.NotificationEvent;
 import io.quarkus.logging.Log;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.ws.rs.core.MediaType;
@@ -88,7 +89,7 @@ public class NotificationEventBroadcaster {
 
     private OutboundSseEvent toOutboundEvent(NotificationEvent event) {
         return sse.newEventBuilder()
-                .name(event.type().name())
+                .name(event.getType().name())
                 .mediaType(MediaType.APPLICATION_JSON_TYPE)
                 .data(NotificationEvent.class, event)
                 .build();

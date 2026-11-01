@@ -18,9 +18,10 @@ criação (`notify()`), usado internamente — não há endpoint de criação na
 - `POST /v1/notifications/{notificationId}/read` — marca uma notificação como lida; idempotente
   (id inexistente ou já lida responde `204` sem alterar nada).
 - `POST /v1/notifications/read-all` — marca todas as não-lidas como lidas.
-- `GET /v1/notifications/events` — stream SSE, code-first (fora do contrato, mesmo molde de
-  `/v1/cache/events`): emite um evento `NEW` com a notificação recém-criada a cada chamada de
-  `notify()`.
+- `GET /v1/notifications/events` — stream SSE, endpoint code-first (fora de `paths` no
+  contrato, mesmo molde de `/v1/cache/events`): emite um evento `NEW` com a notificação
+  recém-criada a cada chamada de `notify()`. O payload é o DTO gerado `NotificationEvent`
+  (schema do contrato, com `NotificationEventType`).
 - Limpeza periódica de sinks SSE fechados (`NotificationScheduler`, a cada 60s) — ver
   "Observações técnicas".
 - `notify(level, title, message, folderId, coverImageUrl)` — cria uma notificação e publica o
@@ -64,7 +65,7 @@ criação (`notify()`), usado internamente — não há endpoint de criação na
 ## Fluxos importantes
 
 - `notify()`: cria `Notification` com `read = false`, persiste, converte pro DTO de resposta via
-  `NotificationMapper` e publica `NotificationEvent.created(...)` no
+  `NotificationMapper` e publica um `NotificationEvent` do tipo `NEW` no
   `NotificationEventBroadcaster` — todo sink SSE aberto recebe o evento `NEW` na hora.
 - `markNotificationRead`: busca por id; se presente, seta `read = true`. Idempotente e
   silencioso (sem exceção) se o id não existir.

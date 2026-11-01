@@ -88,8 +88,8 @@ anibridge, franquias/relações entre animes).
    AniList/TMDB durante o auto-bind, ausência de candidato AniList/mapeamento TMDB utilizável,
    segmentos de numeração ambíguos (`anibridge`) e pareamento incompleto de arquivos↔episódio;
    nenhum outro domínio emite notificação ainda. O push em tempo real via SSE em
-   `/v1/notifications/events` emite um evento a cada notificação nova, no mesmo molde code-first
-   do SSE de `cache` (`/v1/cache/events`).
+   `/v1/notifications/events` emite um evento a cada notificação nova, no mesmo molde do SSE de
+   `cache` (`/v1/cache/events`): endpoint code-first, payload (`NotificationEvent`) no contrato.
 
 ## Atores envolvidos
 
