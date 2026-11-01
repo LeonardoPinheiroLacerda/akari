@@ -1,5 +1,6 @@
 package io.github.leonardopinheirolacerda.akari.domain.playback.client;
 
+import io.github.leonardopinheirolacerda.akari.api.dto.AudioTrack;
 import io.github.leonardopinheirolacerda.akari.api.dto.MediaInfoResponse;
 import io.github.leonardopinheirolacerda.akari.api.dto.SubtitleTrack;
 import io.github.leonardopinheirolacerda.akari.api.dto.VideoTrack;
@@ -643,17 +644,47 @@ public class FfmpegClient {
         args.add(audioEncoder(audio.codec()));
         appendAudioBitrate(args, audio, null);
         appendAudioChannels(args, audio, null);
+        appendAudioFilter(args, audio, null);
     }
 
-    /** {@code true} se a faixa de áudio selecionada já estiver codificada no {@code codec} alvo. */
+    /**
+     * {@code true} se a faixa de áudio selecionada já estiver codificada no {@code codec} alvo
+     * — pra AAC, só se também tiver layout de canais conhecido: copiar um AAC com
+     * {@code channel_layout=unknown} (PCE no {@code esds}, em vez de uma configuração padrão)
+     * repete o mesmo erro de parsing do {@link #appendAudioFilter} corrige no encode.
+     */
     private boolean matchesSelectedAudio(AudioCodec codec, MediaInfoResponse mediaInfo, Integer audioTrackIndex) {
-        final String probedCodec = mediaInfo.getAudio().get(audioTrackIndex).getCodec();
+        final AudioTrack track = mediaInfo.getAudio().get(audioTrackIndex);
+        final String probedCodec = track.getCodec();
 
         return switch (codec) {
-            case AAC -> "aac".equalsIgnoreCase(probedCodec);
+            case AAC -> "aac".equalsIgnoreCase(probedCodec) && hasKnownChannelLayout(track);
             case FLAC -> "flac".equalsIgnoreCase(probedCodec);
             case OPUS -> "opus".equalsIgnoreCase(probedCodec);
         };
+    }
+
+    /** {@code false} se o {@code channel_layout} do probe vier ausente ou {@code unknown}. */
+    private boolean hasKnownChannelLayout(AudioTrack track) {
+        final String layout = track.getChannelLayout();
+        return layout != null && !"unknown".equalsIgnoreCase(layout);
+    }
+
+    /**
+     * Normaliza o layout de canais no encode AAC pra um dos layouts que o encoder representa
+     * com uma configuração padrão no {@code esds} (em vez de um Program Config Element) — layouts
+     * fora dessa lista, como {@code 5.1(side)} (comum em DTS-HD MA), saem com
+     * {@code channel_layout=unknown}, que o parser de MP4 do Chromium rejeita já no
+     * {@code init.mp4}. Só se aplica quando a estratégia não pediu downmix explícito
+     * ({@code channels() == null}) — um {@code -ac} explícito já força um layout sem ambiguidade.
+     */
+    private void appendAudioFilter(List<String> args, AudioTranscode audio, Integer variantIndex) {
+        if (audio.codec() != AudioCodec.AAC || audio.channels() != null) {
+            return;
+        }
+
+        args.add(variantIndex != null ? "-filter:a:" + variantIndex : "-af");
+        args.add("aformat=channel_layouts=7.1|5.1|stereo|mono");
     }
 
     /**
@@ -831,6 +862,7 @@ public class FfmpegClient {
             if (encode) {
                 appendAudioBitrate(args, audio, i);
                 appendAudioChannels(args, audio, i);
+                appendAudioFilter(args, audio, i);
             }
         }
     }
