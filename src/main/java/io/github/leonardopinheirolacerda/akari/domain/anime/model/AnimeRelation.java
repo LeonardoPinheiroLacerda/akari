@@ -36,8 +36,8 @@ public class AnimeRelation extends PanacheEntityBase {
     public RelationType relationType;
 
     /**
-     * Arestas onde {@code anilistId} aparece em qualquer ponta — usado pela BFS bidirecional
-     * do grafo de relações.
+     * Arestas onde {@code anilistId} aparece em qualquer ponta — usado pela subida até a raiz
+     * da franquia.
      *
      * @param anilistId anime pivô
      * @return arestas com {@code fromAnilistId} ou {@code toAnilistId} igual ao pivô
@@ -45,6 +45,19 @@ public class AnimeRelation extends PanacheEntityBase {
     public static List<AnimeRelation> findByAnilistIdEitherSide(Integer anilistId) {
         return AnimeRelation
                 .find("fromAnilistId = ?1 or toAnilistId = ?1", anilistId)
+                .list();
+    }
+
+    /**
+     * Arestas onde qualquer um dos {@code anilistIds} aparece em qualquer ponta — usado pela BFS
+     * bidirecional do grafo de relações, uma consulta por nível.
+     *
+     * @param anilistIds animes da fronteira da BFS
+     * @return arestas com {@code fromAnilistId} ou {@code toAnilistId} entre os informados
+     */
+    public static List<AnimeRelation> findByAnilistIdsEitherSide(List<Integer> anilistIds) {
+        return AnimeRelation
+                .find("fromAnilistId in ?1 or toAnilistId in ?1", anilistIds)
                 .list();
     }
 

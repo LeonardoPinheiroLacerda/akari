@@ -24,8 +24,8 @@ public enum RelationType {
      * Tipos que, saindo de um anime, indicam que ele descende de outro título — por isso
      * quebram a raiz natural da franquia. Fonte única da regra, usada na paginação de raízes,
      * na classificação de nó no grafo, e na subida até a raiz de {@code GET
-     * /v1/metadata/animes/{anilistId}/franchise} ({@code AnimeRelationsService
-     * #findFranchiseRootId}) — essa última soma ainda {@code SUMMARY} com a direção invertida
+     * /v1/metadata/animes/{anilistId}/franchise} ({@code RelationGraph#findFranchiseRootId}) —
+     * essa última soma ainda {@code SUMMARY} com a direção invertida
      * ({@code A -[SUMMARY]-> B} quer dizer "B é resumo de A", ou seja, A é o primário; o
      * contrário do sentido de {@code PREQUEL}/{@code PARENT}, onde quem tem a aresta saindo é o
      * descendente). {@code ALTERNATIVE} fica de fora da subida de propósito: a AniList tagueia

@@ -288,20 +288,13 @@ public class AnimeService {
     }
 
     private AnimeResponse toResponse(Anime anime) {
-        final AnimeResponse response = animeMapper.toView(anime);
-        return animeOverrideService.applyTo(response, anime);
+        return animeOverrideService.applyTo(animeMapper.toView(anime), anime);
     }
 
     private AnimeBindingSummary toBindingSummary(Anime anime) {
-        final AnimeBindingSummary summary = animeMapper.toBindingSummary(anime);
-
-        final String title = animeOverrideService.resolveTitle(anime);
-        final String thumbnail = animeOverrideService.resolveThumbnailMedium(anime);
-
-        summary.title(title);
-        summary.thumbnail(thumbnail);
-
-        return summary;
+        return animeMapper.toBindingSummary(anime)
+                .title(animeOverrideService.resolveTitle(anime))
+                .thumbnail(animeOverrideService.resolveThumbnailMedium(anime));
     }
 
 }

@@ -14,7 +14,6 @@ import io.github.leonardopinheirolacerda.akari.domain.videofile.service.VideoFil
 import io.github.leonardopinheirolacerda.akari.exceptions.IntegrationException;
 import io.github.leonardopinheirolacerda.akari.exceptions.IntegrationNotConfiguredException;
 import io.github.leonardopinheirolacerda.akari.exceptions.ResourceNotFoundException;
-import io.quarkus.logging.Log;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -65,12 +64,11 @@ public class EpisodeContinuityResolutionService {
      * episódio seguinte, {@code END_OF_SERIES}.
      *
      * <p>Episódio seguinte que já está gravado em outro arquivo da pasta, ou que já foi proposto
-     * antes pra outro arquivo nesta mesma passada, sai {@code EPISODE_IN_USE} com o
-     * {@code usedByFileId} — e o arquivo continua sendo a âncora do próximo, pra sequência não
-     * quebrar.
+     * antes pra outro arquivo nesta mesma passada, sai {@code EPISODE_IN_USE} — e o arquivo
+     * continua sendo a âncora do próximo, pra sequência não quebrar. Quem usa o episódio
+     * ({@code usedByFileId}) é preenchido depois, pelo {@link EpisodePairingComparisonService}.
      *
      * @param anime anime com binding TMDB de série
-     * @param folderId pasta do anime
      * @param currentEpisodes pares gravados dos arquivos da pasta, por {@code fileId} — as âncoras
      *                        da continuidade
      * @return um resultado por arquivo da pasta, na ordem natural dos nomes
@@ -79,11 +77,8 @@ public class EpisodeContinuityResolutionService {
      *                                           a temporada não estiver em cache
      * @throws ResourceNotFoundException se a série vinculada não existir mais no TMDB
      */
-    public List<FilePairingResolution> resolve(Anime anime,
-                                               Integer folderId,
-                                               Map<Integer, ResolvedEpisode> currentEpisodes) {
-
-        final List<VideoFile> videoFiles = videoFileService.listByFolderOrderedByNaturalSortKey(folderId);
+    public List<FilePairingResolution> resolve(Anime anime, Map<Integer, ResolvedEpisode> currentEpisodes) {
+        final List<VideoFile> videoFiles = videoFileService.listByFolderOrderedByNaturalSortKey(anime.folder.id);
 
         // Dono de cada episódio já gravado, na ordem natural — o primeiro arquivo que o tem.
         final Map<ResolvedEpisode, Integer> storedOwners = new HashMap<>();
@@ -124,7 +119,6 @@ public class EpisodeContinuityResolutionService {
                         TmdbFilePairingProposalStatus.PAIRED,
                         currentEpisode,
                         pairing,
-                        null,
                         null
                 ));
 
@@ -134,14 +128,7 @@ public class EpisodeContinuityResolutionService {
             }
 
             if (anchorEpisode == null) {
-                resolutions.add(new FilePairingResolution(
-                        videoFile,
-                        TmdbFilePairingProposalStatus.NO_ANCHOR,
-                        null,
-                        null,
-                        null,
-                        null
-                ));
+                resolutions.add(FilePairingResolution.unresolved(videoFile, TmdbFilePairingProposalStatus.NO_ANCHOR));
                 continue;
             }
 
@@ -153,14 +140,7 @@ public class EpisodeContinuityResolutionService {
             );
 
             if (nextEpisode.isEmpty()) {
-                resolutions.add(new FilePairingResolution(
-                        videoFile,
-                        TmdbFilePairingProposalStatus.END_OF_SERIES,
-                        null,
-                        null,
-                        null,
-                        null
-                ));
+                resolutions.add(FilePairingResolution.unresolved(videoFile, TmdbFilePairingProposalStatus.END_OF_SERIES));
                 continue;
             }
 
@@ -181,8 +161,7 @@ public class EpisodeContinuityResolutionService {
                     status,
                     proposedEpisode,
                     animeTmdbFilePairingMapper.toPairingRequest(nextEpisode.get()),
-                    anchorFileId,
-                    usedByFileId
+                    anchorFileId
             ));
 
             proposedOwners.putIfAbsent(proposedEpisode, videoFile.id);
@@ -240,19 +219,10 @@ public class EpisodeContinuityResolutionService {
                                                  Integer seasonNumber,
                                                  Map<Integer, List<TmdbEpisodeResponse>> episodesBySeason) {
 
-        return episodesBySeason.computeIfAbsent(seasonNumber, number -> {
-            try {
-                final List<TmdbEpisodeResponse> episodes = tmdbService.getSeason(tmdbId, number, false)
-                        .episodes();
-
-                return episodes == null
-                        ? List.of()
-                        : episodes;
-            } catch (ResourceNotFoundException e) {
-                Log.warnf("Temporada %d não existe no TMDB %d; a continuidade a trata como vazia", number, tmdbId);
-                return List.of();
-            }
-        });
+        return episodesBySeason.computeIfAbsent(
+                seasonNumber,
+                number -> tmdbService.getSeasonEpisodes(tmdbId, number)
+        );
     }
 
 }

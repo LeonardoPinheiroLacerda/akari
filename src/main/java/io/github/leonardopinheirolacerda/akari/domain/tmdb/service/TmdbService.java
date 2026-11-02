@@ -8,6 +8,7 @@ import io.github.leonardopinheirolacerda.akari.exceptions.IntegrationException;
 import io.github.leonardopinheirolacerda.akari.exceptions.ResourceNotFoundException;
 import io.github.leonardopinheirolacerda.akari.domain.setting.service.SettingService;
 import io.github.leonardopinheirolacerda.akari.domain.tmdb.client.TmdbClient;
+import io.github.leonardopinheirolacerda.akari.domain.tmdb.client.dtos.TmdbEpisodeResponse;
 import io.github.leonardopinheirolacerda.akari.domain.tmdb.client.dtos.TmdbImagesResponse;
 import io.github.leonardopinheirolacerda.akari.domain.tmdb.client.dtos.TmdbMovieDetailsResponse;
 import io.github.leonardopinheirolacerda.akari.domain.tmdb.client.dtos.TmdbMovieSearchResponse;
@@ -18,12 +19,14 @@ import io.github.leonardopinheirolacerda.akari.domain.tmdb.client.dtos.TmdbTvSea
 import io.github.leonardopinheirolacerda.akari.domain.tmdb.mapper.TmdbMapper;
 import io.github.leonardopinheirolacerda.akari.utils.CacheUtils;
 import io.github.leonardopinheirolacerda.akari.utils.HttpErrorUtils;
+import io.github.leonardopinheirolacerda.akari.utils.RetryUtils;
 import io.quarkus.logging.Log;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
 import jakarta.ws.rs.ProcessingException;
 import jakarta.ws.rs.WebApplicationException;
+import java.util.List;
 import org.eclipse.microprofile.rest.client.inject.RestClient;
 
 /**
@@ -259,6 +262,34 @@ public class TmdbService {
                 () -> fetchSeason(seriesId, seasonNumber),
                 payload -> IntegrationCache.writeEntry(cacheKey, payload, objectMapper)
         );
+    }
+
+    /**
+     * Lê só os episódios de uma temporada de série no TMDB, cache-first, com retry em rate
+     * limit. Temporada que não existe no TMDB conta como vazia — quem anda pela série (pairing
+     * de episódios) segue com o resto dela.
+     *
+     * @param seriesId id da série no TMDB
+     * @param seasonNumber número da temporada
+     * @return os episódios da temporada; vazio se a temporada não existir ou não tiver episódios
+     * @throws IntegrationException se a chamada ao TMDB falhar por outro motivo
+     */
+    @Transactional
+    public List<TmdbEpisodeResponse> getSeasonEpisodes(Integer seriesId, Integer seasonNumber) {
+        final TmdbSeasonResponse season;
+
+        try {
+            season = RetryUtils.withRateLimitRetry(() -> getSeason(seriesId, seasonNumber, false));
+        } catch (ResourceNotFoundException e) {
+            Log.warnf("Temporada %d não existe no TMDB %d, tratada como vazia", seasonNumber, seriesId);
+            return List.of();
+        }
+
+        if (season.episodes() == null) {
+            return List.of();
+        }
+
+        return season.episodes();
     }
 
     private TmdbMovieSearchResultPage fetchMovieSearch(String query, Integer page, String language, boolean includeAdult) {

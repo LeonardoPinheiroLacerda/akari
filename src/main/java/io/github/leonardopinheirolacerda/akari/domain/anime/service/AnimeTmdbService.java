@@ -14,10 +14,8 @@ import io.github.leonardopinheirolacerda.akari.domain.anime.model.TmdbFilePairin
 import io.github.leonardopinheirolacerda.akari.domain.setting.service.SettingService;
 import io.github.leonardopinheirolacerda.akari.domain.tmdb.client.dtos.TmdbImageResponse;
 import io.github.leonardopinheirolacerda.akari.domain.tmdb.client.dtos.TmdbImagesResponse;
-import io.github.leonardopinheirolacerda.akari.domain.tmdb.client.dtos.TmdbMovieDetailsResponse;
 import io.github.leonardopinheirolacerda.akari.domain.tmdb.client.dtos.TmdbTranslationDataResponse;
 import io.github.leonardopinheirolacerda.akari.domain.tmdb.client.dtos.TmdbTranslationEntryResponse;
-import io.github.leonardopinheirolacerda.akari.domain.tmdb.client.dtos.TmdbTvDetailsResponse;
 import io.github.leonardopinheirolacerda.akari.domain.tmdb.service.TmdbService;
 import io.github.leonardopinheirolacerda.akari.exceptions.BusinessRuleException;
 import io.github.leonardopinheirolacerda.akari.exceptions.IntegrationException;
@@ -185,55 +183,50 @@ public class AnimeTmdbService {
     public TmdbOverridesSchema getTmdbOverridesSchema(Integer anilistId, Boolean forceRefresh) {
         final Anime anime = findBoundAnimeOrThrow(anilistId);
 
-        final boolean isTv = anime.tmdbMediaType == TmdbMediaType.TV;
         final Integer tmdbId = anime.tmdbId;
 
-        final String defaultTitle;
-        final String defaultOverview;
-        final String defaultLanguage;
+        final TmdbBindingDetails details = fetchDetails(tmdbId, anime.tmdbMediaType, forceRefresh);
 
-        if (isTv) {
-            final TmdbTvDetailsResponse tv = tmdbService.getTvDetails(tmdbId, forceRefresh);
-            defaultTitle = tv.name();
-            defaultOverview = tv.overview();
-            defaultLanguage = tv.originalLanguage();
-        } else {
-            final TmdbMovieDetailsResponse movie = tmdbService.getMovieDetails(tmdbId, forceRefresh);
-            defaultTitle = movie.title();
-            defaultOverview = movie.overview();
-            defaultLanguage = movie.originalLanguage();
-        }
-
-        final List<TmdbTranslationEntryResponse> translations = isTv
+        final List<TmdbTranslationEntryResponse> translations = anime.tmdbMediaType == TmdbMediaType.TV
                 ? tmdbService.getTvTranslations(tmdbId, forceRefresh).translations()
                 : tmdbService.getMovieTranslations(tmdbId, forceRefresh).translations();
 
-        final TmdbImagesResponse images = isTv
-                ? tmdbService.getTvImages(tmdbId, forceRefresh)
-                : tmdbService.getMovieImages(tmdbId, forceRefresh);
+        final TmdbImagesResponse images = fetchImages(tmdbId, anime.tmdbMediaType, forceRefresh);
 
         return new TmdbOverridesSchema()
-                .title(collectTexts(defaultTitle, defaultLanguage, translations, TmdbTranslationDataResponse::localizedName))
-                .synopsis(collectTexts(defaultOverview, defaultLanguage, translations, TmdbTranslationDataResponse::overview))
+                .title(collectTexts(
+                        details.getTitle(),
+                        details.getOriginalLanguage(),
+                        translations,
+                        TmdbTranslationDataResponse::localizedName
+                ))
+                .synopsis(collectTexts(
+                        details.getOverview(),
+                        details.getOriginalLanguage(),
+                        translations,
+                        TmdbTranslationDataResponse::overview
+                ))
                 .posterPath(toImageOptions(images.posters(), TmdbImageUtils::posterMedium))
                 .backdropPath(toImageOptions(images.backdrops(), TmdbImageUtils::backdrop))
                 .logoPath(toImageOptions(images.logos(), TmdbImageUtils::logo));
     }
 
     /**
-     * Busca o anime e confirma que ele tem binding TMDB, ou lança 404. Usado também pelo
-     * {@link AnimeTmdbFilePairingService}, que exige o mesmo binding pra existir.
+     * Busca o anime e confirma que ele tem binding TMDB de série — pairing de episódios só existe
+     * pra série. Usado pelo {@link AnimeTmdbFilePairingService} e pelo
+     * {@link AnimeTmdbProposalService}.
      *
      * @param anilistId id do anime na AniList
-     * @return o anime, com {@code tmdbId} garantidamente preenchido
+     * @return o anime, com binding TMDB de série
      * @throws ResourceNotFoundException se o anime não existir ou não tiver binding TMDB
+     * @throws BusinessRuleException se o binding TMDB for de filme
      */
-    public Anime findBoundAnimeOrThrow(Integer anilistId) {
-        final Anime anime = animeService.findOrThrow(anilistId);
+    public Anime findTvBoundAnimeOrThrow(Integer anilistId) {
+        final Anime anime = findBoundAnimeOrThrow(anilistId);
 
-        if (anime.tmdbId == null) {
-            Log.warnf("Anime %d não tem binding TMDB", anilistId);
-            throw new ResourceNotFoundException("Não foi possível localizar um binding TMDB para o anime informado");
+        if (anime.tmdbMediaType != TmdbMediaType.TV) {
+            Log.warnf("Anime %d tem binding TMDB de filme, sem pairing de episódios", anilistId);
+            throw new BusinessRuleException("Pairing de episódios só existe pra binding TMDB de série");
         }
 
         return anime;
@@ -254,13 +247,34 @@ public class AnimeTmdbService {
      *                                           não estiver em cache
      */
     public TmdbBindingDetails fetchDetails(Integer tmdbId, TmdbMediaType mediaType) {
+        return fetchDetails(tmdbId, mediaType, false);
+    }
+
+    private TmdbBindingDetails fetchDetails(Integer tmdbId, TmdbMediaType mediaType, Boolean forceRefresh) {
         if (mediaType == TmdbMediaType.TV) {
-            final TmdbTvDetailsResponse tvDetails = tmdbService.getTvDetails(tmdbId, false);
-            return animeTmdbMapper.toDetails(tvDetails);
+            return animeTmdbMapper.toDetails(tmdbService.getTvDetails(tmdbId, forceRefresh));
         }
 
-        final TmdbMovieDetailsResponse movieDetails = tmdbService.getMovieDetails(tmdbId, false);
-        return animeTmdbMapper.toDetails(movieDetails);
+        return animeTmdbMapper.toDetails(tmdbService.getMovieDetails(tmdbId, forceRefresh));
+    }
+
+    /**
+     * Busca o anime e confirma que ele tem binding TMDB, ou lança 404 — usado pelas operações
+     * sobre um binding existente e por {@link #findTvBoundAnimeOrThrow}.
+     *
+     * @param anilistId id do anime na AniList
+     * @return o anime, com {@code tmdbId} garantidamente preenchido
+     * @throws ResourceNotFoundException se o anime não existir ou não tiver binding TMDB
+     */
+    private Anime findBoundAnimeOrThrow(Integer anilistId) {
+        final Anime anime = animeService.findOrThrow(anilistId);
+
+        if (anime.tmdbId == null) {
+            Log.warnf("Anime %d não tem binding TMDB", anilistId);
+            throw new ResourceNotFoundException("Não foi possível localizar um binding TMDB para o anime informado");
+        }
+
+        return anime;
     }
 
     /**
@@ -275,9 +289,7 @@ public class AnimeTmdbService {
         final TmdbImagesResponse images;
 
         try {
-            images = RetryUtils.withRateLimitRetry(() -> mediaType == TmdbMediaType.TV
-                    ? tmdbService.getTvImages(tmdbId, false)
-                    : tmdbService.getMovieImages(tmdbId, false));
+            images = RetryUtils.withRateLimitRetry(() -> fetchImages(tmdbId, mediaType, false));
 
         } catch (IntegrationException | ResourceNotFoundException e) {
             Log.warnf(e, "Busca de imagens no TMDB %d falhou, binding segue sem backdrop/logo", tmdbId);
@@ -293,6 +305,14 @@ public class AnimeTmdbService {
                 images.logos(),
                 settingService.getTmdbImageLogoLanguage()
         );
+    }
+
+    private TmdbImagesResponse fetchImages(Integer tmdbId, TmdbMediaType mediaType, Boolean forceRefresh) {
+        if (mediaType == TmdbMediaType.TV) {
+            return tmdbService.getTvImages(tmdbId, forceRefresh);
+        }
+
+        return tmdbService.getMovieImages(tmdbId, forceRefresh);
     }
 
     /**
@@ -336,30 +356,24 @@ public class AnimeTmdbService {
         final List<TmdbLocalizedOption> result = new ArrayList<>();
 
         for (TmdbTranslationEntryResponse entry : translations) {
-            if (entry.data() == null) {
-                continue;
-            }
-
-            final String value = valueExtractor.apply(entry.data());
-
-            if (value != null && !value.isBlank()) {
-                final TmdbLocalizedOption text = new TmdbLocalizedOption()
-                        .value(value)
-                        .language(entry.iso6391());
-
-                result.add(text);
+            if (entry.data() != null) {
+                addIfHasText(result, valueExtractor.apply(entry.data()), entry.iso6391());
             }
         }
 
-        if (defaultValue != null && !defaultValue.isBlank()) {
-            final TmdbLocalizedOption text = new TmdbLocalizedOption()
-                    .value(defaultValue)
-                    .language(defaultLanguage);
-
-            result.add(text);
-        }
+        addIfHasText(result, defaultValue, defaultLanguage);
 
         return result;
+    }
+
+    private static void addIfHasText(List<TmdbLocalizedOption> options, String value, String language) {
+        if (value == null || value.isBlank()) {
+            return;
+        }
+
+        options.add(new TmdbLocalizedOption()
+                .value(value)
+                .language(language));
     }
 
     private static List<TmdbImageOption> toImageOptions(List<TmdbImageResponse> images, Function<String, String> urlBuilder) {

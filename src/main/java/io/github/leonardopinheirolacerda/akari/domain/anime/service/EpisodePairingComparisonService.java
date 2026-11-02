@@ -13,7 +13,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -61,9 +60,8 @@ public class EpisodePairingComparisonService {
      *
      * <p>Só {@code PAIRED} e {@code EPISODE_IN_USE} são proposta: recebem {@code change}
      * ({@code NEW} sem par gravado, {@code SAME} igual, {@code REPLACE} diferente) e
-     * {@code usedByFileId} — o que a estratégia já trouxe ou, se ela não verificou, o primeiro
-     * outro arquivo (na ordem das resoluções) com esse par gravado, senão um que recebeu a mesma
-     * proposta antes. Vem pré-selecionada só a proposta {@code NEW} sem uso por outro arquivo.
+     * {@code usedByFileId} — o primeiro outro arquivo (na ordem das resoluções) com esse par
+     * gravado, senão um que recebeu a mesma proposta antes. Vem pré-selecionada só a proposta {@code NEW} sem uso por outro arquivo.
      *
      * @param resolutions resolução de cada arquivo da pasta, na ordem natural dos nomes
      * @param currentEpisodes pares gravados por {@code fileId} (ver {@link #findCurrentEpisodes})
@@ -115,8 +113,7 @@ public class EpisodePairingComparisonService {
         }
 
         final TmdbFilePairingChange change = changeOf(currentEpisode, proposedEpisode);
-        final Integer usedByFileId = Optional.ofNullable(resolution.usedByFileId())
-                .orElseGet(() -> findUsedByFileId(fileId, proposedEpisode, resolutions, currentEpisodes, proposedOwners));
+        final Integer usedByFileId = findUsedByFileId(fileId, proposedEpisode, resolutions, currentEpisodes, proposedOwners);
 
         proposedOwners.putIfAbsent(proposedEpisode, fileId);
 
@@ -149,17 +146,12 @@ public class EpisodePairingComparisonService {
                                      Map<Integer, ResolvedEpisode> currentEpisodes,
                                      Map<ResolvedEpisode, Integer> proposedOwners) {
 
-        final Optional<Integer> storedOwner = resolutions.stream()
+        return resolutions.stream()
                 .map(resolution -> resolution.videoFile().id)
                 .filter(otherFileId -> !otherFileId.equals(fileId))
                 .filter(otherFileId -> proposedEpisode.equals(currentEpisodes.get(otherFileId)))
-                .findFirst();
-
-        if (storedOwner.isPresent()) {
-            return storedOwner.get();
-        }
-
-        return proposedOwners.get(proposedEpisode);
+                .findFirst()
+                .orElse(proposedOwners.get(proposedEpisode));
     }
 
 }

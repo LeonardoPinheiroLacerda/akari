@@ -15,8 +15,6 @@ import io.github.leonardopinheirolacerda.akari.domain.tmdb.service.TmdbService;
 import io.github.leonardopinheirolacerda.akari.domain.videofile.model.VideoFile;
 import io.github.leonardopinheirolacerda.akari.domain.videofile.service.VideoFileService;
 import io.github.leonardopinheirolacerda.akari.exceptions.IntegrationException;
-import io.github.leonardopinheirolacerda.akari.exceptions.ResourceNotFoundException;
-import io.github.leonardopinheirolacerda.akari.utils.RetryUtils;
 import io.quarkus.logging.Log;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -125,16 +123,11 @@ public class EpisodePairingResolutionService {
 
                 if (resolved.isEmpty() && !absoluteOffsetCandidates.isEmpty()) {
                     if (offsetSegments.isPresent()) {
-                        for (Integer offsetCandidate : absoluteOffsetCandidates) {
-                            resolved = anibridgeResolutionService.resolveEpisode(
-                                    offsetSegments.get(),
-                                    episodeNumber.getAsInt() - offsetCandidate
-                            );
-
-                            if (resolved.isPresent()) {
-                                break;
-                            }
-                        }
+                        resolved = resolveWithOffsets(
+                                offsetSegments.get(),
+                                absoluteOffsetCandidates,
+                                episodeNumber.getAsInt()
+                        );
                     } else {
                         offsetNeededButIneligible = true;
                     }
@@ -147,7 +140,7 @@ public class EpisodePairingResolutionService {
 
             if (resolved.isEmpty()) {
                 final TmdbFilePairingProposalStatus status = unresolvedStatus(episodeNumber, offsetNeededButIneligible);
-                resolutions.add(new FilePairingResolution(videoFile, status, null, null, null, null));
+                resolutions.add(FilePairingResolution.unresolved(videoFile, status));
                 continue;
             }
 
@@ -165,7 +158,6 @@ public class EpisodePairingResolutionService {
                         TmdbFilePairingProposalStatus.NOT_FOUND_IN_TMDB,
                         resolved.get(),
                         null,
-                        null,
                         null
                 ));
                 continue;
@@ -178,7 +170,6 @@ public class EpisodePairingResolutionService {
                     TmdbFilePairingProposalStatus.PAIRED,
                     resolved.get(),
                     pairing,
-                    null,
                     null
             ));
         }
@@ -188,8 +179,25 @@ public class EpisodePairingResolutionService {
 
     private List<FilePairingResolution> withStatus(List<VideoFile> videoFiles, TmdbFilePairingProposalStatus status) {
         return videoFiles.stream()
-                .map(videoFile -> new FilePairingResolution(videoFile, status, null, null, null, null))
+                .map(videoFile -> FilePairingResolution.unresolved(videoFile, status))
                 .toList();
+    }
+
+    /**
+     * Tenta resolver o número pela numeração absoluta, um offset da cadeia de prequels por vez,
+     * parando no primeiro que o anibridge resolver.
+     */
+    private Optional<ResolvedEpisode> resolveWithOffsets(List<MappingSegment> offsetSegments,
+                                                         List<Integer> offsetCandidates,
+                                                         Integer episodeNumber) {
+
+        return offsetCandidates.stream()
+                .map(offsetCandidate -> anibridgeResolutionService.resolveEpisode(
+                        offsetSegments,
+                        episodeNumber - offsetCandidate
+                ))
+                .flatMap(Optional::stream)
+                .findFirst();
     }
 
     /**
@@ -229,14 +237,8 @@ public class EpisodePairingResolutionService {
 
         final List<TmdbEpisodeResponse> episodes = episodesBySeason.computeIfAbsent(resolved.seasonNumber(), seasonNumber -> {
             try {
-                return RetryUtils.withRateLimitRetry(
-                        () -> tmdbService.getSeason(
-                                tmdbId,
-                                seasonNumber,
-                                false
-                        ).episodes());
-
-            } catch (IntegrationException | ResourceNotFoundException e) {
+                return tmdbService.getSeasonEpisodes(tmdbId, seasonNumber);
+            } catch (IntegrationException e) {
                 Log.warnf(e, "Busca da temporada %d no TMDB falhou pra pasta %d (%s)", seasonNumber, folderId, folderName);
                 return List.of();
             }

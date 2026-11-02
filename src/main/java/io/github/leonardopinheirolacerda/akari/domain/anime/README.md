@@ -42,7 +42,7 @@ Grafo de relações:
 - Materializar o grafo via BFS bidirecional até profundidade configurável (`getAnimeRelationGraph`).
 - Listar animes-raiz da coleção, paginados (`listRelationRoots`).
 - Montar a franquia de um anime já organizada em raiz/temporadas/filmes/especiais pra tela de detalhe do app (`getAnimeFranchise`).
-- Achar o prequel direto de um anime, usado pelo domínio `ingestion` pra calcular deslocamento de numeração absoluta (`findDirectPrequelId`).
+- Achar o prequel direto de um anime, usado pelo `AbsoluteEpisodeOffsetService` pra calcular o deslocamento de numeração absoluta no pairing de episódios (`findDirectPrequelId`).
 
 Eixo TMDB:
 - Vincular o anime a uma série/filme do TMDB, validando a existência do id e pré-preenchendo backdrop/logo com a imagem mais votada (melhor esforço) (`bindTmdb`).
@@ -59,12 +59,12 @@ Proposta de binding TMDB:
 Resolução do pairing TMDB (`EpisodePairingResolutionService`, sem endpoint próprio):
 - Número do episódio extraído do nome do arquivo (`ingestion.extractor.EpisodeNumberExtractor`), convertido pra temporada/episódio do TMDB pelo anibridge — só pelos segments que apontam pra série vinculada (`AnibridgeResolutionService.resolveCandidateFor`), pra nunca aplicar a numeração de um título sobre outro: sem nenhum, todos os arquivos saem `NO_MAPPING`. Segments conflitantes (`resolveSafeSegments` vazio) → `CONFLICTING_MAPPING`.
 - Fallbacks: numeração absoluta, com offsets candidatos calculados pela cadeia de prequels da AniList (`AbsoluteEpisodeOffsetService`, tentados do mais próximo ao mais distante, só quando o mapeamento cobre a temporada isolada com segurança — senão `AMBIGUOUS_ABSOLUTE_NUMBERING`); e pasta de 1 arquivo com anime de 1 episódio → episódio 1.
-- Cada episódio resolvido é confirmado no TMDB (`TmdbService.getSeason`, temporada cacheada por pasta), de onde sai a metadata do pairing; se não existir (temporada inexistente, episódio fora dela ou falha na busca) → `NOT_FOUND_IN_TMDB`, sem pairing.
+- Cada episódio resolvido é confirmado no TMDB (`TmdbService.getSeasonEpisodes`, com retry de rate limit, temporada cacheada por pasta), de onde sai a metadata do pairing; se não existir (temporada inexistente, episódio fora dela ou falha na busca) → `NOT_FOUND_IN_TMDB`, sem pairing.
 
 Resolução por continuidade (`EpisodeContinuityResolutionService`, sem endpoint próprio, só na proposta):
-- Não consulta o anibridge: depende só do binding TMDB, da estrutura da série no TMDB (`TmdbService.getTvDetails`/`getSeason`, cache-first) e dos pairings já gravados na pasta — funciona justamente quando o anibridge não mapeia o anime (ex.: especiais pareados à mão na temporada 0).
+- Não consulta o anibridge: depende só do binding TMDB, da estrutura da série no TMDB (`TmdbService.getTvDetails`/`getSeasonEpisodes`, cache-first) e dos pairings já gravados na pasta — funciona justamente quando o anibridge não mapeia o anime (ex.: especiais pareados à mão na temporada 0).
 - Os arquivos de um anime são os arquivos diretos da pasta dele, então estão todos no mesmo diretório: a continuidade anda pela pasta inteira na ordem natural dos nomes (`VideoFileService.listByFolderOrderedByNaturalSortKey`).
-- Arquivo com par gravado é âncora e sai `PAIRED` com o próprio par. Cada arquivo sem par recebe o episódio seguinte ao da âncora e vira a âncora do próximo. Se esse episódio já está gravado em outro arquivo, ou já foi proposto antes nesta passada, a própria continuidade marca `EPISODE_IN_USE` com o `usedByFileId` — e o arquivo continua sendo âncora, pra sequência não quebrar. Sem âncora antes → `NO_ANCHOR`; sem episódio seguinte → `END_OF_SERIES`.
+- Arquivo com par gravado é âncora e sai `PAIRED` com o próprio par. Cada arquivo sem par recebe o episódio seguinte ao da âncora e vira a âncora do próximo. Se esse episódio já está gravado em outro arquivo, ou já foi proposto antes nesta passada, a própria continuidade marca `EPISODE_IN_USE` (o `usedByFileId` vem da comparação) — e o arquivo continua sendo âncora, pra sequência não quebrar. Sem âncora antes → `NO_ANCHOR`; sem episódio seguinte → `END_OF_SERIES`.
 - Depois do último episódio de uma temporada, segue no primeiro da próxima temporada com episódios, pelo número. A temporada 0 (especiais) não tem tratamento próprio: âncora nela continua dentro dela e, no fim, segue pra temporada 1; como vem antes de todas, nunca é a próxima de outra temporada. Temporada que não existe mais no TMDB (par gravado desatualizado) conta como vazia; outras falhas do TMDB propagam (`502`/`503`).
 
 File pairing:
@@ -81,8 +81,8 @@ Episódios:
 - `AnimeService` injeta `AnimeRelationsService` (ressincroniza o grafo após bind/sync) e `AnimeOverrideService` (resolve campos exibidos).
 - `AnimeRelationsService` injeta `AnimeOverrideService` (resolve título/thumbnail dos nós do grafo).
 - `AnimeTmdbService` injeta `AnimeService` (busca o anime base, reusa `findOrThrow`).
-- `AnimeTmdbFilePairingService` injeta `AnimeTmdbService` (reusa `findBoundAnimeOrThrow`).
-- `AnimeTmdbProposalService` injeta `AnimeTmdbService` (reusa `fetchDetails` pra montar a ficha e `findBoundAnimeOrThrow`), `EpisodePairingResolutionService` (estratégia anibridge), `EpisodeContinuityResolutionService` (estratégia de continuidade) e `EpisodePairingComparisonService` (pares gravados e comparação) — só escolhe a estratégia e encadeia os três.
+- `AnimeTmdbFilePairingService` injeta `AnimeTmdbService` (reusa `findTvBoundAnimeOrThrow`).
+- `AnimeTmdbProposalService` injeta `AnimeTmdbService` (reusa `fetchDetails` pra montar a ficha e `findTvBoundAnimeOrThrow`), `EpisodePairingResolutionService` (estratégia anibridge), `EpisodeContinuityResolutionService` (estratégia de continuidade) e `EpisodePairingComparisonService` (pares gravados e comparação) — só escolhe a estratégia e encadeia os três.
 - `AnimeTmdbFilePairingMapper.toPairingRequest` é o único ponto que traduz um episódio do TMDB pros campos do pairing — usado por `EpisodePairingResolutionService` e `EpisodeContinuityResolutionService`.
 - `EpisodePairingResolutionService` injeta `AbsoluteEpisodeOffsetService` (offsets de numeração absoluta).
 - `AbsoluteEpisodeOffsetService` injeta `AnimeService` e `AnimeRelationsService` (anda a cadeia de prequels).
@@ -116,9 +116,8 @@ HTTP, via os seis `*Resource` (`/v1/metadata/animes/...`, `/v1/metadata/folders/
 
 Programático, pra outros domínios (sem HTTP):
 - `AnimeService.findByFolder`, `.exists`, `.find`, `.findOrThrow`, `.updateReviewStatusIfNotReviewed`, `.getAnimeBindings`.
-- `AnimeRelationsService.findDirectPrequelId`.
 - `AnimeTmdbFilePairingService.getTmdbFilePairings`.
-- `AnimeTmdbService.findBoundAnimeOrThrow` (uso intra-domínio, mas público).
+- `AnimeTmdbService.findTvBoundAnimeOrThrow` (uso intra-domínio, mas público).
 
 ## Fluxos importantes
 
@@ -126,9 +125,9 @@ Programático, pra outros domínios (sem HTTP):
 
 **Sync de relações em cascata (`AnimeRelationsService.syncRelations`):** apaga as arestas que saem do anime e as recria a partir da resposta da AniList; pra cada relação que aponta pra um anime *já conhecido localmente*, salva a aresta e dispara recursivamente o mesmo sync pro vizinho (se ainda não visitado nessa chamada), buscando-o de novo na AniList. Relações pra animes não vinculados localmente são ignoradas — o grafo se fecha quando esses animes forem vinculados depois. Tudo dentro de uma única `@Transactional`.
 
-**Grafo de relações (`AnimeRelationsService.getAnimeRelationGraph`):** BFS bidirecional sobre `AnimeRelation` (segue tanto `fromAnilistId` quanto `toAnilistId`) até `depth` saltos, classificando cada nó como raiz manual/natural/não-raiz via `RelationType.ANCESTOR_LINKS` (`PREQUEL`, `PARENT`).
+**Grafo de relações (`AnimeRelationsService.getAnimeRelationGraph`):** BFS bidirecional sobre `AnimeRelation` (`RelationGraph.closure`, segue tanto `fromAnilistId` quanto `toAnilistId`, uma consulta por nível) até `depth` saltos, classificando cada nó como raiz manual/natural/não-raiz via `RelationType.ANCESTOR_LINKS` (`PREQUEL`, `PARENT`).
 
-**Franquia organizada (`AnimeRelationsService.getAnimeFranchise`):** sobe até a raiz seguindo `RelationType.ANCESTOR_LINKS` (saindo do pivot) e `SUMMARY` em sentido invertido (chegando no pivot — uma aresta `A -[SUMMARY]-> B` indica que B é derivado de A); `ALTERNATIVE` fica de fora dessa subida porque a AniList costuma taguear esse tipo nos dois sentidos, o que criaria um ciclo sem lado ancestral objetivo. A partir da raiz, fecha a franquia via BFS bidirecional sem limite de profundidade, só por `RelationType.FRANCHISE_LINKS` (`SEQUEL`, `SIDE_STORY`, `SPIN_OFF`, `SUMMARY`, `PARENT`, `ALTERNATIVE`). `seasons` é a cadeia de `SEQUEL` a partir da raiz, na ordem da cadeia, filtrada por `RelationType.SERIES_FORMATS`; o resto do fechamento vira `movies`/`specials`, separados por `RelationType.MOVIE_FORMATS`/`SPECIAL_FORMATS` (três listas disjuntas) e ordenados por `seasonYear`, depois `Season` (ordem natural do enum), depois `anilistId`. `root`/`seasons`/`movies`/`specials` usam o `AnimeResponse` completo, resolvido via `AnimeOverrideService` igual às demais vistas do domínio. Busca os `Anime` da franquia em lote (`Anime.findByIds`) pra evitar N+1.
+**Franquia organizada (`AnimeRelationsService.getAnimeFranchise`):** os percursos do grafo ficam em `RelationGraph` (`findFranchiseRootId`, `closure`, `sequelChainFrom`); o service só monta a resposta. Sobe até a raiz seguindo `RelationType.ANCESTOR_LINKS` (saindo do pivot) e `SUMMARY` em sentido invertido (chegando no pivot — uma aresta `A -[SUMMARY]-> B` indica que B é derivado de A); `ALTERNATIVE` fica de fora dessa subida porque a AniList costuma taguear esse tipo nos dois sentidos, o que criaria um ciclo sem lado ancestral objetivo. A partir da raiz, fecha a franquia via BFS bidirecional sem limite de profundidade, só por `RelationType.FRANCHISE_LINKS` (`SEQUEL`, `SIDE_STORY`, `SPIN_OFF`, `SUMMARY`, `PARENT`, `ALTERNATIVE`). `seasons` é a cadeia de `SEQUEL` a partir da raiz, na ordem da cadeia, filtrada por `RelationType.SERIES_FORMATS`; o resto do fechamento vira `movies`/`specials`, separados por `RelationType.MOVIE_FORMATS`/`SPECIAL_FORMATS` (três listas disjuntas) e ordenados por `seasonYear`, depois `Season` (ordem natural do enum), depois `anilistId`. `root`/`seasons`/`movies`/`specials` usam o `AnimeResponse` completo, resolvido via `AnimeOverrideService` igual às demais vistas do domínio. Busca os `Anime` da franquia em lote (`Anime.findByIds`) pra evitar N+1.
 
 **Resolução de overrides (`AnimeOverrideService`):** usada por `AnimeService.toResponse`/`toBindingSummary` e por `AnimeRelationsService` pra decidir, campo a campo, entre o override manual (TMDB) e o dado cru (AniList); banner e logo só existem via override (a AniList não tem esses campos).
 
@@ -141,7 +140,9 @@ Programático, pra outros domínios (sem HTTP):
 - `model/Anime.java` — entidade central; PK é o próprio `anilistId` (sem id surrogate), concentra dados AniList + binding/overrides TMDB + curadoria + revisão.
 - `service/AnimeOverrideService.java` — motor único de resolução override↔dado cru, reaproveitado pelas outras facetas.
 - `service/AnimeService.java` — binding↔pasta, sync, curadoria; ponto de entrada mais usado por outros domínios.
-- `service/AnimeRelationsService.java` — sync recursivo do grafo, BFS de materialização e montagem da franquia (`getAnimeFranchise`); lógica mais complexa do domínio.
+- `service/AnimeRelationsService.java` — sync recursivo do grafo e montagem das respostas de grafo e franquia (`getAnimeRelationGraph`, `getAnimeFranchise`).
+- `graph/RelationGraph.java` — percursos sobre o grafo de relações: fechamento por BFS, subida até a raiz da franquia, cadeia de `SEQUEL` e classificação de raiz; regras de ancestralidade (`SUMMARY` invertido, `ALTERNATIVE` fora). Classe estática sem CDI, não `*Service`, porque não orquestra regra de negócio nem tem resource — só lê `AnimeRelation`/`Anime` pelas consultas das entidades, dentro da transação de quem chama. Lógica mais complexa do domínio.
+- `graph/model/RelationClosure.java` — resultado da BFS (`animeIds` alcançados + `edges` percorridas).
 - `service/AnimeTmdbService.java` — binding TMDB, overrides, schema de opções; maior arquivo do domínio (344 linhas).
 - `service/AnimeTmdbFilePairingService.java` — pairing por arquivo e schema de temporadas/episódios.
 - `model/AnimeRelation.java` + `model/RelationType.java` — grafo de relações; `RelationType` concentra as listas-fonte-única usadas pelo grafo e pela franquia (`ANCESTOR_LINKS`, `FRANCHISE_LINKS`, `SPECIAL_LINKS`, `SERIES_FORMATS`, `MOVIE_FORMATS`, `SPECIAL_FORMATS`).
@@ -149,7 +150,7 @@ Programático, pra outros domínios (sem HTTP):
 
 ## Observações técnicas e débitos identificados
 
-- **Uso inconsistente de `RetryUtils`:** só `AnimeTmdbService.prefillImageOverrides` usa `RetryUtils.withRateLimitRetry`. Todas as outras chamadas de rede do domínio — `anilistSearchService.findById` (bind, sync, cascata de `syncRelations`), `tmdbService.getTvDetails/getMovieDetails` (bind, schemas), `tmdbService.getSeason` (file-pairing schema) — não têm retry nem tratamento de rate limit. Sob rate limiting da AniList/TMDB, esses caminhos falham direto. **Backlog real** (confirmado pelo mantenedor, mesmo item do risco geral de retry ad hoc).
+- **Uso inconsistente de `RetryUtils`:** dentro do domínio, só têm retry de rate limit o `AnimeTmdbService.prefillImageOverrides` e a busca de episódios das temporadas nas duas estratégias de pairing (`EpisodePairingResolutionService`, `EpisodeContinuityResolutionService`), via `TmdbService.getSeasonEpisodes`. No caminho automático da ingestão, o `FolderAutoBindService` envolve com `RetryUtils.withRateLimitRetry` as chamadas a `bindAnimeToFolder` e `bindTmdb`. As demais chamadas de rede — `anilistSearchService.findById` (bind e sync pelo portal, cascata de `syncRelations`, proposta de binding), `tmdbService.getTvDetails/getMovieDetails` (bind e estado TMDB, schemas, temporadas da continuidade), traduções/imagens do schema de overrides e `tmdbService.getSeason` (file-pairing schema) — não têm retry nem tratamento de rate limit. Sob rate limiting da AniList/TMDB, esses caminhos falham direto. **Backlog real** (confirmado pelo mantenedor, mesmo item do risco geral de retry ad hoc).
 - **`syncRelations` roda recursão não limitada dentro de uma única `@Transactional`:** cada vizinho ainda não visitado dispara uma nova chamada de rede à AniList antes de continuar a recursão. Em franquias grandes, isso significa N chamadas de rede sequenciais dentro de uma transação de banco só, sem timeout ou circuit breaker visível — risco de transação longa/timeout proporcional ao tamanho da franquia. **Backlog real** (confirmado pelo mantenedor).
 - **`getTmdbFilePairingSchema` faz uma chamada por temporada** (`tmdbService.getSeason`), sequencial, um N+1 clássico sobre a API do TMDB — **confirmado**: `getSeason` é cache-first via `IntegrationCache` (mesmo padrão dos demais métodos de `TmdbService`), então chamadas repetidas pela mesma temporada não batem de novo no upstream; o N+1 em si (N chamadas sequenciais na primeira vez) continua existindo, mas o custo de rede real só ocorre uma vez por temporada por TTL.
 - **`clearTmdbBinding` não toca em `TmdbFilePairing`:** ao remover o binding TMDB, os overrides do anime são zerados, mas os pairings de episódio dos vídeos da pasta (nome, sinopse, thumbnail vindos do TMDB) permanecem intactos, agora desvinculados de qualquer binding TMDB ativo. **Lacuna a cobrir** (confirmado pelo mantenedor): o comportamento correto é limpar/invalidar os pairings junto ao remover o binding; vai pro backlog.

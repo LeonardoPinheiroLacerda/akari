@@ -23,17 +23,24 @@ import io.github.leonardopinheirolacerda.akari.domain.videofile.model.VideoFile;
  *                par, se o episódio gravado não existir mais no TMDB
  * @param basedOnFileId arquivo âncora de onde a continuidade partiu; {@code null} no anibridge e
  *                      no arquivo que já tinha par
- * @param usedByFileId outro arquivo que já usa o episódio proposto, quando a própria estratégia
- *                     detecta isso (continuidade, em {@code EPISODE_IN_USE}); {@code null} quando
- *                     a estratégia não verifica (anibridge) — aí a comparação com os pares
- *                     gravados é que preenche
  */
 public record FilePairingResolution(
         VideoFile videoFile,
         TmdbFilePairingProposalStatus status,
         ResolvedEpisode resolvedEpisode,
         TmdbFilePairingRequest pairing,
-        Integer basedOnFileId,
-        Integer usedByFileId
+        Integer basedOnFileId
 ) {
+
+    /**
+     * Resultado de um arquivo que a estratégia não resolveu pra nenhum episódio — só o status.
+     *
+     * @param videoFile arquivo resolvido
+     * @param status motivo de não ter pairing
+     * @return o resultado, sem episódio, pairing nem arquivos relacionados
+     */
+    public static FilePairingResolution unresolved(VideoFile videoFile, TmdbFilePairingProposalStatus status) {
+        return new FilePairingResolution(videoFile, status, null, null, null);
+    }
+
 }

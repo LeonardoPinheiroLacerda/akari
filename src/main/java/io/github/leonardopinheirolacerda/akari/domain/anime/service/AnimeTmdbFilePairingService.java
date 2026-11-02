@@ -3,14 +3,11 @@ package io.github.leonardopinheirolacerda.akari.domain.anime.service;
 import io.github.leonardopinheirolacerda.akari.api.dto.TmdbFilePairingRequest;
 import io.github.leonardopinheirolacerda.akari.api.dto.TmdbFilePairingResponse;
 import io.github.leonardopinheirolacerda.akari.api.dto.TmdbFilePairingSchema;
-import io.github.leonardopinheirolacerda.akari.api.dto.TmdbMediaType;
 import io.github.leonardopinheirolacerda.akari.domain.anime.mapper.AnimeTmdbFilePairingMapper;
 import io.github.leonardopinheirolacerda.akari.domain.anime.model.Anime;
 import io.github.leonardopinheirolacerda.akari.domain.anime.model.TmdbFilePairing;
 import io.github.leonardopinheirolacerda.akari.domain.tmdb.client.dtos.TmdbSeasonResponse;
-import io.github.leonardopinheirolacerda.akari.domain.tmdb.client.dtos.TmdbSeasonSummaryResponse;
 import io.github.leonardopinheirolacerda.akari.domain.tmdb.service.TmdbService;
-import io.github.leonardopinheirolacerda.akari.domain.videofile.model.VideoFile;
 import io.github.leonardopinheirolacerda.akari.domain.videofile.service.VideoFileService;
 import io.github.leonardopinheirolacerda.akari.exceptions.BusinessRuleException;
 import io.github.leonardopinheirolacerda.akari.exceptions.ResourceNotFoundException;
@@ -49,18 +46,12 @@ public class AnimeTmdbFilePairingService {
      * @throws BusinessRuleException se o binding for de filme — filme não tem temporadas
      */
     public TmdbFilePairingSchema getTmdbFilePairingSchema(Integer anilistId) {
-        final Anime anime = animeTmdbService.findBoundAnimeOrThrow(anilistId);
+        final Anime anime = animeTmdbService.findTvBoundAnimeOrThrow(anilistId);
 
-        if (anime.tmdbMediaType != TmdbMediaType.TV) {
-            Log.warnf("Anime %d tem binding de filme — sem temporadas pra parear", anilistId);
-            throw new BusinessRuleException("Esse anime é um filme — não tem temporadas nem episódios pra parear");
-        }
-
-        final List<TmdbSeasonSummaryResponse> seasonSummaries = tmdbService
+        final List<TmdbSeasonResponse> seasons = tmdbService
                 .getTvDetails(anime.tmdbId, false)
-                .seasons();
-
-        final List<TmdbSeasonResponse> seasons = seasonSummaries.stream()
+                .seasons()
+                .stream()
                 .map(summary -> tmdbService.getSeason(anime.tmdbId, summary.seasonNumber(), false))
                 .toList();
 
@@ -98,25 +89,16 @@ public class AnimeTmdbFilePairingService {
     public TmdbFilePairingResponse updateTmdbFilePairing(Integer fileId, TmdbFilePairingRequest tmdbFilePairingRequest) {
         Log.infof("Atualizando pairing TMDB do arquivo %d", fileId);
 
-        final VideoFile videoFile = videoFileService.findOrThrow(fileId);
+        videoFileService.findOrThrow(fileId);
 
         final TmdbFilePairing pairing = TmdbFilePairing.find(fileId)
                 .orElseGet(() -> {
                     final TmdbFilePairing created = new TmdbFilePairing();
-                    created.fileId = videoFile.id;
+                    created.fileId = fileId;
                     return created;
                 });
 
-        pairing.seasonNumber = tmdbFilePairingRequest.getSeasonNumber();
-        pairing.episodeNumber = tmdbFilePairingRequest.getEpisodeNumber();
-        pairing.thumbnailPath = tmdbFilePairingRequest.getThumbnailPath();
-        pairing.episodeName = tmdbFilePairingRequest.getEpisodeName();
-        pairing.episodeOverview = tmdbFilePairingRequest.getEpisodeOverview();
-        pairing.episodeAirDate = tmdbFilePairingRequest.getEpisodeAirDate();
-        pairing.episodeRuntime = tmdbFilePairingRequest.getEpisodeRuntime();
-        pairing.episodeVoteAverage = tmdbFilePairingRequest.getEpisodeVoteAverage();
-        pairing.episodeVoteCount = tmdbFilePairingRequest.getEpisodeVoteCount();
-        pairing.episodeType = tmdbFilePairingRequest.getEpisodeType();
+        animeTmdbFilePairingMapper.applyRequest(tmdbFilePairingRequest, pairing);
 
         pairing.persist();
 

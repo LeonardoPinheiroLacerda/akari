@@ -31,9 +31,12 @@ internamente por outros domínios (chamada direta ao service, sem passar por `Tm
 - `getMovieImages` / `getTvImages` — `GET /3/movie|tv/{id}/images`.
 - `getMovieTranslations` / `getTvTranslations` — `GET /3/movie|tv/{id}/translations`.
 - `getSeason` — `GET /3/tv/{id}/season/{n}` (episódios de uma temporada).
+- `getSeasonEpisodes` — só os episódios de uma temporada, sobre o `getSeason`, com
+  `RetryUtils.withRateLimitRetry`; temporada inexistente no TMDB ou sem episódios vira lista
+  vazia. Usado pelas estratégias de pairing de episódios, que andam pela série inteira.
 
-Todas essas operações são cache-first (TTL via preferência `tmdb.cache.ttl`) e aceitam
-`forceRefresh` para ignorar o cache.
+Todas essas operações são cache-first (TTL via preferência `tmdb.cache.ttl`); todas menos
+`getSeasonEpisodes` aceitam `forceRefresh` para ignorar o cache.
 
 ## Dependências internas e externas
 
@@ -44,8 +47,9 @@ Internas (outros domínios usados por este):
   `tmdb.api-key` (token), `tmdb.cache.ttl`, `tmdb.default-language`, `tmdb.include-adult`,
   `tmdb.image.logo-language`, `tmdb.image.backdrop-language`. Usado tanto em
   `TmdbService` quanto em `TmdbAuthHeadersFactory`.
-- `utils.CacheUtils`, `utils.HttpErrorUtils`, `utils.TmdbImageUtils` — helpers compartilhados
-  (cache-aside, classificação de erro HTTP 404, montagem de URL de CDN).
+- `utils.CacheUtils`, `utils.HttpErrorUtils`, `utils.RetryUtils`, `utils.TmdbImageUtils` —
+  helpers compartilhados (cache-aside, classificação de erro HTTP 404, retry em rate limit,
+  montagem de URL de CDN).
 - `exceptions.*` (`AkariException` e subclasses) — `IntegrationException`,
   `IntegrationNotConfiguredException`, `ResourceNotFoundException`.
 
@@ -70,11 +74,11 @@ Externa:
   `TmdbEpisodeResponse` para os DTOs de contrato do pareamento.
 - `domain.anibridge.service.AnibridgeResolutionService` — usa `TmdbSeasonSummaryResponse`
   (dentro de `TmdbMappingCandidate`) para resolver o melhor candidato de binding anime↔TMDB.
-- `domain.anime.service.EpisodePairingResolutionService` — usa `getSeason` e
+- `domain.anime.service.EpisodePairingResolutionService` — usa `getSeasonEpisodes` e
   `TmdbEpisodeResponse` diretamente pra confirmar no TMDB o episódio resolvido pelo anibridge e
   montar a metadata do pairing (pairing automático da ingestão e proposta de pairing do portal).
 - `domain.anime.service.EpisodeContinuityResolutionService` — usa `getTvDetails` (temporadas
-  regulares) e `getSeason` pra achar o episódio seguinte ao da âncora na proposta por
+  regulares) e `getSeasonEpisodes` pra achar o episódio seguinte ao da âncora na proposta por
   continuidade.
 - `domain.ingestion.service.FolderAutoBindService` — orquestra o binding automático de pasta
   (chama `AnimeTmdbService`/`EpisodePairingResolutionService`/`AnimeTmdbFilePairingService`/
@@ -169,7 +173,7 @@ responsabilidade do domínio `anime` é só decidir *quando* buscar e *como* usa
   fora de `tmdb`.
 - **Erros de rede/5xx fora de 404 não distinguem causa.** Todo erro não-404 vindo do TMDB (rate
   limit 429, 401 por token inválido, timeout) é tratado igual: vira `IntegrationException`
-  genérica (502). Não há tratamento específico para 429 (rate limit) neste domínio — o retry
-  para rate limit observado no fluxo de binding (`RetryUtils.withRateLimitRetry`) é feito pelos
-  chamadores (`domain.anime`, `domain.ingestion`), não por `TmdbService`. **Backlog real**
+  genérica (502). O retry para rate limit (`RetryUtils.withRateLimitRetry`) é feito pelos
+  chamadores (`domain.anime`, `domain.ingestion`, `domain.anibridge`) — dentro de `TmdbService`,
+  só o `getSeasonEpisodes` tem retry; os demais métodos falham direto num 429. **Backlog real**
   (confirmado pelo mantenedor, mesmo item do risco geral de retry ad hoc).

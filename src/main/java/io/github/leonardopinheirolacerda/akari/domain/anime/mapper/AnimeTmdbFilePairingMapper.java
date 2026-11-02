@@ -12,6 +12,7 @@ import io.github.leonardopinheirolacerda.akari.utils.TmdbImageUtils;
 import java.util.List;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
+import org.mapstruct.MappingTarget;
 
 /**
  * Converte entre o model {@link TmdbFilePairing}, as temporadas/episódios do TMDB, e os DTOs
@@ -39,6 +40,16 @@ public interface AnimeTmdbFilePairingMapper {
     @Mapping(target = "episodeVoteAverage", source = "voteAverage")
     @Mapping(target = "episodeVoteCount", source = "voteCount")
     TmdbFilePairingRequest toPairingRequest(TmdbEpisodeResponse episode);
+
+    /**
+     * Copia o payload do pairing pra entidade — campo {@code null} no payload zera aquela
+     * dimensão. O {@code fileId} é a chave da entidade e não vem do payload.
+     *
+     * @param request novo estado do pairing
+     * @param pairing entidade a atualizar
+     */
+    @Mapping(target = "fileId", ignore = true)
+    void applyRequest(TmdbFilePairingRequest request, @MappingTarget TmdbFilePairing pairing);
 
     default TmdbFilePairingSchema toSchema(List<TmdbSeasonResponse> seasons) {
         final List<TmdbFilePairingSchemaSeason> seasonList = seasons

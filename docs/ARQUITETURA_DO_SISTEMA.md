@@ -223,9 +223,10 @@ itens abaixo são backlog real (a corrigir aos poucos), exceto onde indicado "Ac
    sessão MEGA cacheada stale no rclone; só reiniciar o `rcd` resolve (`fscache/clear` não é
    suficiente). Afeta diretamente `GET /v1/storage/providers/{id}/health` para providers MEGA.
 4. **Retry de rate-limit ad hoc, não centralizado**: `RetryUtils.withRateLimitRetry` é aplicado em
-   alguns call sites específicos (`anime.prefillImageOverrides`, `ingestion.FolderAutoBindService`),
-   não dentro dos services `anilist`/`tmdb` — quem chama e esquece de envolver a chamada corre risco
-   de falha dura sob rate limit do upstream.
+   alguns call sites específicos (`anime.prefillImageOverrides`, `ingestion.FolderAutoBindService`,
+   `anibridge.AnibridgeResolutionService`) e, dentro dos services de integração, só em
+   `TmdbService.getSeasonEpisodes` — no resto dos services `anilist`/`tmdb`, quem chama e esquece de
+   envolver a chamada corre risco de falha dura sob rate limit do upstream.
 5. **`anime`**: recursão não limitada em `syncRelations` dentro de uma única `@Transactional`, com
    uma chamada de rede por vizinho novo — risco de transação longa em franquias grandes;
    `getTmdbFilePairingSchema` faz N chamadas sequenciais ao TMDB (uma por temporada); ausência de

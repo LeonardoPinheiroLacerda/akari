@@ -123,12 +123,7 @@ public class AnimeTmdbProposalService {
      *                                           estrutura da série não estiver em cache
      */
     public TmdbFilePairingProposalResponse proposeTmdbFilePairing(TmdbFilePairingProposalRequest request) {
-        final Anime anime = animeTmdbService.findBoundAnimeOrThrow(request.getAnilistId());
-
-        if (anime.tmdbMediaType != TmdbMediaType.TV) {
-            Log.warnf("Anime %d tem binding TMDB de filme, sem pairing de episódios", anime.anilistId);
-            throw new BusinessRuleException("Pairing de episódios só existe pra binding TMDB de série");
-        }
+        final Anime anime = animeTmdbService.findTvBoundAnimeOrThrow(request.getAnilistId());
 
         final TmdbFilePairingStrategy strategy = Objects.requireNonNullElse(
                 request.getStrategy(),
@@ -139,7 +134,7 @@ public class AnimeTmdbProposalService {
 
         final List<FilePairingResolution> resolutions = switch (strategy) {
             case ANIBRIDGE -> episodePairingResolutionService.resolve(anime, anime.folder.id, anime.folder.name);
-            case CONTINUITY -> episodeContinuityResolutionService.resolve(anime, anime.folder.id, currentEpisodes);
+            case CONTINUITY -> episodeContinuityResolutionService.resolve(anime, currentEpisodes);
         };
 
         final List<TmdbFilePairingProposal> files = episodePairingComparisonService.compare(resolutions, currentEpisodes);
