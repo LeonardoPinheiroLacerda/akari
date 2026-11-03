@@ -15,6 +15,7 @@ import io.github.leonardopinheirolacerda.akari.domain.tmdb.service.TmdbService;
 import io.github.leonardopinheirolacerda.akari.domain.videofile.model.VideoFile;
 import io.github.leonardopinheirolacerda.akari.domain.videofile.service.VideoFileService;
 import io.github.leonardopinheirolacerda.akari.exceptions.IntegrationException;
+import io.github.leonardopinheirolacerda.akari.utils.RetryUtils;
 import io.quarkus.logging.Log;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -237,7 +238,7 @@ public class EpisodePairingResolutionService {
 
         final List<TmdbEpisodeResponse> episodes = episodesBySeason.computeIfAbsent(resolved.seasonNumber(), seasonNumber -> {
             try {
-                return tmdbService.getSeasonEpisodes(tmdbId, seasonNumber);
+                return RetryUtils.withRateLimitRetry(() -> tmdbService.getSeasonEpisodes(tmdbId, seasonNumber));
             } catch (IntegrationException e) {
                 Log.warnf(e, "Busca da temporada %d no TMDB falhou pra pasta %d (%s)", seasonNumber, folderId, folderName);
                 return List.of();

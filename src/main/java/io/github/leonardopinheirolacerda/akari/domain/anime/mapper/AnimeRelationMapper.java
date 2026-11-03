@@ -28,7 +28,7 @@ public interface AnimeRelationMapper {
      *              {@code AnimeOverrideService#resolveTitle}
      * @param posterUrl poster já resolvido (considera override TMDB) — ver
      *                  {@code AnimeOverrideService#resolveThumbnailMedium}
-     * @param rootKind classificação de raiz já resolvida pelo grafo
+     * @param rootKind classificação de raiz já resolvida pela organização em franquias
      */
     @Mapping(source = "anime.anilistId", target = "anilistId")
     @Mapping(source = "anime.malId", target = "malId")

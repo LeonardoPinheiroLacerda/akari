@@ -140,8 +140,8 @@ tags:
       Gerencia a metadata de anime (binding com pastas do catalog, sync AniList) e a camada de
       enriquecimento TMDB (binding, overrides, file pairing). Dois eixos principais:
 
-      - **Anime** (base): binding anime↔pasta, fetch/sync AniList, curadoria manual (franchise
-        root), grafo de relações entre animes.
+      - **Anime** (base): binding anime↔pasta, fetch/sync AniList, grafo de relações entre
+        animes e organização em franquias.
       - **TMDB** (enriquecimento): binding TMDB↔anime, overrides manuais (título, sinopse,
         poster/backdrop/logo), file pairing (temporada/episódio/thumbnail por vídeo).
 
@@ -149,6 +149,12 @@ tags:
       `AnimeResponse` ficam `null` sem TMDB + overrides.
   - name: AnimeRelations
     description: Relações (sequel/prequel/side story) entre animes
+  - name: AnimeFranchise
+    description: |
+      Organização administrativa das franquias (portal): listar, criar e remover franquias
+      manuais, mover um anime de franquia ou ocultá-lo. Cada anime pertence a no máximo uma
+      franquia, identificada pela obra de início (a raiz) — ver `GET /v1/metadata/franchises`
+      pras regras de resolução.
   - name: AnimeTmdb
     description: Binding TMDB e overrides do anime
   - name: AnimeTmdbFilePairing
@@ -1031,25 +1037,6 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /v1/metadata/animes/{anilistId}/franchise-root:
-    parameters:
-      - $ref: '#/components/parameters/AnilistIdPathParam'
-    put:
-      tags: [Anime]
-      operationId: setAnimeFranchiseRoot
-      summary: Curadoria manual da flag de raiz da franquia
-      requestBody:
-        $ref: '#/components/requestBodies/AnimeFranchiseRootRequestBody'
-      responses:
-        '200':
-          $ref: '#/components/responses/AnimeOk'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
-
   /v1/metadata/animes/{anilistId}/review:
     parameters:
       - $ref: '#/components/parameters/AnilistIdPathParam'
@@ -1125,8 +1112,8 @@ paths:
       operationId: listRelationRoots
       summary: Animes-raiz da coleção (paginado)
       description: |
-        Animes com `franchiseRootCuration = MANUAL_ROOT`, mais os com `franchiseRootCuration =
-        AUTO` dos quais não sai nenhuma relação `PREQUEL` nem `PARENT`. Ordenados por `anilistId`.
+        Raízes das franquias — naturais e manuais, as mesmas de `GET /v1/metadata/franchises`
+        (ver lá as regras de resolução). Ordenadas por `anilistId`.
       parameters:
         - $ref: '#/components/parameters/PageParam'
         - $ref: '#/components/parameters/SizeParam'
@@ -1163,40 +1150,181 @@ paths:
       operationId: getAnimeFranchise
       summary: Franquia do anime, já organizada em raiz/temporadas/filmes/especiais
       description: |
-        `root` é sempre a raiz da franquia, mesmo que o `anilistId` informado seja de outra
-        temporada — se a raiz também for uma temporada, ela aparece em `seasons` além de
-        `root`. `root`, `seasons`, `movies` e `specials` usam o `AnimeResponse` completo
-        (mesmos campos de `GET /v1/metadata/animes/{anilistId}`, com os mesmos overrides
-        manuais).
+        Franquia à qual o anime pertence (`franchiseOf`, regras em `GET
+        /v1/metadata/franchises`), mesmo que o `anilistId` informado não seja a raiz. `404` se
+        o anime não está na coleção ou está fora de qualquer franquia (oculto, direto ou por
+        herança).
 
-        Classificação a partir das arestas de `anime_relation`:
-        - **Raiz**: sobe por `PREQUEL`/`PARENT` (ancestral de continuidade) ou por `SUMMARY` em
-          sentido invertido (uma aresta `A -[SUMMARY]-> B` indica que `B` é derivado de `A` —
-          cobre filme/recap ligado ao título principal só por essa aresta, que senão viraria
-          raiz da própria "franquia"), até não sobrar mais nenhuma (ou até uma curadoria manual
-          de raiz). `ALTERNATIVE` não conta pra achar a raiz — a AniList tagueia esse tipo de
-          forma simétrica com frequência, sem um lado objetivamente ancestral.
-        - **`seasons`**: a raiz mais a cadeia de `SEQUEL` a partir dela, na ordem da cadeia, só
-          os de formato de série (`TV`, `TV_SHORT`, `ONA`).
-        - **`movies`**/**`specials`**: os demais animes da franquia ligados por `SIDE_STORY`,
-          `SPIN_OFF`, `SUMMARY`, `PARENT` ou `ALTERNATIVE`, mais os da cadeia de `SEQUEL` que
-          não são de formato de série — separados por formato: `MOVIE` vai pra `movies`, o
-          resto (`OVA`, `SPECIAL`, ...) pra `specials`. As duas ordenadas por `year`, depois
-          por `season` (`WINTER`/`SPRING`/`SUMMER`/`FALL`), com `anilistId` como desempate — a
-          AniList não tem uma data de estreia mais precisa persistida localmente.
-        - Ficam fora de todas as listas: animes ligados só por `CHARACTER`, `OTHER`/
-          `ADAPTATION`, e qualquer anime da cadeia de `SEQUEL` com formato fora das listas
-          acima (ex. `MUSIC`, formato ausente) que não tenha também uma aresta própria de
-          `SIDE_STORY`/`SPIN_OFF`/`SUMMARY`/`PARENT`/`ALTERNATIVE`.
-        - Só entram animes já vinculados à coleção (com metadata local salva) — a mesma
-          limitação do `relations/graph`: uma relação pra um anime ainda não vinculado
-          simplesmente não existe em `anime_relation`.
+        Os **membros** são todos os animes cuja franquia é esta raiz, incluindo a própria raiz:
+        - **`seasons`**: a raiz mais a cadeia de `SEQUEL` a partir dela, só entre os membros, na
+          ordem da cadeia, filtrada pelos formatos de série (`TV`, `TV_SHORT`, `ONA`). A cadeia
+          continua através de um membro de outro formato; ele só não entra em `seasons`.
+        - **`movies`**/**`specials`**: os demais membros, separados por formato — `MOVIE` em
+          `movies`, o resto em `specials` —, ordenados por `year`, depois `season`
+          (`WINTER`/`SPRING`/`SUMMER`/`FALL`), com `anilistId` como desempate. Um membro sem
+          relação com os outros entra mesmo assim, pelo formato.
 
-        Sem duplicatas: cada anime aparece em só uma das listas (`seasons`, `movies` ou
-        `specials`).
+        `root`, `seasons`, `movies` e `specials` usam o `AnimeResponse` completo (mesmos campos
+        de `GET /v1/metadata/animes/{anilistId}`, com os mesmos overrides manuais). Sem
+        duplicatas: cada membro aparece em só uma das listas.
       responses:
         '200':
           $ref: '#/components/responses/AnimeFranchiseOk'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    put:
+      tags: [AnimeFranchise]
+      operationId: setAnimeFranchise
+      summary: Move o anime de franquia ou o oculta
+      description: |
+        - `AUTO`: o anime volta à regra automática (`rootId` proibido).
+        - `MANUAL_MEMBER`: o anime vai pra franquia de `rootId`, que é obrigatório e precisa ser
+          uma raiz atual. Os animes `AUTO` que sobem até ele (o galho automático) vão junto,
+          assim como os `MANUAL_MEMBER` que apontam pra ele.
+        - `HIDDEN`: o anime fica fora de qualquer franquia (`rootId` proibido), e o galho
+          automático dele e os `MANUAL_MEMBER` que apontam pra ele também.
+        - `MANUAL_ROOT` não é aceito aqui: raiz manual só nasce em `POST /v1/metadata/franchises`.
+
+        Mover uma **raiz** pra outra franquia junta as duas: se a raiz é manual, ela deixa de
+        ser raiz e os membros `MANUAL_MEMBER` dela passam pra `rootId`; se é natural, o galho
+        segue pela resolução. Uma raiz manual que volta pra `AUTO` ou é oculta deixa de ser
+        raiz, e os membros `MANUAL_MEMBER` dela a acompanham.
+
+        Devolve a franquia de destino com `MANUAL_MEMBER`, e a de origem com `AUTO`/`HIDDEN`. Se
+        a franquia de origem deixou de existir (o anime era a raiz), devolve a franquia em que o
+        anime está agora; se ele não está em nenhuma, a resposta vem sem corpo.
+
+        `400` se `assignment` for `MANUAL_ROOT`, se `rootId` faltar com `MANUAL_MEMBER`, vier com
+        `AUTO`/`HIDDEN`, não for uma raiz atual, for a franquia atual do anime ou o próprio
+        anime; `404` se o anime ou `rootId` não estão na coleção.
+      requestBody:
+        $ref: '#/components/requestBodies/AnimeFranchiseAssignmentRequestBody'
+      responses:
+        '200':
+          $ref: '#/components/responses/FranchiseDetailOk'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/metadata/franchises:
+    get:
+      tags: [AnimeFranchise]
+      operationId: listFranchises
+      summary: Franquias da coleção (paginado)
+      description: |
+        Cada anime pertence a no máximo uma franquia, identificada pela obra de início (a raiz).
+
+        **Pai automático** (no máximo um por anime), pelas arestas de `anime_relation`, em ordem
+        de prioridade:
+        1. `PREQUEL` saindo dele (a obra anterior);
+        2. `PARENT` saindo dele (a obra principal);
+        3. `SIDE_STORY`/`SPIN_OFF`/`SUMMARY` chegando nele (é derivado de quem aponta).
+
+        Dentro da mesma prioridade, desempata pelo `year` mais antigo (sem ano por último),
+        depois pelo menor `anilistId`. `ALTERNATIVE`, `OTHER` e `CHARACTER` nunca geram pai.
+
+        **Franquia de um anime** (`franchiseOf`), pela atribuição (`franchiseAssignment`):
+        1. `HIDDEN` → nenhuma.
+        2. `MANUAL_ROOT` (raiz criada em `POST /v1/metadata/franchises`) → ela mesma.
+        3. `MANUAL_MEMBER` → a franquia da obra escolhida (`franchiseOf(rootId)`); enquanto ela é
+           raiz, é ela mesma.
+        4. `AUTO` sem pai automático → ela mesma (raiz natural).
+        5. `AUTO` com pai automático → a franquia do pai. O galho segue o pai: se o pai foi
+           movido ou está oculto, o anime vai junto, a menos que tenha atribuição própria.
+        6. Ciclo na subida → o anime onde o ciclo foi detectado vira raiz.
+
+        As raízes são os animes cuja franquia é eles mesmos: `MANUAL` (raiz manual) ou `NATURAL`
+        (as demais). `q` busca, sem diferenciar maiúsculas, no título principal, inglês ou
+        manual da raiz e dos membros — acha a franquia que contém a obra procurada. Ordenadas
+        por `anilistId` da raiz.
+      parameters:
+        - $ref: '#/components/parameters/FranchiseSearchParam'
+        - $ref: '#/components/parameters/FranchiseKindFilterParam'
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/SizeParam'
+      responses:
+        '200':
+          $ref: '#/components/responses/FranchiseSummaryPageOk'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      tags: [AnimeFranchise]
+      operationId: createFranchise
+      summary: Cria uma franquia manual com o anime informado como raiz
+      description: |
+        A atribuição do anime vira `MANUAL_ROOT`: ele sai da franquia em que estava e o galho
+        automático dele vem junto. `409` se ele já é raiz; `404` se não está na coleção.
+      requestBody:
+        $ref: '#/components/requestBodies/CreateFranchiseRequestBody'
+      responses:
+        '201':
+          $ref: '#/components/responses/FranchiseDetailCreated'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/metadata/franchises/hidden:
+    get:
+      tags: [AnimeFranchise]
+      operationId: listHiddenAnimes
+      summary: Animes fora de qualquer franquia (paginado)
+      description: |
+        Os ocultos à mão (`HIDDEN`) e os que ficaram de fora por herança (o galho automático de
+        um anime oculto). Ordenados por `anilistId`.
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/SizeParam'
+      responses:
+        '200':
+          $ref: '#/components/responses/AnimeBindingSummaryPageOk'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/metadata/franchises/{rootId}:
+    parameters:
+      - $ref: '#/components/parameters/RootIdPathParam'
+    get:
+      tags: [AnimeFranchise]
+      operationId: getFranchise
+      summary: Detalhe da franquia pra organização no portal
+      description: |
+        Membros (com atribuição e pai automático), animes relacionados que estão em outra
+        franquia ou ocultos, as arestas entre eles pro desenho, e a prévia da classificação em
+        temporadas/filmes/especiais (mesmas regras de `GET
+        /v1/metadata/animes/{anilistId}/franchise`). `404` se `rootId` não é uma raiz atual.
+      responses:
+        '200':
+          $ref: '#/components/responses/FranchiseDetailOk'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      tags: [AnimeFranchise]
+      operationId: deleteFranchise
+      summary: Remove uma franquia manual
+      description: |
+        A raiz (`MANUAL_ROOT`) e os membros `MANUAL_MEMBER` dela voltam pra `AUTO`. `400`
+        se a raiz é natural; `404` se `rootId` não é uma raiz atual.
+      responses:
+        '204':
+          description: Franquia manual removida
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -1769,6 +1897,27 @@ components:
       description: ID do anime na AniList
       schema:
         $ref: '#/components/schemas/AnilistId'
+    RootIdPathParam:
+      name: rootId
+      in: path
+      required: true
+      description: ID na AniList do anime raiz da franquia
+      schema:
+        $ref: '#/components/schemas/AnilistId'
+    FranchiseSearchParam:
+      name: q
+      in: query
+      required: false
+      description: Texto buscado no título da raiz e dos membros
+      schema:
+        type: string
+    FranchiseKindFilterParam:
+      name: kind
+      in: query
+      required: false
+      description: Filtra pelo tipo de raiz
+      schema:
+        $ref: '#/components/schemas/FranchiseKind'
     DepthParam:
       name: depth
       in: query
@@ -1878,13 +2027,20 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/AnimeBindingRequest'
-    AnimeFranchiseRootRequestBody:
-      description: Payload de curadoria da flag
+    AnimeFranchiseAssignmentRequestBody:
+      description: Nova atribuição de franquia do anime
       required: true
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/AnimeFranchiseRootRequest'
+            $ref: '#/components/schemas/AnimeFranchiseAssignmentRequest'
+    CreateFranchiseRequestBody:
+      description: Anime que vira raiz da nova franquia manual
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/CreateFranchiseRequest'
     TmdbBindingRequestBody:
       description: Payload de binding anime↔TMDB
       required: true
@@ -1942,6 +2098,12 @@ components:
             $ref: '#/components/schemas/ApiError'
     NotFound:
       description: Recurso inexistente (`RESOURCE_NOT_FOUND`)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    Conflict:
+      description: O recurso já existe ou está num estado incompatível (`CONFLICT`)
       content:
         application/json:
           schema:
@@ -2205,6 +2367,30 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/AnimeFranchiseResponse'
+    FranchiseDetailOk:
+      description: Detalhe da franquia
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FranchiseDetail'
+    FranchiseDetailCreated:
+      description: Franquia manual criada
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FranchiseDetail'
+    FranchiseSummaryPageOk:
+      description: Página (possivelmente vazia) de franquias
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FranchiseSummaryPage'
+    AnimeBindingSummaryPageOk:
+      description: Página (possivelmente vazia) de animes
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AnimeBindingSummaryPage'
     TmdbFilePairingProposalOk:
       description: Proposta de pairing por arquivo
       content:
@@ -2398,6 +2584,8 @@ components:
           negócio.
         - `RESOURCE_NOT_FOUND` (404): o recurso não existe (ou a rota não existe / um
           parâmetro de path não pôde ser convertido).
+        - `CONFLICT` (409): o recurso que se quer criar já existe ou o estado atual impede a
+          operação.
         - `REQUEST_ERROR` (405, 406, 415, ...): requisição incompatível com o endpoint —
           método, `Content-Type` ou `Accept` não suportados.
         - `INTEGRATION_ERROR` (502): um sistema externo (AniList, TMDB, rclone, ffprobe)
@@ -2413,6 +2601,7 @@ components:
         - VALIDATION_ERROR
         - BUSINESS_RULE_VIOLATION
         - RESOURCE_NOT_FOUND
+        - CONFLICT
         - REQUEST_ERROR
         - INTEGRATION_ERROR
         - INTEGRATION_NOT_CONFIGURED
@@ -3722,26 +3911,6 @@ components:
         folderId:
           $ref: '#/components/schemas/FolderId'
 
-    FranchiseRootCuration:
-      type: string
-      description: |
-        Curadoria da flag de raiz de franquia. `MANUAL_ROOT` força este anime como raiz, mesmo
-        com relação ancestral; `MANUAL_NOT_ROOT` força NÃO ser raiz (desabilita a raiz natural,
-        mesmo sem ancestral); `AUTO` deixa automático — é raiz quando não sai dele nenhuma
-        relação `PREQUEL` nem `PARENT`.
-      enum:
-        - AUTO
-        - MANUAL_ROOT
-        - MANUAL_NOT_ROOT
-
-    AnimeFranchiseRootRequest:
-      type: object
-      description: Payload da curadoria manual da raiz de franquia
-      required: [franchiseRootCuration]
-      properties:
-        franchiseRootCuration:
-          $ref: '#/components/schemas/FranchiseRootCuration'
-
     AnimeReviewStatus:
       type: string
       description: |
@@ -3838,7 +4007,7 @@ components:
         o bind já escolhe a imagem mais votada automaticamente, e um override manual pode
         trocar essa escolha depois. `synopsis` vem em HTML quando a fonte é AniList (pode
         conter `<br>`, `<i>`, `<b>`).
-      required: [anilistId, franchiseRootCuration]
+      required: [anilistId, franchiseAssignment]
       properties:
         anilistId:
           $ref: '#/components/schemas/AnilistId'
@@ -3903,8 +4072,14 @@ components:
           nullable: true
           items:
             type: string
-        franchiseRootCuration:
-          $ref: '#/components/schemas/FranchiseRootCuration'
+        franchiseAssignment:
+          $ref: '#/components/schemas/FranchiseAssignment'
+        franchiseRootId:
+          allOf: [{ $ref: '#/components/schemas/AnilistId' }]
+          nullable: true
+          description: |
+            Raiz da franquia à qual o anime pertence (`franchiseOf`); `null` se está fora de
+            qualquer franquia (oculto, direto ou por herança)
         reviewStatus:
           allOf: [{ $ref: '#/components/schemas/AnimeReviewStatus' }]
           nullable: true
@@ -3948,17 +4123,17 @@ components:
         rootKind:
           allOf: [{ $ref: '#/components/schemas/AnimeRootKind' }]
           description: >-
-            Classificação de raiz já decidida no backend a partir da curadoria + estrutura do grafo.
-            A curadoria crua (`franchiseRootCuration`) vive no detalhe do anime, não no nó do grafo.
+            Classificação de raiz já decidida no backend pela organização em franquias. A
+            atribuição crua (`franchiseAssignment`) vive no detalhe do anime, não no nó do grafo.
 
     AnimeRootKind:
       type: string
       description: >-
-        Tipo de raiz de franquia resolvido no backend. `MANUAL` = curadoria explícita
-        (`franchiseRootCuration = MANUAL_ROOT`); `NATURAL` = curadoria automática
-        (`franchiseRootCuration = AUTO`) e nenhuma relação ancestral (`PREQUEL` ou `PARENT`) sai
-        do anime; `NOT_ROOT` = não é raiz (curadoria `MANUAL_NOT_ROOT`, ou `AUTO` com relação
-        ancestral).
+        Tipo de raiz de franquia resolvido no backend (regras em `GET
+        /v1/metadata/franchises`). `MANUAL` = raiz de uma franquia manual; `NATURAL` = raiz que
+        não foi criada à mão (anime `AUTO` sem pai automático, ou onde a subida detectou um
+        ciclo); `NOT_ROOT` = não é raiz (pertence à franquia de outro anime, ou está fora de
+        qualquer franquia).
       enum:
         - MANUAL
         - NATURAL
@@ -4013,28 +4188,186 @@ components:
           type: array
           nullable: true
           description: |
-            A raiz mais a cadeia de `SEQUEL` a partir dela, na ordem da cadeia, só com
-            formato de série (`TV`, `TV_SHORT`, `ONA`)
+            A raiz mais a cadeia de `SEQUEL` a partir dela entre os membros, na ordem da cadeia,
+            só com formato de série (`TV`, `TV_SHORT`, `ONA`)
           items:
             $ref: '#/components/schemas/AnimeResponse'
         movies:
           type: array
           nullable: true
           description: |
-            Filmes da franquia (formato `MOVIE`) — mesma origem de `specials` (`SIDE_STORY`,
-            `SPIN_OFF`, `SUMMARY`, mais os da cadeia de `SEQUEL` sem formato de série), só que
-            separados por formato. Ordenados por `year`/`season`
+            Membros fora de `seasons` com formato `MOVIE`. Ordenados por `year`/`season`
           items:
             $ref: '#/components/schemas/AnimeResponse'
         specials:
           type: array
           nullable: true
           description: |
-            Demais animes da franquia sem formato de série e sem ser filme (`OVA`, `SPECIAL`,
-            ...) — `SIDE_STORY`, `SPIN_OFF`, `SUMMARY`, mais os da cadeia de `SEQUEL` nesses
-            formatos. Ordenados por `year`/`season`
+            Membros fora de `seasons` de qualquer outro formato (`OVA`, `SPECIAL`, `TV` fora da
+            cadeia, ...). Ordenados por `year`/`season`
           items:
             $ref: '#/components/schemas/AnimeResponse'
+
+    FranchiseAssignment:
+      type: string
+      description: |
+        Atribuição de franquia de um anime — como ele foi posicionado. `AUTO` = pela regra
+        automática (pai automático); `MANUAL_MEMBER` = posto à mão na franquia de uma raiz;
+        `MANUAL_ROOT` = raiz de uma franquia criada à mão; `HIDDEN` = oculto, fora de qualquer
+        franquia — os clientes não o listam.
+      enum:
+        - AUTO
+        - MANUAL_MEMBER
+        - MANUAL_ROOT
+        - HIDDEN
+
+    FranchiseKind:
+      type: string
+      description: |
+        Tipo de raiz. `MANUAL` = franquia criada à mão (`POST /v1/metadata/franchises`);
+        `NATURAL` = as demais raízes.
+      enum:
+        - NATURAL
+        - MANUAL
+
+    AnimeFranchiseAssignmentRequest:
+      type: object
+      description: Nova atribuição de franquia do anime
+      required: [assignment]
+      properties:
+        assignment:
+          $ref: '#/components/schemas/FranchiseAssignment'
+        rootId:
+          allOf: [{ $ref: '#/components/schemas/AnilistId' }]
+          nullable: true
+          description: Raiz de destino. Obrigatório com `MANUAL_MEMBER` e proibido nos outros valores
+
+    CreateFranchiseRequest:
+      type: object
+      description: Anime que vira raiz da nova franquia manual
+      required: [rootAnilistId]
+      properties:
+        rootAnilistId:
+          $ref: '#/components/schemas/AnilistId'
+
+    FranchiseSummary:
+      type: object
+      description: Resumo de uma franquia pra listagem
+      required: [root, kind, memberCount]
+      properties:
+        root:
+          $ref: '#/components/schemas/AnimeBindingSummary'
+        kind:
+          $ref: '#/components/schemas/FranchiseKind'
+        memberCount:
+          type: integer
+          format: int32
+          description: Quantidade de membros, contando a raiz
+
+    FranchiseSummaryPage:
+      description: Envelope paginado de franquias
+      allOf:
+        - $ref: '#/components/schemas/Page'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/FranchiseSummary'
+
+    AnimeBindingSummaryPage:
+      description: Envelope paginado de resumos de anime
+      allOf:
+        - $ref: '#/components/schemas/Page'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/AnimeBindingSummary'
+
+    FranchiseMember:
+      type: object
+      description: Membro da franquia
+      required: [anime, assignment]
+      properties:
+        anime:
+          $ref: '#/components/schemas/AnimeResponse'
+        assignment:
+          allOf: [{ $ref: '#/components/schemas/FranchiseAssignment' }]
+          description: Atribuição do membro (`AUTO`, `MANUAL_MEMBER` ou `MANUAL_ROOT`; membro nunca é `HIDDEN`)
+        autoParentId:
+          allOf: [{ $ref: '#/components/schemas/AnilistId' }]
+          nullable: true
+          description: Pai automático do membro, mesmo que ele esteja em outra franquia
+
+    FranchiseRelatedAnime:
+      type: object
+      description: |
+        Anime da coleção com aresta pra algum membro, mas em outra franquia ou oculto. Um item
+        por anime, com a aresta de menor id (as demais estão em `edges`), ordenados por
+        `anilistId`
+      required: [anime, relationType, memberId]
+      properties:
+        anime:
+          $ref: '#/components/schemas/AnimeBindingSummary'
+        currentRoot:
+          allOf: [{ $ref: '#/components/schemas/AnimeBindingSummary' }]
+          nullable: true
+          description: Raiz da franquia em que o anime está hoje; `null` se está oculto
+        relationType:
+          type: string
+          description: 'Tipo da aresta como gravada (ex.: `SEQUEL`, `SIDE_STORY`)'
+        memberId:
+          allOf: [{ $ref: '#/components/schemas/AnilistId' }]
+          description: Membro na outra ponta da aresta
+
+    FranchiseDetail:
+      type: object
+      description: Franquia detalhada pra organização no portal
+      required: [root, kind]
+      properties:
+        root:
+          $ref: '#/components/schemas/AnimeResponse'
+        kind:
+          $ref: '#/components/schemas/FranchiseKind'
+        members:
+          type: array
+          nullable: true
+          description: Membros da franquia, incluindo a raiz, ordenados por `anilistId`
+          items:
+            $ref: '#/components/schemas/FranchiseMember'
+        related:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/FranchiseRelatedAnime'
+        edges:
+          type: array
+          nullable: true
+          description: Arestas entre membros e entre membros e `related`, pro desenho
+          items:
+            $ref: '#/components/schemas/AnimeRelationEdge'
+        seasons:
+          type: array
+          nullable: true
+          description: Prévia de `seasons` em `GET /v1/metadata/animes/{anilistId}/franchise`
+          items:
+            $ref: '#/components/schemas/AnilistId'
+        movies:
+          type: array
+          nullable: true
+          description: Prévia de `movies`
+          items:
+            $ref: '#/components/schemas/AnilistId'
+        specials:
+          type: array
+          nullable: true
+          description: Prévia de `specials`
+          items:
+            $ref: '#/components/schemas/AnilistId'
 
     TmdbBindingRequest:
       type: object

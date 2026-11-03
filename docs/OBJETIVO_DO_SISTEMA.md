@@ -59,8 +59,8 @@ anibridge, franquias/relações entre animes).
 4. **Busca e binding de metadata** (`AnilistSearch`, `TmdbSearch`, `Anime`, `AnimeTmdb`) → admin
    busca um anime na AniList e/ou um título no TMDB, e faz o *binding* entre uma pasta do catálogo
    e uma ficha de anime (e, opcionalmente, entre o anime e uma ficha TMDB). Pode também curar
-   manualmente campos que a fonte externa não cobre bem (overrides de título/sinopse/imagens,
-   *franchise root*, relações entre animes).
+   manualmente campos que a fonte externa não cobre bem (overrides de título/sinopse/imagens) e
+   organizar os animes em franquias (`AnimeFranchise`).
 5. **Pairing de arquivo com episódio** (`AnimeTmdbFilePairing`) → cada `VideoFile` de uma pasta
    vinculada é associado a uma temporada/episódio do TMDB (com apoio do `anibridge` para resolver
    numeração absoluta↔temporada, quando aplicável), permitindo gerar thumbnail por episódio.
@@ -95,7 +95,8 @@ anibridge, franquias/relações entre animes).
 
 - **Administrador do backend** — único ator humano explícito no contrato: cadastra storage
   providers, configura preferências (`Setting`), dispara/acompanha ingestão, cura metadata de
-  anime (binding, overrides, relações, franchise root), gerencia o cache e acompanha notificações.
+  anime (binding, overrides, organização em franquias), gerencia o cache e acompanha
+  notificações.
   Não há diferenciação de papéis/permissões no contrato, e **confirmado em código**: não existe
   nenhum mecanismo de autenticação/autorização implementado (sem `@RolesAllowed`,
   `SecurityIdentity` ou configuração de segurança) — é uma lacuna real reconhecida, não uma

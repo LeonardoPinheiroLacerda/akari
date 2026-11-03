@@ -157,11 +157,11 @@ public class FolderAutoBindService {
         }
 
         try {
-            RetryUtils.withRateLimitRetry(
+            return RetryUtils.withRateLimitRetry(
                     () -> {
                         final AnimeBindingRequest request = new AnimeBindingRequest()
                                 .folderId(folderId);
-                        return animeService.bindAnimeToFolder(anilistId, request);
+                        return animeService.bindAnime(anilistId, request);
                     });
         } catch (IntegrationException e) {
             Log.warnf(e, "Bind AniList %d falhou pra pasta %d (%s)", anilistId, folderId, folderName);
@@ -169,9 +169,6 @@ public class FolderAutoBindService {
                     NotificationLevel.WARNING, folderName, "Bind na AniList falhou", folderId, null);
             return null;
         }
-
-        return animeService.findByFolder(folderId)
-                .orElse(null);
     }
 
     /**

@@ -31,9 +31,9 @@ internamente por outros domínios (chamada direta ao service, sem passar por `Tm
 - `getMovieImages` / `getTvImages` — `GET /3/movie|tv/{id}/images`.
 - `getMovieTranslations` / `getTvTranslations` — `GET /3/movie|tv/{id}/translations`.
 - `getSeason` — `GET /3/tv/{id}/season/{n}` (episódios de uma temporada).
-- `getSeasonEpisodes` — só os episódios de uma temporada, sobre o `getSeason`, com
-  `RetryUtils.withRateLimitRetry`; temporada inexistente no TMDB ou sem episódios vira lista
-  vazia. Usado pelas estratégias de pairing de episódios, que andam pela série inteira.
+- `getSeasonEpisodes` — só os episódios de uma temporada, sobre o `getSeason`; temporada
+  inexistente no TMDB ou sem episódios vira lista vazia. Usado pelas estratégias de pairing de
+  episódios, que andam pela série inteira.
 
 Todas essas operações são cache-first (TTL via preferência `tmdb.cache.ttl`); todas menos
 `getSeasonEpisodes` aceitam `forceRefresh` para ignorar o cache.
@@ -174,6 +174,6 @@ responsabilidade do domínio `anime` é só decidir *quando* buscar e *como* usa
 - **Erros de rede/5xx fora de 404 não distinguem causa.** Todo erro não-404 vindo do TMDB (rate
   limit 429, 401 por token inválido, timeout) é tratado igual: vira `IntegrationException`
   genérica (502). O retry para rate limit (`RetryUtils.withRateLimitRetry`) é feito pelos
-  chamadores (`domain.anime`, `domain.ingestion`, `domain.anibridge`) — dentro de `TmdbService`,
-  só o `getSeasonEpisodes` tem retry; os demais métodos falham direto num 429. **Backlog real**
+  chamadores (`domain.anime`, `domain.ingestion`, `domain.anibridge`) — `TmdbService` não tem
+  retry; seus métodos falham direto num 429. **Backlog real**
   (confirmado pelo mantenedor, mesmo item do risco geral de retry ad hoc).

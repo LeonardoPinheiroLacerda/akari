@@ -14,6 +14,7 @@ import io.github.leonardopinheirolacerda.akari.domain.videofile.service.VideoFil
 import io.github.leonardopinheirolacerda.akari.exceptions.IntegrationException;
 import io.github.leonardopinheirolacerda.akari.exceptions.IntegrationNotConfiguredException;
 import io.github.leonardopinheirolacerda.akari.exceptions.ResourceNotFoundException;
+import io.github.leonardopinheirolacerda.akari.utils.RetryUtils;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -221,7 +222,7 @@ public class EpisodeContinuityResolutionService {
 
         return episodesBySeason.computeIfAbsent(
                 seasonNumber,
-                number -> tmdbService.getSeasonEpisodes(tmdbId, number)
+                number -> RetryUtils.withRateLimitRetry(() -> tmdbService.getSeasonEpisodes(tmdbId, number))
         );
     }
 

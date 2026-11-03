@@ -36,19 +36,6 @@ public class AnimeRelation extends PanacheEntityBase {
     public RelationType relationType;
 
     /**
-     * Arestas onde {@code anilistId} aparece em qualquer ponta — usado pela subida até a raiz
-     * da franquia.
-     *
-     * @param anilistId anime pivô
-     * @return arestas com {@code fromAnilistId} ou {@code toAnilistId} igual ao pivô
-     */
-    public static List<AnimeRelation> findByAnilistIdEitherSide(Integer anilistId) {
-        return AnimeRelation
-                .find("fromAnilistId = ?1 or toAnilistId = ?1", anilistId)
-                .list();
-    }
-
-    /**
      * Arestas onde qualquer um dos {@code anilistIds} aparece em qualquer ponta — usado pela BFS
      * bidirecional do grafo de relações, uma consulta por nível.
      *
@@ -58,6 +45,19 @@ public class AnimeRelation extends PanacheEntityBase {
     public static List<AnimeRelation> findByAnilistIdsEitherSide(List<Integer> anilistIds) {
         return AnimeRelation
                 .find("fromAnilistId in ?1 or toAnilistId in ?1", anilistIds)
+                .list();
+    }
+
+    /**
+     * Todas as arestas dos tipos informados — usado pela resolução de franquias, que calcula o
+     * pai automático de todos os animes de uma vez.
+     *
+     * @param relationTypes tipos de relação
+     * @return as arestas desses tipos
+     */
+    public static List<AnimeRelation> findByTypes(List<RelationType> relationTypes) {
+        return AnimeRelation
+                .find("relationType in ?1", relationTypes)
                 .list();
     }
 

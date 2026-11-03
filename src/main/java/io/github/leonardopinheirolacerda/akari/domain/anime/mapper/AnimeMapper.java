@@ -24,6 +24,7 @@ public interface AnimeMapper {
     @Mapping(target = "thumbnails", expression = "java(toThumbnails(anime))")
     @Mapping(target = "banner", ignore = true)
     @Mapping(target = "logo", ignore = true)
+    @Mapping(target = "franchiseRootId", ignore = true)
     AnimeResponse toView(Anime anime);
 
     @Mapping(source = "folder.id", target = "folderId")
@@ -35,7 +36,7 @@ public interface AnimeMapper {
 
     /**
      * Copia os campos de metadata da resposta da AniList pro model, usado tanto no binding
-     * inicial quanto no sync. Não toca na pasta nem na curadoria manual.
+     * inicial quanto no sync. Não toca na pasta nem na atribuição de franquia.
      *
      * @param source resposta da AniList pro anime
      * @param anime model a ser atualizado
@@ -54,7 +55,8 @@ public interface AnimeMapper {
     @Mapping(target = "score", expression = "java(toScore(source.averageScore()))")
     @Mapping(target = "studio", expression = "java(toMainStudio(source.studios()))")
     @Mapping(target = "folder", ignore = true)
-    @Mapping(target = "franchiseRootCuration", ignore = true)
+    @Mapping(target = "franchiseAssignment", ignore = true)
+    @Mapping(target = "franchiseRoot", ignore = true)
     @Mapping(target = "createdAt", ignore = true)
     @Mapping(target = "tmdbId", ignore = true)
     @Mapping(target = "tmdbMediaType", ignore = true)

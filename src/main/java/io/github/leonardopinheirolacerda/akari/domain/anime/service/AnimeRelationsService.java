@@ -9,14 +9,16 @@ import io.github.leonardopinheirolacerda.akari.domain.anilist.client.dtos.Anilis
 import io.github.leonardopinheirolacerda.akari.domain.anilist.client.dtos.AnilistRelationEdgeResponse;
 import io.github.leonardopinheirolacerda.akari.domain.anilist.client.dtos.AnilistRelationNodeResponse;
 import io.github.leonardopinheirolacerda.akari.domain.anilist.service.AnilistSearchService;
+import io.github.leonardopinheirolacerda.akari.domain.anime.graph.FranchiseClassifier;
+import io.github.leonardopinheirolacerda.akari.domain.anime.graph.FranchiseResolver;
 import io.github.leonardopinheirolacerda.akari.domain.anime.graph.RelationGraph;
+import io.github.leonardopinheirolacerda.akari.domain.anime.graph.model.FranchiseResolution;
+import io.github.leonardopinheirolacerda.akari.domain.anime.graph.model.FranchiseSections;
 import io.github.leonardopinheirolacerda.akari.domain.anime.graph.model.RelationClosure;
-import io.github.leonardopinheirolacerda.akari.domain.anime.mapper.AnimeMapper;
 import io.github.leonardopinheirolacerda.akari.domain.anime.mapper.AnimeRelationMapper;
 import io.github.leonardopinheirolacerda.akari.domain.anime.model.Anime;
 import io.github.leonardopinheirolacerda.akari.domain.anime.model.AnimeRelation;
 import io.github.leonardopinheirolacerda.akari.domain.anime.model.RelationType;
-import io.github.leonardopinheirolacerda.akari.domain.anime.model.Season;
 import io.github.leonardopinheirolacerda.akari.exceptions.ResourceNotFoundException;
 import io.github.leonardopinheirolacerda.akari.model.PageResult;
 import io.quarkus.logging.Log;
@@ -24,9 +26,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashSet;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -36,25 +36,12 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
- * Grafo de relações entre animes (sequel/prequel/side story) e a sincronização das arestas a
- * partir da resposta da AniList.
+ * Grafo de relações entre animes (sequel/prequel/side story), a sincronização das arestas a
+ * partir da resposta da AniList, as raízes das franquias e a franquia organizada pros
+ * clientes.
  */
 @ApplicationScoped
 public class AnimeRelationsService {
-
-    /**
-     * Ordena {@code movies}/{@code specials} (antes do split por formato) por {@code
-     * seasonYear}, depois pela ordem natural de {@link Season}, com {@code anilistId} como
-     * desempate final — sem uma data de estreia mais precisa persistida localmente (ver
-     * {@link Anime#seasonYear}/{@link Anime#season}).
-     */
-    private static final Comparator<Anime> MOVIES_AND_SPECIALS_ORDER = Comparator
-            .comparing((Anime anime) -> anime.seasonYear, Comparator.nullsLast(Comparator.naturalOrder()))
-            .thenComparing(AnimeRelationsService::seasonOf, Comparator.nullsLast(Comparator.naturalOrder()))
-            .thenComparing(anime -> anime.anilistId);
-
-    @Inject
-    AnimeMapper animeMapper;
 
     @Inject
     AnimeRelationMapper animeRelationMapper;
@@ -95,18 +82,20 @@ public class AnimeRelationsService {
     }
 
     /**
-     * Lista os animes-raiz da coleção, paginados.
+     * Lista as raízes das franquias da coleção (naturais e manuais), paginadas — ver
+     * {@link FranchiseResolver}.
      *
      * @param page página 0-based
      * @param size tamanho da página
-     * @return a página de animes-raiz
+     * @return a página de raízes
      */
     public AnimePage listRelationRoots(Integer page, Integer size) {
-        final PageResult<Anime> roots = Anime.findRoots(page, size);
+        final FranchiseResolution resolution = FranchiseResolver.resolve();
+        final PageResult<Anime> roots = Anime.findPageByIds(resolution.rootIds(), page, size);
 
         final List<AnimeResponse> data = roots.data()
                 .stream()
-                .map(this::toResponse)
+                .map(anime -> animeOverrideService.toResponse(anime, resolution))
                 .toList();
 
         return new AnimePage()
@@ -129,8 +118,9 @@ public class AnimeRelationsService {
     public AnimeRelationGraphResponse getAnimeRelationGraph(Integer anilistId, Integer depth) {
         requireAnimeExists(anilistId, "montar o grafo de relações");
 
-        final RelationClosure closure = RelationGraph.closure(anilistId, depth, type -> true);
+        final RelationClosure closure = RelationGraph.closure(anilistId, depth);
         final List<AnimeRelation> edges = closure.edges();
+        final FranchiseResolution resolution = FranchiseResolver.resolve();
 
         final Map<Integer, Anime> animeById = Anime.<Anime>findByIds(new ArrayList<>(closure.animeIds()))
                 .stream()
@@ -144,7 +134,7 @@ public class AnimeRelationsService {
                         anime,
                         animeOverrideService.resolveTitle(anime),
                         animeOverrideService.resolveThumbnailMedium(anime),
-                        RelationGraph.rootKindOf(anime, edges)))
+                        resolution.rootKindOf(anime.anilistId)))
                 .toList();
 
         return new AnimeRelationGraphResponse()
@@ -155,94 +145,51 @@ public class AnimeRelationsService {
 
     /**
      * Monta a franquia do anime informado já organizada em raiz/temporadas/filmes/especiais,
-     * pra tela de detalhe do app — ver {@link RelationGraph#findFranchiseRootId} pra como a raiz é
-     * encontrada, {@link RelationType#FRANCHISE_LINKS} pra quais arestas formam a franquia a
-     * partir dela, e {@link RelationType#SERIES_FORMATS}/{@link RelationType#MOVIE_FORMATS}/
-     * {@link RelationType#SPECIAL_FORMATS} (as três disjuntas) pra como a cadeia de
-     * {@code SEQUEL} é dividida entre temporada, filme e especial.
+     * pra tela de detalhe do app — ver {@link FranchiseResolver} pra a que franquia cada anime
+     * pertence e {@link FranchiseClassifier} pra como os membros são divididos.
      *
      * @param anilistId anime que ancora a busca; não precisa ser a raiz
      * @return a franquia organizada
-     * @throws ResourceNotFoundException se não há metadata salva pro id informado
+     * @throws ResourceNotFoundException se não há metadata salva pro id informado, ou se o anime
+     *         está fora de qualquer franquia
      */
     public AnimeFranchiseResponse getAnimeFranchise(Integer anilistId) {
         requireAnimeExists(anilistId, "montar a franquia");
 
-        final Integer rootId = RelationGraph.findFranchiseRootId(anilistId);
+        final FranchiseResolution resolution = FranchiseResolver.resolve();
+        final Integer rootId = resolution.rootOf(anilistId);
 
-        final RelationClosure closure = RelationGraph.closure(rootId, Integer.MAX_VALUE, RelationType.FRANCHISE_LINKS::contains);
-        final Set<Integer> franchiseIds = closure.animeIds();
-        final List<AnimeRelation> edges = closure.edges();
+        if (rootId == null) {
+            Log.warnf("Anime %d está fora de qualquer franquia", anilistId);
+            throw new ResourceNotFoundException("O anime informado está fora de qualquer franquia");
+        }
 
-        final List<Integer> sequelChain = RelationGraph.sequelChainFrom(rootId, edges);
+        final List<Integer> memberIds = resolution.membersOf(rootId);
 
-        final Map<Integer, Anime> animeById = Anime.<Anime>findByIds(new ArrayList<>(franchiseIds))
+        final Map<Integer, Anime> memberById = Anime.<Anime>findByIds(memberIds)
                 .stream()
                 .collect(Collectors.toMap(anime -> anime.anilistId, Function.identity()));
 
-        final Set<Integer> seasonIds = new LinkedHashSet<>();
-        final Set<Integer> excludedIds = new HashSet<>();
-
-        for (Integer id : sequelChain) {
-            final String format = animeById.get(id).format;
-
-            if (RelationType.SERIES_FORMATS.contains(format)) {
-                seasonIds.add(id);
-            } else if (!RelationType.MOVIE_FORMATS.contains(format)
-                    && !RelationType.SPECIAL_FORMATS.contains(format)
-                    && !RelationGraph.hasDirectSpecialLink(id, edges)) {
-                excludedIds.add(id);
-            }
-        }
-
-        final List<AnimeResponse> seasons = seasonIds.stream()
-                .map(id -> toResponse(animeById.get(id)))
-                .toList();
-
-        final List<Anime> specialsAndMovies = franchiseIds.stream()
-                .filter(id -> !seasonIds.contains(id) && !excludedIds.contains(id))
-                .map(animeById::get)
-                .sorted(MOVIES_AND_SPECIALS_ORDER)
-                .toList();
-
-        final List<AnimeResponse> movies = specialsAndMovies.stream()
-                .filter(anime -> RelationType.MOVIE_FORMATS.contains(anime.format))
-                .map(this::toResponse)
-                .toList();
-
-        final List<AnimeResponse> specials = specialsAndMovies.stream()
-                .filter(anime -> !RelationType.MOVIE_FORMATS.contains(anime.format))
-                .map(this::toResponse)
-                .toList();
+        final FranchiseSections sections = FranchiseClassifier.classify(
+                rootId,
+                memberById,
+                AnimeRelation.findByAnilistIdsEitherSide(memberIds)
+        );
 
         return new AnimeFranchiseResponse()
-                .root(toResponse(animeById.get(rootId)))
-                .seasons(seasons)
-                .movies(movies)
-                .specials(specials);
+                .root(animeOverrideService.toResponse(memberById.get(rootId), resolution))
+                .seasons(toResponses(sections.seasonIds(), memberById, resolution))
+                .movies(toResponses(sections.movieIds(), memberById, resolution))
+                .specials(toResponses(sections.specialIds(), memberById, resolution));
     }
 
-    private AnimeResponse toResponse(Anime anime) {
-        return animeOverrideService.applyTo(animeMapper.toView(anime), anime);
-    }
+    private List<AnimeResponse> toResponses(List<Integer> anilistIds,
+                                            Map<Integer, Anime> animeById,
+                                            FranchiseResolution resolution) {
 
-    /**
-     * Converte {@code Anime#season} (string crua da AniList) pro {@link Season}, pra ordenar
-     * {@link #MOVIES_AND_SPECIALS_ORDER} pela ordem natural do enum em vez de comparar strings.
-     *
-     * @param anime anime cujo {@code season} se converte
-     * @return o {@link Season} correspondente; {@code null} se for {@code null} ou não bater
-     *         com nenhuma constante conhecida
-     */
-    private static Season seasonOf(Anime anime) {
-        if (anime.season == null) {
-            return null;
-        }
-        try {
-            return Season.valueOf(anime.season);
-        } catch (IllegalArgumentException e) {
-            return null;
-        }
+        return anilistIds.stream()
+                .map(id -> animeOverrideService.toResponse(animeById.get(id), resolution))
+                .toList();
     }
 
     private void syncRelations(AnilistMediaResponse anilist, Set<Integer> visited) {

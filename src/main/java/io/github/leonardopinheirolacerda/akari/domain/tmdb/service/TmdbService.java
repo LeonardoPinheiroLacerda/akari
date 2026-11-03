@@ -19,7 +19,6 @@ import io.github.leonardopinheirolacerda.akari.domain.tmdb.client.dtos.TmdbTvSea
 import io.github.leonardopinheirolacerda.akari.domain.tmdb.mapper.TmdbMapper;
 import io.github.leonardopinheirolacerda.akari.utils.CacheUtils;
 import io.github.leonardopinheirolacerda.akari.utils.HttpErrorUtils;
-import io.github.leonardopinheirolacerda.akari.utils.RetryUtils;
 import io.quarkus.logging.Log;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -265,9 +264,9 @@ public class TmdbService {
     }
 
     /**
-     * Lê só os episódios de uma temporada de série no TMDB, cache-first, com retry em rate
-     * limit. Temporada que não existe no TMDB conta como vazia — quem anda pela série (pairing
-     * de episódios) segue com o resto dela.
+     * Lê só os episódios de uma temporada de série no TMDB, cache-first. Temporada que não
+     * existe no TMDB conta como vazia — quem anda pela série (pairing de episódios) segue com o
+     * resto dela.
      *
      * @param seriesId id da série no TMDB
      * @param seasonNumber número da temporada
@@ -279,7 +278,7 @@ public class TmdbService {
         final TmdbSeasonResponse season;
 
         try {
-            season = RetryUtils.withRateLimitRetry(() -> getSeason(seriesId, seasonNumber, false));
+            season = getSeason(seriesId, seasonNumber, false);
         } catch (ResourceNotFoundException e) {
             Log.warnf("Temporada %d não existe no TMDB %d, tratada como vazia", seasonNumber, seriesId);
             return List.of();

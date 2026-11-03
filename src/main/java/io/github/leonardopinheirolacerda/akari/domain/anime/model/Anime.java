@@ -1,7 +1,7 @@
 package io.github.leonardopinheirolacerda.akari.domain.anime.model;
 
 import io.github.leonardopinheirolacerda.akari.api.dto.AnimeReviewStatus;
-import io.github.leonardopinheirolacerda.akari.api.dto.FranchiseRootCuration;
+import io.github.leonardopinheirolacerda.akari.api.dto.FranchiseAssignment;
 import io.github.leonardopinheirolacerda.akari.api.dto.TmdbMediaType;
 import io.github.leonardopinheirolacerda.akari.domain.mediafolder.model.MediaFolder;
 import io.github.leonardopinheirolacerda.akari.model.PageResult;
@@ -14,6 +14,7 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
 import jakarta.persistence.OneToOne;
 import jakarta.persistence.Table;
 import java.time.OffsetDateTime;
@@ -89,8 +90,12 @@ public class Anime extends PanacheEntityBase {
     public String studio;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "franchise_root_curation")
-    public FranchiseRootCuration franchiseRootCuration;
+    @Column(name = "franchise_assignment")
+    public FranchiseAssignment franchiseAssignment;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "franchise_root_id")
+    public Anime franchiseRoot;
 
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)
@@ -162,26 +167,57 @@ public class Anime extends PanacheEntityBase {
     }
 
     /**
-     * Animes-raiz da coleção, paginados: curadoria manual em {@code MANUAL_ROOT}, mais os em
-     * {@code AUTO} dos quais não sai nenhuma relação ancestral ({@link RelationType#ANCESTOR_LINKS}).
+     * Dados de franquia de todos os animes da coleção, numa consulta só — base da resolução de
+     * franquias ({@code FranchiseResolver}).
      *
+     * @return um {@link FranchiseNode} por anime
+     */
+    public static List<FranchiseNode> findFranchiseNodes() {
+        return Anime
+                .find(
+                        "select a.anilistId, a.seasonYear, a.franchiseAssignment, r.anilistId"
+                                + " from Anime a left join a.franchiseRoot r"
+                )
+                .project(FranchiseNode.class)
+                .list();
+    }
+
+    /**
+     * Ids dos animes cujo título principal, inglês ou manual contém o texto, sem diferenciar
+     * maiúsculas.
+     *
+     * @param text texto buscado
+     * @return os {@code anilistId} encontrados
+     */
+    public static List<Integer> findIdsByTitle(String text) {
+        return Anime
+                .find(
+                        "select anilistId from Anime"
+                                + " where lower(titleMain) like ?1"
+                                + " or lower(titleEnglish) like ?1"
+                                + " or lower(overrideTitle) like ?1",
+                        "%" + text.toLowerCase() + "%"
+                )
+                .project(Integer.class)
+                .list();
+    }
+
+    /**
+     * Página dos animes com os ids informados, ordenada por {@code anilistId} — pra paginar no
+     * banco um conjunto de ids decidido em memória (raízes, ocultos).
+     *
+     * @param anilistIds ids que compõem o conjunto paginado
      * @param page página 0-based
      * @param size tamanho da página
-     * @return a página de raízes, ordenada por {@code anilistId}
+     * @return a página de animes
      */
-    public static PageResult<Anime> findRoots(Integer page, Integer size) {
+    public static PageResult<Anime> findPageByIds(List<Integer> anilistIds, Integer page, Integer size) {
+        if (anilistIds.isEmpty()) {
+            return new PageResult<>(List.of(), page, size, 0L, 0);
+        }
+
         final PanacheQuery<Anime> query = Anime
-                .find(
-                        "FROM Anime a WHERE a.franchiseRootCuration = ?1"
-                                + " OR (a.franchiseRootCuration = ?2 AND NOT EXISTS ("
-                                + "   SELECT 1 FROM AnimeRelation r"
-                                + "   WHERE r.fromAnilistId = a.anilistId AND r.relationType IN ?3"
-                                + " ))"
-                                + " ORDER BY a.anilistId",
-                        FranchiseRootCuration.MANUAL_ROOT,
-                        FranchiseRootCuration.AUTO,
-                        RelationType.ANCESTOR_LINKS
-                )
+                .find("anilistId in ?1 order by anilistId", anilistIds)
                 .page(page, size);
 
         return new PageResult<>(
@@ -190,6 +226,37 @@ public class Anime extends PanacheEntityBase {
                 size,
                 query.count(),
                 query.pageCount()
+        );
+    }
+
+    /**
+     * Passa pra {@code target} os animes {@code MANUAL_MEMBER} na franquia de {@code source}.
+     *
+     * @param source raiz de onde os membros saem
+     * @param target raiz pra onde os membros vão
+     */
+    public static void moveManualMembers(Anime source, Anime target) {
+        Anime.update(
+                "franchiseRoot = ?1 where franchiseAssignment = ?2 and franchiseRoot = ?3",
+                target,
+                FranchiseAssignment.MANUAL_MEMBER,
+                source
+        );
+    }
+
+    /**
+     * Volta pra {@code AUTO} os animes {@code MANUAL_MEMBER} na franquia de {@code root} — usado ao
+     * remover a franquia manual ou o próprio anime raiz.
+     *
+     * @param root raiz cujos membros manuais voltam pra regra automática
+     */
+    public static void resetManualMembers(Anime root) {
+        Anime.update(
+                "franchiseAssignment = ?1, franchiseRoot = null"
+                        + " where franchiseAssignment = ?2 and franchiseRoot = ?3",
+                FranchiseAssignment.AUTO,
+                FranchiseAssignment.MANUAL_MEMBER,
+                root
         );
     }
 

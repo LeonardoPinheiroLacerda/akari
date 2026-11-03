@@ -49,6 +49,11 @@ não há tabela compartilhada entre domínios além das FKs explícitas abaixo.
 - **V17** — insere três preferências novas em `setting` (`playback.default.audio-language`,
   `playback.default.subtitle-language`, `playback.default.subtitle-forced`) — mesmo padrão de
   seed do V3, incremental.
+- **V18** — organização em franquias: adiciona em `anime` `franchise_assignment` (`AUTO`/
+  `MANUAL_MEMBER`/`MANUAL_ROOT`/`HIDDEN`, default `AUTO`) e `franchise_root_id` (auto-referência,
+  `ON DELETE SET NULL`, com índice parcial nas linhas não nulas — os membros `MANUAL_MEMBER`),
+  e remove `franchise_root_curation`. A franquia de cada anime não é materializada: é resolvida
+  em memória a cada leitura (`FranchiseResolver`).
 
 ## Seed de `setting` (V3 + V10 + V17)
 

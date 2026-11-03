@@ -1,18 +1,26 @@
 package io.github.leonardopinheirolacerda.akari.domain.anime.service;
 
+import io.github.leonardopinheirolacerda.akari.api.dto.AnimeBindingSummary;
 import io.github.leonardopinheirolacerda.akari.api.dto.AnimeResponse;
+import io.github.leonardopinheirolacerda.akari.domain.anime.graph.model.FranchiseResolution;
+import io.github.leonardopinheirolacerda.akari.domain.anime.mapper.AnimeMapper;
 import io.github.leonardopinheirolacerda.akari.domain.anime.model.Anime;
 import io.github.leonardopinheirolacerda.akari.utils.TmdbImageUtils;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 
 /**
  * Resolve, pra cada campo overridable de um anime, qual valor prevalece: o override manual do
  * TMDB (quando setado) ou o dado cru da AniList. Regra única, reaproveitada por qualquer
- * service que precise exibir anime (base, relations, ...), em vez de cada um decidir isso por
- * conta própria.
+ * service que precise exibir anime (base, relations, franquias, ...), em vez de cada um decidir
+ * isso por conta própria — por isso também monta o {@link AnimeResponse} e o
+ * {@link AnimeBindingSummary} já resolvidos.
  */
 @ApplicationScoped
 public class AnimeOverrideService {
+
+    @Inject
+    AnimeMapper animeMapper;
 
     /**
      * Título principal — só o {@code main} é afetado; english/japanese/synonyms continuam da
@@ -110,6 +118,31 @@ public class AnimeOverrideService {
         response.logo(resolveLogo(anime));
 
         return response;
+    }
+
+    /**
+     * Monta o {@link AnimeResponse} do anime: mapeia, aplica os overrides ({@link #applyTo}) e
+     * preenche a raiz da franquia.
+     *
+     * @param anime anime a exibir
+     * @param resolution franquia de cada anime
+     * @return a resposta montada
+     */
+    public AnimeResponse toResponse(Anime anime, FranchiseResolution resolution) {
+        return applyTo(animeMapper.toView(anime), anime)
+                .franchiseRootId(resolution.rootOf(anime.anilistId));
+    }
+
+    /**
+     * Monta o {@link AnimeBindingSummary} do anime, com título e thumbnail já resolvidos.
+     *
+     * @param anime anime a exibir
+     * @return o resumo montado
+     */
+    public AnimeBindingSummary toBindingSummary(Anime anime) {
+        return animeMapper.toBindingSummary(anime)
+                .title(resolveTitle(anime))
+                .thumbnail(resolveThumbnailMedium(anime));
     }
 
     private static boolean hasText(String value) {

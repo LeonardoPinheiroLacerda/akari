@@ -2,7 +2,6 @@ package io.github.leonardopinheirolacerda.akari.domain.anime.resource;
 
 import io.github.leonardopinheirolacerda.akari.api.AnimeApi;
 import io.github.leonardopinheirolacerda.akari.api.dto.AnimeBindingRequest;
-import io.github.leonardopinheirolacerda.akari.api.dto.AnimeFranchiseRootRequest;
 import io.github.leonardopinheirolacerda.akari.api.dto.AnimeResponse;
 import io.github.leonardopinheirolacerda.akari.domain.anime.service.AnimeService;
 import io.github.leonardopinheirolacerda.akari.exceptions.BusinessRuleException;
@@ -10,8 +9,8 @@ import io.github.leonardopinheirolacerda.akari.exceptions.ResourceNotFoundExcept
 import jakarta.inject.Inject;
 
 /**
- * Implementa {@link AnimeApi} — binding anime↔pasta, fetch/sync na AniList e curadoria manual
- * da raiz de franquia, em {@code /v1/metadata/animes}.
+ * Implementa {@link AnimeApi} — binding anime↔pasta, fetch/sync na AniList e revisão da
+ * ingestão, em {@code /v1/metadata/animes}.
  *
  * <p>Só traduz HTTP ↔ service, sem lógica própria: toda regra de negócio e mapeamento ficam no
  * {@link AnimeService}.
@@ -91,25 +90,8 @@ public class AnimeResource implements AnimeApi {
     }
 
     /**
-     * {@code PUT /v1/metadata/animes/{anilistId}/franchise-root} — atualiza a curadoria manual
-     * da flag de raiz de franquia.
-     *
-     * @param anilistId id do anime na AniList
-     * @param animeFranchiseRootRequest payload com a nova curadoria
-     * @return a metadata atualizada, com {@code 200 OK}
-     * @throws ResourceNotFoundException (traduzida em 404) se não há metadata salva pro id
-     *         informado
-     */
-    @Override
-    public AnimeResponse setAnimeFranchiseRoot(
-            Integer anilistId,
-            AnimeFranchiseRootRequest animeFranchiseRootRequest) {
-        return animeService.setAnimeFranchiseRoot(anilistId, animeFranchiseRootRequest);
-    }
-
-    /**
      * {@code POST /v1/metadata/animes/{anilistId}/sync} — busca o anime de novo na AniList e
-     * atualiza a metadata, mantendo a pasta vinculada e a curadoria manual da raiz de franquia.
+     * atualiza a metadata, mantendo a pasta vinculada e a atribuição de franquia.
      *
      * @param anilistId id do anime na AniList
      * @return a metadata atualizada, com {@code 200 OK}

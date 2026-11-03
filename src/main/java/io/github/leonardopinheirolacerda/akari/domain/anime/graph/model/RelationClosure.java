@@ -6,7 +6,7 @@ import java.util.Set;
 
 /**
  * Resultado da BFS bidirecional do grafo de relações, calculada por
- * {@code RelationGraph#closure} — base do grafo de relações e da franquia.
+ * {@code RelationGraph#closure} — base do grafo de relações.
  *
  * @param animeIds {@code anilistId} alcançados, na ordem de descoberta, incluindo o de partida
  * @param edges arestas percorridas que passaram o filtro de tipo, sem repetição

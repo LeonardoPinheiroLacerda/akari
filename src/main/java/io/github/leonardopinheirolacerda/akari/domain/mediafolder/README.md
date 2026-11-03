@@ -108,7 +108,6 @@ conjunto de pastas.
 - `MediaFolder.findPage` usa `FROM MediaFolder m WHERE ...` com alias explícito (em vez do
   curto `where ...` sem `FROM`) desde que os filtros de anime precisaram de subquery
   correlacionada — sem alias, a correlação do `EXISTS`/`IN` com a pasta externa seria ambígua.
-  Mesmo padrão já usado em `Anime.findRoots` pra correlacionar com `AnimeRelation`.
 - **Confirmado nas migrations:** `media_folder.parent_id` e `video_file.folder_id` têm
   `ON DELETE CASCADE` na DDL (`V2__create-catalog-tables.sql`) — a cascata de descendentes e
   arquivos ao deletar uma pasta é real. Já `anime.folder_id` (`V6__create-anime-table.sql`)

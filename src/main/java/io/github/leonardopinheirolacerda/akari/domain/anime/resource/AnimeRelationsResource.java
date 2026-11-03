@@ -10,7 +10,7 @@ import jakarta.inject.Inject;
 
 /**
  * Implementa {@link AnimeRelationsApi} — grafo de relações entre animes (sequel/prequel/side
- * story) e a listagem de animes-raiz, em {@code /v1/metadata/anime-relations} e
+ * story), a listagem das raízes das franquias e a franquia organizada, em {@code /v1/metadata/anime-relations} e
  * {@code /v1/metadata/animes/{anilistId}/relations/graph}.
  *
  * <p>Só traduz HTTP ↔ service, sem lógica própria: toda regra de negócio e mapeamento ficam no
@@ -37,11 +37,12 @@ public class AnimeRelationsResource implements AnimeRelationsApi {
     }
 
     /**
-     * {@code GET /v1/metadata/anime-relations} — lista os animes-raiz da coleção, paginados.
+     * {@code GET /v1/metadata/anime-relations} — lista as raízes das franquias da coleção
+     * (naturais e manuais), paginadas.
      *
      * @param page página desejada, 0-based
      * @param size tamanho da página
-     * @return a página de animes-raiz, com {@code 200 OK}
+     * @return a página de raízes, com {@code 200 OK}
      */
     @Override
     public AnimePage listRelationRoots(Integer page, Integer size) {
@@ -50,12 +51,12 @@ public class AnimeRelationsResource implements AnimeRelationsApi {
 
     /**
      * {@code GET /v1/metadata/animes/{anilistId}/franchise} — franquia do anime já organizada
-     * em raiz/temporadas/especiais, pra tela de detalhe do app.
+     * em raiz/temporadas/filmes/especiais, pra tela de detalhe do app.
      *
      * @param anilistId anime que ancora a busca; não precisa ser a raiz
      * @return a franquia organizada, com {@code 200 OK}
      * @throws ResourceNotFoundException (traduzida em 404) se não há metadata salva pro id
-     *         informado
+     *         informado, ou se o anime está fora de qualquer franquia
      */
     @Override
     public AnimeFranchiseResponse getAnimeFranchise(Integer anilistId) {
