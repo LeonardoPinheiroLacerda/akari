@@ -22,12 +22,17 @@ public final class AnilistQueries {
                   episodes
                   duration
                   startDate { year month day }
+                  endDate { year month day }
+                  status
                   seasonYear
                   format
                   season
                   averageScore
+                  meanScore
+                  popularity
                   isAdult
                   genres
+                  tags { name rank isMediaSpoiler }
                   studios(isMain: true) {
                     nodes { name }
                   }
@@ -51,12 +56,17 @@ public final class AnilistQueries {
                 episodes
                 duration
                 startDate { year month day }
+                endDate { year month day }
+                status
                 seasonYear
                 format
                 season
                 averageScore
+                meanScore
+                popularity
                 isAdult
                 genres
+                tags { name rank isMediaSpoiler }
                 studios(isMain: true) {
                   nodes { name }
                 }

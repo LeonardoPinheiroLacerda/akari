@@ -3674,6 +3674,14 @@ components:
         startDate:
           allOf: [{ $ref: '#/components/schemas/AnilistFuzzyDate' }]
           nullable: true
+        endDate:
+          allOf: [{ $ref: '#/components/schemas/AnilistFuzzyDate' }]
+          nullable: true
+          description: Data de término; `null` enquanto o anime não terminou
+        status:
+          type: string
+          nullable: true
+          description: Status bruto da AniList (`FINISHED`, `RELEASING`, `NOT_YET_RELEASED`, `CANCELLED`, `HIATUS`)
         seasonYear:
           type: integer
           format: int32
@@ -3689,7 +3697,17 @@ components:
           type: integer
           format: int32
           nullable: true
-          description: Nota média em escala 0–100
+          description: Nota média ponderada em escala 0–100
+        meanScore:
+          type: integer
+          format: int32
+          nullable: true
+          description: Média simples das notas em escala 0–100
+        popularity:
+          type: integer
+          format: int32
+          nullable: true
+          description: Quantidade de usuários da AniList com o anime na lista
         isAdult:
           type: boolean
           nullable: true
@@ -3699,6 +3717,12 @@ components:
           description: Nomes de gêneros
           items:
             type: string
+        tags:
+          type: array
+          nullable: true
+          description: Tags da AniList, com relevância e marcação de spoiler
+          items:
+            $ref: '#/components/schemas/AnimeTagResponse'
         studio:
           type: string
           nullable: true
@@ -4072,6 +4096,34 @@ components:
           nullable: true
           items:
             type: string
+        tags:
+          type: array
+          nullable: true
+          description: Tags da AniList, com relevância e marcação de spoiler
+          items:
+            $ref: '#/components/schemas/AnimeTagResponse'
+        startDate:
+          allOf: [{ $ref: '#/components/schemas/AnilistFuzzyDate' }]
+          nullable: true
+          description: Data de estreia segundo a AniList
+        endDate:
+          allOf: [{ $ref: '#/components/schemas/AnilistFuzzyDate' }]
+          nullable: true
+          description: Data de término segundo a AniList; `null` enquanto o anime não terminou
+        status:
+          type: string
+          nullable: true
+          description: Status bruto da AniList (`FINISHED`, `RELEASING`, `NOT_YET_RELEASED`, `CANCELLED`, `HIATUS`)
+        popularity:
+          type: integer
+          format: int32
+          nullable: true
+          description: Quantidade de usuários da AniList com o anime na lista
+        meanScore:
+          type: number
+          format: double
+          nullable: true
+          description: Média simples das notas na AniList, em escala 0–10 (`score` é a média ponderada)
         franchiseAssignment:
           $ref: '#/components/schemas/FranchiseAssignment'
         franchiseRootId:
@@ -4084,6 +4136,23 @@ components:
           allOf: [{ $ref: '#/components/schemas/AnimeReviewStatus' }]
           nullable: true
           description: '`null` até o auto-bind terminar de processar a pasta pela primeira vez'
+
+    AnimeTagResponse:
+      type: object
+      description: Tag da AniList atribuída ao anime
+      required: [name]
+      properties:
+        name:
+          type: string
+        rank:
+          type: integer
+          format: int32
+          nullable: true
+          description: Quanto a tag se aplica ao anime, de 0 a 100
+        isSpoiler:
+          type: boolean
+          nullable: true
+          description: '`true` se a tag revela parte da história'
 
     AnimePage:
       description: Envelope paginado de animes

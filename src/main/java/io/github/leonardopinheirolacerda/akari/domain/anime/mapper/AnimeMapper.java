@@ -2,11 +2,14 @@ package io.github.leonardopinheirolacerda.akari.domain.anime.mapper;
 
 import io.github.leonardopinheirolacerda.akari.api.dto.AnimeBindingSummary;
 import io.github.leonardopinheirolacerda.akari.api.dto.AnimeResponse;
+import io.github.leonardopinheirolacerda.akari.api.dto.AnimeTagResponse;
 import io.github.leonardopinheirolacerda.akari.api.dto.AnimeThumbnailsResponse;
 import io.github.leonardopinheirolacerda.akari.api.dto.AnimeTitlesResponse;
 import io.github.leonardopinheirolacerda.akari.domain.anilist.client.dtos.AnilistMediaResponse;
 import io.github.leonardopinheirolacerda.akari.domain.anilist.client.dtos.AnilistStudioConnectionResponse;
+import io.github.leonardopinheirolacerda.akari.domain.anilist.client.dtos.AnilistTagResponse;
 import io.github.leonardopinheirolacerda.akari.domain.anime.model.Anime;
+import io.github.leonardopinheirolacerda.akari.domain.anime.model.AnimeTag;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
 import org.mapstruct.MappingTarget;
@@ -53,6 +56,7 @@ public interface AnimeMapper {
     @Mapping(source = "coverImage.extraLarge", target = "thumbnailLarge")
     @Mapping(target = "duration", expression = "java(toDurationLabel(source.duration()))")
     @Mapping(target = "score", expression = "java(toScore(source.averageScore()))")
+    @Mapping(target = "meanScore", expression = "java(toScore(source.meanScore()))")
     @Mapping(target = "studio", expression = "java(toMainStudio(source.studios()))")
     @Mapping(target = "folder", ignore = true)
     @Mapping(target = "franchiseAssignment", ignore = true)
@@ -67,6 +71,12 @@ public interface AnimeMapper {
     @Mapping(target = "overrideBackdropPath", ignore = true)
     @Mapping(target = "overrideLogoPath", ignore = true)
     void applyAnilistData(AnilistMediaResponse source, @MappingTarget Anime anime);
+
+    @Mapping(source = "isMediaSpoiler", target = "spoiler")
+    AnimeTag toTag(AnilistTagResponse source);
+
+    @Mapping(source = "spoiler", target = "isSpoiler")
+    AnimeTagResponse toTagResponse(AnimeTag tag);
 
     default AnimeTitlesResponse toTitles(Anime anime) {
         return new AnimeTitlesResponse()
@@ -91,7 +101,7 @@ public interface AnimeMapper {
         return minutes + " min";
     }
 
-    // averageScore da AniList é 0-100; o contrato expõe em escala 0-10
+    // averageScore/meanScore da AniList são 0-100; o contrato expõe em escala 0-10
     default Double toScore(Integer averageScore) {
         if (averageScore == null) {
             return null;
