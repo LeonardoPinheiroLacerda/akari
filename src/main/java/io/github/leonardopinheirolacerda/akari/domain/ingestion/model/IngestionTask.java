@@ -9,6 +9,8 @@ import jakarta.persistence.*;
 import org.hibernate.annotations.CreationTimestamp;
 
 import java.time.OffsetDateTime;
+import java.util.List;
+import java.util.Optional;
 
 /**
  * O processamento de uma pasta dentro de uma {@link Ingestion}, persistido na tabela
@@ -41,12 +43,15 @@ public class IngestionTask extends PanacheEntityBase {
     @JoinColumn(name = "anime_id", referencedColumnName = "anilist_id")
     public Anime anime;
 
-    /** Situação da task; gravada como {@code PENDING} na criação. */
+    /**
+     * Situação da task: {@code PENDING} na criação, {@code RUNNING} quando o scheduler a toma e
+     * {@code COMPLETED}, {@code WAITING_CURATION} ou {@code FAILED} ao fim dos steps.
+     */
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     public IngestionTaskStatus status;
 
-    /** Etapa em execução ou a última executada; {@code null} antes da primeira. */
+    /** Step em execução ou o último executado; {@code null} antes do primeiro. */
     @Enumerated(EnumType.STRING)
     @Column(name = "current_step")
     public IngestionStep currentStep;
@@ -55,11 +60,26 @@ public class IngestionTask extends PanacheEntityBase {
     @Column(name = "created_at", nullable = false, updatable = false)
     public OffsetDateTime createdAt;
 
-    /** Quando a primeira etapa começou; {@code null} até lá. */
+    /** Quando o scheduler tomou a task pra execução; {@code null} até lá. */
     @Column(name = "started_at")
     public OffsetDateTime startedAt;
 
-    /** Quando a última etapa terminou; {@code null} até lá. */
+    /** Quando a task parou de ser processada, em qualquer situação final; {@code null} até lá. */
     @Column(name = "completed_at")
     public OffsetDateTime completedAt;
+
+    /**
+     * Busca a próxima task a executar — a {@code PENDING} ou {@code RUNNING} (interrompida por
+     * uma queda do serviço) mais antiga —, já com a pasta carregada.
+     *
+     * @return a task; vazio se não houver nenhuma a executar
+     */
+    public static Optional<IngestionTask> findNextExecutable() {
+        return IngestionTask
+                .find(
+                        "FROM IngestionTask t JOIN FETCH t.folder WHERE t.status IN ?1 ORDER BY t.id",
+                        List.of(IngestionTaskStatus.PENDING, IngestionTaskStatus.RUNNING)
+                )
+                .firstResultOptional();
+    }
 }

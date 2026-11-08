@@ -130,6 +130,19 @@ public class AnimeService {
     }
 
     /**
+     * Busca o model cru do anime vinculado à pasta, sem lançar se não houver — usado pela
+     * ingestão pra checar o binding antes de buscar na AniList. Leitura marcada
+     * {@code @Transactional} pra funcionar fora de contexto de request.
+     *
+     * @param folderId id da pasta no catalog
+     * @return o anime vinculado, se houver
+     */
+    @Transactional
+    public Optional<Anime> findByFolder(Integer folderId) {
+        return Anime.findByFolderId(folderId);
+    }
+
+    /**
      * Busca o model cru do anime pelo {@code anilistId}, sem lançar se não houver — leitura
      * marcada {@code @Transactional} pra funcionar fora de contexto de request.
      *

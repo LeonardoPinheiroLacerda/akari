@@ -14,7 +14,8 @@ import java.util.Map;
  * Um evento da linha do tempo de uma {@link IngestionStepExecution}, persistido na tabela
  * {@code ingestion_step_event}.
  *
- * <p>Some junto com a execução ({@code ON DELETE CASCADE}). Nenhum fluxo grava eventos ainda.
+ * <p>Some junto com a execução ({@code ON DELETE CASCADE}). Gravado pelos steps via
+ * {@code IngestionStepService}, um por transação.
  */
 @Entity
 @Table(name = "ingestion_step_event")

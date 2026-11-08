@@ -64,14 +64,14 @@ public class IngestionService {
 
     /**
      * Registra no catalog as pastas e os arquivos de vídeo de um subtree do provider e cria uma
-     * {@link Ingestion} com uma {@code IngestionTask} por pasta.
+     * {@link Ingestion} com uma {@code IngestionTask} por pasta com vídeo.
      *
      * <p>Fluxo: valida o TMDB configurado e o provider → lista a árvore remota a partir de
      * {@code rootPath}, acrescentando o próprio {@code rootPath} como pasta (o {@code listTree}
      * só devolve descendentes) → persiste a {@link Ingestion} como {@code PENDING} → pra cada
      * pasta, da mais rasa pra mais funda, cria a {@code MediaFolder} se não existir (transação
      * própria), lista os vídeos diretos dela e submete a criação da task numa thread virtual.
-     * Toda pasta ganha task, inclusive as sem vídeos diretos.
+     * Só pasta com vídeo ganha task.
      *
      * <p>Devolve depois de submeter as tasks, sem esperar por elas. Falha de uma task fica só
      * no log, sem afetar as demais. Não há deduplicação: dois disparos simultâneos sobre o

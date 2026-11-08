@@ -7,14 +7,15 @@ import jakarta.persistence.*;
 import org.hibernate.annotations.CreationTimestamp;
 
 import java.time.OffsetDateTime;
+import java.util.List;
 
 /**
  * Uma tentativa de executar uma {@link IngestionStep} para uma {@link IngestionTask},
  * persistida na tabela {@code ingestion_step_execution}.
  *
  * <p>Repetir uma etapa cria uma nova linha com {@code attempt} incrementado, preservando as
- * tentativas anteriores. Os eventos da tentativa ficam em {@link IngestionStepEvent}. Nenhum
- * fluxo cria execuções ainda.
+ * tentativas anteriores. Os eventos da tentativa ficam em {@link IngestionStepEvent}. Criada e
+ * finalizada pelo próprio step, via {@code IngestionStepService}.
  */
 @Entity
 @Table(name = "ingestion_step_execution")
@@ -51,4 +52,36 @@ public class IngestionStepExecution extends PanacheEntityBase {
     /** Quando a tentativa terminou; {@code null} até lá. */
     @Column(name = "completed_at")
     public OffsetDateTime completedAt;
+
+    /**
+     * Conta as tentativas já registradas de uma etapa numa task — base do {@code attempt} da
+     * próxima tentativa.
+     *
+     * @param taskId id da task
+     * @param step etapa contada
+     * @return quantas execuções dessa etapa a task já tem; {@code 0} se nenhuma
+     */
+    public static long countByTaskAndStep(Integer taskId, IngestionStep step) {
+        return IngestionStepExecution.count("task.id = ?1 AND step = ?2", taskId, step);
+    }
+
+    /**
+     * Confirma se a etapa já foi executada até o fim na task — alguma tentativa terminou
+     * {@code COMPLETED} ou {@code SKIPPED}.
+     *
+     * @param taskId id da task
+     * @param step etapa verificada
+     * @return {@code true} se a etapa não precisa rodar de novo
+     */
+    public static boolean existsFinished(Integer taskId, IngestionStep step) {
+        return IngestionStepExecution
+                .find(
+                        "task.id = ?1 AND step = ?2 AND status IN ?3",
+                        taskId,
+                        step,
+                        List.of(IngestionStepStatus.COMPLETED, IngestionStepStatus.SKIPPED)
+                )
+                .firstResultOptional()
+                .isPresent();
+    }
 }

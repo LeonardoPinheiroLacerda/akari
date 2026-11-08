@@ -3,14 +3,14 @@ package io.github.leonardopinheirolacerda.akari.domain.ingestion.model.enums;
 /**
  * Situação de uma {@code IngestionTask} — o processamento de uma pasta dentro de uma ingestão.
  *
- * <p>Hoje só {@link #PENDING} é gravado, na criação da task; nenhum fluxo avança o status ainda.
+ * <p>{@link #CANCELLED} ainda não é gravado por nenhum fluxo.
  */
 public enum IngestionTaskStatus {
 
     /** Pasta e arquivos registrados no catalog, nenhuma etapa iniciada. */
     PENDING,
 
-    /** Alguma etapa da pasta em processamento. */
+    /** Tomada pelo scheduler, com os steps em execução. */
     RUNNING,
 
     /** Processamento parado à espera de curadoria manual. */

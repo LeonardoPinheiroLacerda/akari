@@ -15,7 +15,6 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
 
-import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -37,8 +36,9 @@ public class IngestionTaskService {
     VideoFileService videoFileService;
 
     /**
-     * Cadastra os vídeos novos da pasta e cria a task dela como {@code PENDING}, numa transação
-     * só.
+     * Cadastra os vídeos novos da pasta e, se ela tiver algum vídeo (já cadastrado ou vindo do
+     * provider), cria a task dela como {@code PENDING}, numa transação só. Pasta sem vídeo não
+     * ganha task — não há o que processar nela.
      *
      * <p>Arquivo cujo nome já está cadastrado na pasta é ignorado. A checagem é feita antes de
      * criar, e não pelo {@code ConflictException} do {@code VideoFileService}: a exceção, mesmo
@@ -74,13 +74,14 @@ public class IngestionTaskService {
             createVideoFile(mediaFolder, storageVideo);
         }
 
-        final IngestionTask task = new IngestionTask();
-        task.folder = mediaFolder;
-        task.ingestion = ingestion;
-        task.status = IngestionTaskStatus.PENDING;
-        task.createdAt = OffsetDateTime.now();
+        if (!existingNames.isEmpty() || !storageVideos.isEmpty()) {
+            final IngestionTask task = new IngestionTask();
+            task.folder = mediaFolder;
+            task.ingestion = ingestion;
+            task.status = IngestionTaskStatus.PENDING;
 
-        IngestionTask.persist(task);
+            IngestionTask.persist(task);
+        }
     }
 
     private void createVideoFile(MediaFolder mediaFolder, StorageItem storageVideo) {

@@ -85,6 +85,16 @@ public class VideoFile extends PanacheEntityBase {
     }
 
     /**
+     * Conta os arquivos de uma pasta, sem carregá-los.
+     *
+     * @param folderId id da pasta no catalog
+     * @return quantos arquivos a pasta tem; {@code 0} se nenhum
+     */
+    public static long countByFolderId(Integer folderId) {
+        return VideoFile.count("folder.id = ?1", folderId);
+    }
+
+    /**
      * Busca todos os arquivos de uma pasta, sem paginação — usado pela ingestão pra saber quais
      * arquivos da pasta já estão cadastrados.
      *

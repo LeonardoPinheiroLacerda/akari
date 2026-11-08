@@ -191,6 +191,19 @@ public class VideoFileService {
     }
 
     /**
+     * Conta os arquivos de uma pasta, sem carregá-los — usado pela ingestão pra comparar com o
+     * número de episódios do anime. {@code @Transactional} mesmo sendo leitura pra funcionar
+     * também chamado de contextos sem transação ambiente.
+     *
+     * @param folderId id da pasta no catalog
+     * @return quantos arquivos a pasta tem; {@code 0} se nenhum
+     */
+    @Transactional
+    public long countByFolder(Integer folderId) {
+        return VideoFile.countByFolderId(folderId);
+    }
+
+    /**
      * Lista todos os arquivos de uma pasta, sem paginação. Usado pela ingestão pra saber quais
      * arquivos da pasta já estão cadastrados; é {@code @Transactional} mesmo sendo leitura pra
      * funcionar também chamado de contextos sem transação ambiente.

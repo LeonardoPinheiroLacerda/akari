@@ -67,9 +67,16 @@ public class MediaFolder extends PanacheEntityBase {
     @OneToMany(mappedBy = "folder", fetch = FetchType.LAZY)
     public List<VideoFile> videoFiles = new ArrayList<>();
 
-    public Boolean hasFiles() {
+    /**
+     * Confirma se a pasta tem algum arquivo de vídeo direto. Carrega a coleção
+     * {@code videoFiles} inteira.
+     *
+     * @return {@code true} se a pasta tem ao menos um arquivo
+     */
+    public boolean hasFiles() {
         return !videoFiles.isEmpty();
     }
+
     /**
      * Busca uma pasta pelo id.
      *

@@ -3,39 +3,47 @@
 ## Objetivo do módulo
 
 Registrar no catalog as pastas e os arquivos de vídeo de um subtree de storage provider, gravando
-cada disparo como uma `Ingestion` com uma `IngestionTask` por pasta, e permitir consultar quais
-pastas do provider já foram ingeridas.
+cada disparo como uma `Ingestion` com uma `IngestionTask` por pasta com vídeo, executar as tasks
+step a step e permitir consultar quais pastas do provider já foram ingeridas.
 
 ## Responsabilidade principal
 
 Orquestrar chamadas a `storageprovider` (listar a árvore remota e os vídeos de cada pasta) e a
-`mediafolder`/`videofile` (cadastrar pastas e arquivos), e persistir o estado da ingestão em
-quatro tabelas próprias (`ingestion`, `ingestion_task`, `ingestion_step_execution`,
-`ingestion_step_event`).
+`mediafolder`/`videofile` (cadastrar pastas e arquivos), executar os steps de cada task contra
+`anilist`/`anime`, e persistir o estado da ingestão em quatro tabelas próprias (`ingestion`,
+`ingestion_task`, `ingestion_step_execution`, `ingestion_step_event`).
 
 ## Funcionalidades existentes
 
 - `POST /v1/ingestion/providers/{providerId}` (operationId `createIngestionTasks`) — cria as
   pastas do subtree, grava a ingestão e dispara em background o cadastro dos vídeos e a task de
-  cada pasta; devolve `202 STARTED` (`IngestionResource.createIngestionTasks` →
+  cada pasta com vídeo; devolve `202 STARTED` (`IngestionResource.createIngestionTasks` →
   `IngestionService.createIngestionTasks`).
 - `GET /v1/ingestion/providers/{providerId}/available-folders` — lista a árvore de pastas remotas
   do provider marcando quais já foram ingeridas (`IngestionService.listAvailableFolders`).
+- Execução das tasks em background (`IngestionTaskScheduler` → `IngestionTaskExecutionService`):
+  uma task por vez, cada uma passando pelos steps em sequência e gravando uma
+  `IngestionStepExecution` por step e os `IngestionStepEvent`s dela.
+- Step `ANILIST_SYNC` (`AnilistSyncStepService`) — vincula a pasta a um anime da AniList cujo
+  nome seja igual ao da pasta.
 - Extração best-effort do número de episódio a partir do nome do arquivo
   (`extractor/EpisodeNumberExtractor`), consumida por `anime` e `videofile`.
 
 ## Modelo
 
 - `Ingestion` — um disparo. `status` (`IngestionStatus`) gravado como `PENDING`.
-- `IngestionTask` — o processamento de uma pasta dentro da ingestão. `status`
-  (`IngestionTaskStatus`) gravado como `PENDING`; `anime` e `currentStep` ficam `null`.
-- `IngestionStepExecution` — uma tentativa de uma etapa (`IngestionStep`: `ANILIST_SYNC`,
-  `TMDB_BIND`, `TMDB_OVERRIDES`, `TMDB_FILEPAIR`) de uma task, com `attempt` a partir de 1.
+- `IngestionTask` — o processamento de uma pasta com vídeo dentro da ingestão. `status`
+  (`IngestionTaskStatus`), `currentStep` (último step iniciado) e `anime` (anime vinculado à
+  pasta ao fim da task).
+- `IngestionStepExecution` — uma tentativa de um step (`IngestionStep`) numa task, com
+  `attempt` a partir de 1 e `status` (`IngestionStepStatus`).
 - `IngestionStepEvent` — evento da linha do tempo de uma tentativa (`IngestionEventType`), com
-  `details` em `JSONB`.
+  `message` e `details` em `JSONB`.
 
-Nenhum fluxo avança os status, executa etapas ou grava `IngestionStepExecution`/
-`IngestionStepEvent` hoje: a ingestão termina no cadastro de pastas, arquivos e tasks.
+A task passa por `PENDING` → `RUNNING` → `COMPLETED`/`WAITING_CURATION`/`FAILED`; a execução de
+um step nasce `RUNNING` e termina `COMPLETED`, `SKIPPED`, `WAITING_CURATION` ou `FAILED`. A
+`Ingestion` continua `PENDING` (o status agregado não é atualizado), e `CANCELLED` (task) e
+`PENDING` (execução) não são gravados por nenhum fluxo.
 
 FKs (`V20__create-ingestion-tables.sql`): task → ingestão, execução → task e evento → execução
 com `ON DELETE CASCADE`; `ingestion_task.folder_id` com `ON DELETE CASCADE` (a task some com a
@@ -48,14 +56,18 @@ pasta); `ingestion_task.anime_id` com `ON DELETE SET NULL` (remover o anime só 
   os vídeos diretos de cada pasta e verifica existência de `rootPath` na listagem de pastas.
 - `domain/mediafolder` (`MediaFolder`, `MediaFolderService`) — busca/cria (`findOrCreate`) e
   lista (`findSubtree`) pastas do catalog.
-- `domain/videofile` (`VideoFileService`) — lista os arquivos já cadastrados de uma pasta e cria
-  os novos.
-- `domain/anime` (`Anime`) — `IngestionTask.anime` referencia `Anime`.
+- `domain/videofile` (`VideoFileService`) — lista (`listByFolder`), conta (`countByFolder`) e
+  cria (`createVideoFile`) os arquivos de uma pasta.
+- `domain/anime` (`Anime`, `AnimeService`) — o step `ANILIST_SYNC` checa o anime já vinculado à
+  pasta (`findByFolder`), se o título escolhido já tem metadata salva (`find`) e vincula
+  (`bindAnime`); o fim da task grava em `IngestionTask.anime` o anime da pasta (`findByFolder`).
+- `domain/anilist` (`AnilistSearchService`) — busca dos candidatos pelo nome da pasta.
 - `domain/setting` (`SettingService`) — precheck de `tmdb.api-key` configurado.
 - Executor de threads virtuais do Quarkus (`@VirtualThreads ExecutorService`) — roda a criação
   de cada task.
+- Scheduler do Quarkus (`@Scheduled`) — dispara a execução das tasks.
 - `exceptions/` (`BusinessRuleException`, `IntegrationException`, `ResourceNotFoundException`).
-- `utils/` (`DirectoryUtils`, `FileNameUtils`).
+- `utils/` (`DirectoryUtils`, `FileNameUtils`, `RetryUtils`).
 
 ## Módulos relacionados
 
@@ -72,6 +84,8 @@ algo daqui. Fora essa exceção, o módulo é um orquestrador de ponta: consome 
 - `service/IngestionService` — ponto de entrada lógico do disparo e da listagem.
 - `service/IngestionTaskService` — chamado só pelo `IngestionService`, dentro das threads
   virtuais.
+- `scheduler/IngestionTaskScheduler` — a cada 1s (`ConcurrentExecution.SKIP`), chama
+  `IngestionTaskExecutionService.executeNextTask`.
 
 ## Fluxos importantes
 
@@ -84,8 +98,8 @@ algo daqui. Fora essa exceção, o módulo é um orquestrador de ponta: consome 
    → persiste a `Ingestion` como `PENDING` (transação própria) → pra cada pasta, nessa ordem,
    `MediaFolderService.findOrCreate` (transação própria) e lista os vídeos diretos dela.
 2. Paralela, uma thread virtual por pasta: `IngestionTaskService.createIngestionTask` cadastra os
-   vídeos novos e cria a `IngestionTask` como `PENDING`, numa transação só. Toda pasta ganha
-   task, inclusive as sem vídeos diretos.
+   vídeos novos e cria a `IngestionTask` como `PENDING`, numa transação só. Só pasta com vídeo
+   (já cadastrado ou vindo do provider) ganha task.
 
 A resposta `202` sai depois de submeter as tasks, sem esperar por elas. A criação das pastas fica
 na fase sequencial, não nas tasks, porque o `findOrCreate` resolve o `parent` buscando o pai pelo
@@ -99,12 +113,73 @@ capturada, marca a transação da task pra rollback e a task inteira se perderia
 de uma task fica só no log (`Falha ao criar a tarefa de ingestão da pasta ...`), sem afetar as
 demais.
 
+**Execução das tasks** (`IngestionTaskExecutionService.executeNextTask`, a cada 1s): toma a task
+`PENDING` ou `RUNNING` mais antiga (`IngestionTask.findNextExecutable`, com a pasta já
+carregada) e a marca `RUNNING` → chama os steps em sequência, pulando os que `isExecuted` diz já
+terem terminado → um step que termina `WAITING_CURATION` ou `FAILED` para a task nesse mesmo
+status; se todos passarem, a task fica `COMPLETED` → `finishTask` grava o status, o
+`completedAt` e o anime vinculado à pasta. Exceção inesperada termina a task `FAILED`, só com
+log.
+
+- **Uma task por vez:** tasks da mesma franquia rodando juntas disputam as arestas de
+  `anime_relation` no `syncRelations` do bind (chave duplicada, deadlock), e uma transação não vê
+  o anime que a outra ainda não commitou. Com `ConcurrentExecution.SKIP`, o ciclo que cai
+  durante uma task em andamento é pulado.
+- **Retomada:** uma task `RUNNING` no início de um ciclo só pode ter sobrado de uma queda do
+  serviço, já que a anterior sempre termina antes — por isso o scheduler a toma de novo. Os
+  steps já terminados (`COMPLETED`/`SKIPPED`) não rodam outra vez; o interrompido roda numa nova
+  tentativa (`attempt` + 1).
+
+**Contrato dos steps** (`IngestionStepService`, classe abstrata): cada step estende a classe sem
+conhecer os demais nem o orquestrador, e implementa `step()` (qual `IngestionStep` é) e
+`execute(task)`, que devolve o `IngestionStepStatus` final. A classe dá o `isExecuted(task)`
+padrão (alguma execução do step terminou `COMPLETED` ou `SKIPPED`) e os métodos de registro:
+`start` (abre a execução `RUNNING`, com o `attempt` seguinte, e marca `currentStep`), `record`
+(um evento) e `finish` (status final). Cada um é uma transação curta: a linha do tempo fica
+visível enquanto o step roda e nenhuma transação fica aberta durante as chamadas de rede dele.
+
+**Step `ANILIST_SYNC`** (`AnilistSyncStepService.execute`):
+
+1. `STARTED`. Pasta já vinculada a um anime: `MATCH_SELECTED` + `COMPLETED`, mantém o vínculo.
+2. `REQUEST_SENT` → busca o nome da pasta na AniList (5 resultados, com
+   `RetryUtils.withRateLimitRetry`) → `RESPONSE_RECEIVED` → `RESULTS_FOUND` com os candidatos.
+3. Procura um nome igual ao da pasta, sem diferenciar maiúsculas de minúsculas, nesta
+   prioridade — cada nível olha todos os resultados antes de passar ao próximo:
+   1. título (romaji, inglês, nativo, preferido) exato;
+   2. título normalizado;
+   3. sinônimo exato;
+   4. sinônimo normalizado.
+
+   A normalização troca por espaço os caracteres proibidos em nome de pasta
+   (`/ \ : * ? " < > |`) e o hífen, junta os espaços e passa pra minúsculas. O resto da
+   pontuação (`!`, `'`, `,`) continua exigindo igualdade, pra não juntar títulos como `K-ON!` e
+   `K-ON!!`. Troca por espaço, não remove, porque o nome da pasta costuma ter espaço onde o
+   título tem o caractere proibido (`Re Zero` pra `Re:Zero`); o hífen entra porque é o outro
+   substituto usado pra barra (`Fate-stay` pra `Fate/stay`). Título vem antes de sinônimo porque
+   um sinônimo genérico (ex.: `Mirai Nikki OVA` como sinônimo de `Mirai Nikki: Redial`) não
+   pode ganhar de um título que é exatamente o nome da pasta.
+4. Mais de um resultado no mesmo nível: fica o único com número de episódios igual à quantidade
+   de arquivos da pasta (`VideoFileService.countByFolder`). Nenhum nível bate, ou o empate
+   continua: `MATCH_NOT_FOUND` (com os candidatos, no caso do empate) → `WAITING_CURATION`.
+5. `MATCH_SELECTED`. Anime escolhido já sincronizado com outra pasta: `ERROR` → `FAILED`.
+6. Número de episódios conhecido e diferente da quantidade de arquivos: `WARNING` com os dois
+   números, sem bloquear — a divergência costuma ser legítima (episódios curtos compilados num
+   arquivo, filme em mais de um arquivo, episódio faltando).
+7. `AnimeService.bindAnime` (com retry de rate limit) → `COMPLETED`.
+
+Qualquer exceção (AniList fora, bind recusado) vira `ERROR` com a mensagem → `FAILED`.
+
 ## Arquivos críticos
 
 - `service/IngestionService.java` — disparo em duas fases; a ordem e a transação por pasta da
   fase sequencial garantem o `parent` das pastas.
 - `service/IngestionTaskService.java` — cadastro dos vídeos e da task; a checagem de arquivo
   existente antes de criar evita o rollback silencioso da task.
+- `service/IngestionTaskExecutionService.java` — execução sequencial dos steps, retomada e
+  status final da task.
+- `service/step/IngestionStepService.java` — contrato dos steps e registro de execuções e eventos.
+- `service/step/AnilistSyncStepService.java` — escolha do título da AniList e bind; a regra de
+  comparação de nomes decide o que é vinculado automaticamente.
 - `extractor/EpisodeNumberExtractor.java` — heurística de regex ajustada empiricamente contra ~10
   mil arquivos reais; qualquer alteração de pattern tem risco real de regressão silenciosa no
   pairing e na ordem da listagem de episódios.
@@ -124,11 +199,19 @@ demais.
 - `rootPath` não é validado contra o provider no disparo. Com um provider que devolve lista
   vazia pra diretório inexistente (`LocalStorageProviderClient`), a pasta do `rootPath` é criada
   no catalog mesmo assim.
-- As tasks rodam sem limite de paralelismo — uma thread virtual por pasta, cada uma com sua
-  transação, disputando o pool de conexões do datasource.
+- A criação das tasks roda sem limite de paralelismo — uma thread virtual por pasta, cada uma
+  com sua transação, disputando o pool de conexões do datasource.
 - Pastas e arquivos que sumiram do provider não são removidos do catalog.
 - Pasta já existente é reaproveitada como está pelo `findOrCreate`: `mediaType` e `parent` não são
   atualizados, então uma pasta gravada sem pai continua sem pai numa nova ingestão.
+- Não há como reprocessar uma task `FAILED` ou `WAITING_CURATION`: o scheduler só toma
+  `PENDING` e `RUNNING`.
+- A busca na AniList envia o nome da pasta como está e olha só os 5 primeiros resultados: nome
+  de pasta fora do padrão (sufixos como `(2)`, `x2` no lugar de `×2`) pode não trazer o título
+  certo, e a task vai pra curadoria.
+- O retry de rate limit (`RetryUtils.withRateLimitRetry`) não tem limite de tentativas: sob rate
+  limit prolongado da AniList, a task fica parada e os ciclos seguintes são pulados até ela
+  terminar.
 - `IngestionResource` não tem `@ApplicationScoped` explícito na classe (diferente de
   `CacheResource`); sem anotação de escopo, o CDI trata a classe como `@Dependent` — o JAX-RS
   resource funciona normalmente, só sem o pooling de `@ApplicationScoped`. **Backlog real**

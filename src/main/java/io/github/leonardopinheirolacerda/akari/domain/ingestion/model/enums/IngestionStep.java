@@ -2,8 +2,6 @@ package io.github.leonardopinheirolacerda.akari.domain.ingestion.model.enums;
 
 /**
  * Etapas do processamento de uma pasta na ingestão, na ordem em que se encadeiam.
- *
- * <p>Nenhuma etapa é executada hoje: a ingestão só registra pastas, arquivos e tasks.
  */
 public enum IngestionStep {
 
