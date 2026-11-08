@@ -50,7 +50,8 @@ public abstract class IngestionStepService {
      *
      * @param task task em execução, com a pasta já carregada
      * @return status final do step: {@code COMPLETED} ou {@code SKIPPED} deixam a task seguir;
-     *         {@code WAITING_CURATION} ou {@code FAILED} param a task nesse mesmo status
+     *         {@code UNRESOLVED} para a task em {@code WAITING_CURATION} e {@code FAILED}, em
+     *         {@code FAILED}
      */
     public abstract IngestionStepStatus execute(IngestionTask task);
 
@@ -117,8 +118,8 @@ public abstract class IngestionStepService {
      * {@link StepRun#finish}.
      *
      * @param stepExecution execução a fechar
-     * @param status status final: {@code COMPLETED}, {@code SKIPPED}, {@code WAITING_CURATION}
-     *               ou {@code FAILED}
+     * @param status status final: {@code COMPLETED}, {@code SKIPPED}, {@code UNRESOLVED} ou
+     *               {@code FAILED}
      */
     @Transactional
     protected void finish(IngestionStepExecution stepExecution, IngestionStepStatus status) {

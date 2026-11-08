@@ -75,8 +75,8 @@ public class AnilistSyncStepService extends IngestionStepService {
      * ({@code / \ : * ? " < > |}) e o hífen; sinônimo exato; sinônimo com a mesma normalização —
      * um título que bate sempre ganha de um sinônimo que bate; dentro de um nível, desempata pelo
      * número de episódios igual à quantidade de arquivos da pasta, e se o empate continuar, para
-     * à espera de curadoria ({@code WAITING_CURATION}). Achou → vincula ({@code COMPLETED});
-     * não achou → para à espera de curadoria ({@code WAITING_CURATION}); achou, mas o anime já
+     * à espera de curadoria ({@code UNRESOLVED}). Achou → vincula ({@code COMPLETED});
+     * não achou → para à espera de curadoria ({@code UNRESOLVED}); achou, mas o anime já
      * está sincronizado com outra pasta → evento {@code ERROR} ({@code FAILED}). Quando o número
      * de episódios do anime é conhecido e difere da quantidade de arquivos, grava um evento
      * {@code WARNING} e vincula assim mesmo. Busca e bind são retentados em rate limit.
@@ -159,7 +159,7 @@ public class AnilistSyncStepService extends IngestionStepService {
         if (matches.isEmpty()) {
             run.matchNotFound("Nenhum título da AniList tem nome igual ao da pasta");
 
-            return IngestionStepStatus.WAITING_CURATION;
+            return IngestionStepStatus.UNRESOLVED;
         }
 
         final Optional<AnilistMediaSummary> match = untie(matches, fileCount);
@@ -170,7 +170,7 @@ public class AnilistSyncStepService extends IngestionStepService {
                     Map.of("candidates", matches, "files", fileCount)
             );
 
-            return IngestionStepStatus.WAITING_CURATION;
+            return IngestionStepStatus.UNRESOLVED;
         }
 
         final Integer anilistId = match.get().getAnilistId();

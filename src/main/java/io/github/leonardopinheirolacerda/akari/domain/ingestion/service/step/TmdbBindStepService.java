@@ -57,7 +57,7 @@ public class TmdbBindStepService extends IngestionStepService {
      * <p>Fluxo: pasta sem anime vinculado → {@code FAILED}; anime já vinculado ao TMDB → mantém
      * o vínculo ({@code COMPLETED}); senão escolhe o melhor candidato do anibridge pelo
      * {@code anilistId} (ou {@code malId}) e o total de episódios do anime. Para à espera de
-     * curadoria ({@code WAITING_CURATION}) sem candidato, quando há mais de um candidato e o
+     * curadoria ({@code UNRESOLVED}) sem candidato, quando há mais de um candidato e o
      * melhor é suspeito (sobreposição ou cobertura maior que o anime), quando o melhor empata
      * com outro em todos os critérios (suspeita, cobertura e tipo que combina com o formato do
      * anime), ou quando o título escolhido não existe no TMDB (dado do anibridge desatualizado,
@@ -127,7 +127,7 @@ public class TmdbBindStepService extends IngestionStepService {
                     Map.of("anilistId", anime.anilistId)
             );
 
-            return IngestionStepStatus.WAITING_CURATION;
+            return IngestionStepStatus.UNRESOLVED;
         }
 
         final Integer tmdbId = resolution.best().tmdbId();
@@ -139,7 +139,7 @@ public class TmdbBindStepService extends IngestionStepService {
                     Map.of("tmdbId", tmdbId, "mediaType", mediaType, "candidates", resolution.candidateCount())
             );
 
-            return IngestionStepStatus.WAITING_CURATION;
+            return IngestionStepStatus.UNRESOLVED;
         }
 
         if (resolution.tied()) {
@@ -148,7 +148,7 @@ public class TmdbBindStepService extends IngestionStepService {
                     Map.of("tmdbId", tmdbId, "mediaType", mediaType, "candidates", resolution.candidateCount())
             );
 
-            return IngestionStepStatus.WAITING_CURATION;
+            return IngestionStepStatus.UNRESOLVED;
         }
 
         run.matchSelected(
@@ -164,7 +164,7 @@ public class TmdbBindStepService extends IngestionStepService {
                     Map.of("tmdbId", tmdbId, "mediaType", mediaType)
             );
 
-            return IngestionStepStatus.WAITING_CURATION;
+            return IngestionStepStatus.UNRESOLVED;
         }
 
         RetryUtils.withRateLimitRetry(

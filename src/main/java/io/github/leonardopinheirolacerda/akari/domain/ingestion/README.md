@@ -43,7 +43,7 @@ Orquestrar chamadas a `storageprovider` (listar a árvore remota e os vídeos de
   `message` e `details` em `JSONB`.
 
 A task passa por `PENDING` → `RUNNING` → `COMPLETED`/`WAITING_CURATION`/`FAILED`; a execução de
-um step nasce `RUNNING` e termina `COMPLETED`, `SKIPPED`, `WAITING_CURATION` ou `FAILED`. A
+um step nasce `RUNNING` e termina `COMPLETED`, `SKIPPED`, `UNRESOLVED` ou `FAILED`. A
 `Ingestion` continua `PENDING` (o status agregado não é atualizado), e `CANCELLED` (task) e
 `PENDING` (execução) não são gravados por nenhum fluxo.
 
@@ -123,9 +123,10 @@ demais.
 **Execução das tasks** (`IngestionTaskExecutionService.executeNextTask`, a cada 1s): toma a task
 `PENDING` ou `RUNNING` mais antiga (`IngestionTask.findNextExecutable`, com a pasta já
 carregada) e a marca `RUNNING` → chama os steps em sequência, pulando os que `isExecuted` diz já
-terem terminado → um step que termina `WAITING_CURATION` ou `FAILED` para a task nesse mesmo
-status; se todos passarem, a task fica `COMPLETED` → `finishTask` grava o status, o
-`completedAt` e o anime vinculado à pasta. Exceção inesperada termina a task `FAILED`, só com
+terem terminado → um step que termina `UNRESOLVED` (rodou sem erro, mas não conseguiu decidir
+sozinho) para a task em `WAITING_CURATION`, e um que termina `FAILED`, em `FAILED`; se todos
+passarem, a task fica `COMPLETED` → `finishTask` grava o status, o `completedAt` e o anime
+vinculado à pasta. Exceção inesperada termina a task `FAILED`, só com
 log.
 
 - **Uma task por vez:** tasks da mesma franquia rodando juntas disputam as arestas de
@@ -173,7 +174,7 @@ aberta durante as chamadas de rede dele.
    pode ganhar de um título que é exatamente o nome da pasta.
 4. Mais de um resultado no mesmo nível: fica o único com número de episódios igual à quantidade
    de arquivos da pasta (`VideoFileService.countByFolder`). Nenhum nível bate, ou o empate
-   continua: `MATCH_NOT_FOUND` (com os candidatos, no caso do empate) → `WAITING_CURATION`.
+   continua: `MATCH_NOT_FOUND` (com os candidatos, no caso do empate) → `UNRESOLVED`.
 5. `MATCH_SELECTED`. Anime escolhido já sincronizado com outra pasta: `ERROR` → `FAILED`.
 6. Número de episódios conhecido e diferente da quantidade de arquivos: `WARNING` com os dois
    números, sem bloquear — a divergência costuma ser legítima (episódios curtos compilados num
@@ -188,17 +189,17 @@ Qualquer exceção (AniList fora, bind recusado) vira `ERROR` com a mensagem →
    `MATCH_SELECTED` + `COMPLETED`, mantém o vínculo.
 2. Resolve os candidatos do anibridge (`AnibridgeResolutionService.resolveCandidates`) pelo
    `anilistId` (ou `malId`), com o total de episódios e o formato do anime, todos já salvos —
-   sem chamar a AniList. Nenhum candidato → `MATCH_NOT_FOUND` → `WAITING_CURATION`.
-3. Também vai pra `WAITING_CURATION` com `MATCH_NOT_FOUND`:
+   sem chamar a AniList. Nenhum candidato → `MATCH_NOT_FOUND` → `UNRESOLVED`.
+3. Também termina `UNRESOLVED` com `MATCH_NOT_FOUND`:
    - quando há mais de um candidato e o melhor é suspeito (sobreposição ou cobertura maior que
      o anime). Com um candidato só, a sobreposição não impede o bind: costuma ser o anibridge
      numerando os mesmos episódios de dois jeitos na mesma série, o que só importa pro pairing
      de episódios;
-   - quando o melhor empata com outro em todos os critérios (`CandidateResolution.tied`) — típico de
-     OVA/especial que existe no TMDB como filme e como especial da série.
+   - quando o melhor empata com outro em todos os critérios (`CandidateResolution.tied`) —
+     típico de OVA/especial que existe no TMDB como filme e como especial da série.
 4. `MATCH_SELECTED` → confere o título no TMDB (`AnimeTmdbService.fetchDetails`, com retry de
    rate limit): inexistente (dado do anibridge desatualizado) → `MATCH_NOT_FOUND` →
-   `WAITING_CURATION`. A conferência é separada do bind pra que só o 404 do título vá pra
+   `UNRESOLVED`. A conferência é separada do bind pra que só o 404 do título vá pra
    curadoria, e deixa a ficha em cache pro bind.
 5. `AnimeTmdbService.bindTmdb` (com retry de rate limit) → `COMPLETED`. O bind não preenche os
    overrides de imagem.

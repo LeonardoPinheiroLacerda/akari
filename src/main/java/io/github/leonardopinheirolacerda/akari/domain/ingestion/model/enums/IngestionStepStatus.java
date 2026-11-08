@@ -15,8 +15,13 @@ public enum IngestionStepStatus {
     /** Terminou sem falha. */
     COMPLETED,
 
-    /** Terminou sem erro, mas sem conseguir decidir sozinha; a task para à espera de curadoria. */
-    WAITING_CURATION,
+    /**
+     * Terminou sem erro, mas sem conseguir decidir sozinha — a task vai pra
+     * {@code WAITING_CURATION}. Diferente de {@link #COMPLETED}, não conta como step executado
+     * (o step roda de novo se a task for reprocessada), e diferente de {@link #FAILED}, não houve
+     * erro.
+     */
+    UNRESOLVED,
 
     /** Terminou com falha. */
     FAILED,

@@ -38,8 +38,9 @@ public class IngestionTaskExecutionService {
 
     /**
      * Pega a próxima task a executar e roda os steps dela em sequência, pulando os já executados.
-     * Um step que termina {@code WAITING_CURATION} ou {@code FAILED} para a task nesse status; se
-     * todos passarem, a task termina {@code COMPLETED}. Chamado pelo
+     * Um step que termina {@code UNRESOLVED} para a task em {@code WAITING_CURATION}, e um que
+     * termina {@code FAILED}, em {@code FAILED}; se todos passarem, a task termina
+     * {@code COMPLETED}. Chamado pelo
      * {@code IngestionTaskScheduler}, que pula os ciclos seguintes enquanto a task não acaba.
      */
     public void executeNextTask() {
@@ -64,7 +65,7 @@ public class IngestionTaskExecutionService {
 
                 final IngestionStepStatus status = step.execute(task);
 
-                if (status == IngestionStepStatus.WAITING_CURATION) {
+                if (status == IngestionStepStatus.UNRESOLVED) {
                     finishTask(task.id, IngestionTaskStatus.WAITING_CURATION);
                     return;
                 }

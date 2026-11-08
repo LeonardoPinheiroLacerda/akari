@@ -122,8 +122,8 @@ public final class StepRun {
     /**
      * Fecha a execução com o status final do step.
      *
-     * @param status status final: {@code COMPLETED}, {@code SKIPPED},
-     *               {@code WAITING_CURATION} ou {@code FAILED}
+     * @param status status final: {@code COMPLETED}, {@code SKIPPED}, {@code UNRESOLVED} ou
+     *               {@code FAILED}
      */
     public void finish(IngestionStepStatus status) {
         service.finish(execution, status);
