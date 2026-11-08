@@ -60,6 +60,8 @@ Traduzir a GraphQL da AniList (query `Page(page, perPage).media(search, type: AN
   recursivamente pra seguir o grafo de relações (`relations.edges`) da AniList e montar
   `AnimeRelation`. `AnimeTmdbProposalService` usa `findById` pra ler `idMal` e `episodes` ao propor
   o binding TMDB pelo anibridge.
+- **`domain.ingestion`** (`AnilistSyncStepService`) — usa `AnilistSearchService.search` pra achar
+  o título da AniList com nome igual ao da pasta no step `ANILIST_SYNC`.
 - **`domain.cache`** — infraestrutura de cache consumida pelo service (não o contrário).
 - **`domain.setting`** — fonte do TTL de cache.
 
@@ -122,6 +124,7 @@ Traduzir a GraphQL da AniList (query `Page(page, perPage).media(search, type: AN
   da AniList é rico (campos como `relations`) e um DTO intermediário duplicaria praticamente
   o mesmo shape sem ganho real.
 - **Nenhuma validação de rate limit própria neste domínio:** chamadas à AniList não passam por
-  `RetryUtils` dentro do próprio `anilist`, e nenhum chamador envolve `AnilistSearchService` com
-  `RetryUtils.withRateLimitRetry` — sob rate limit da AniList, as chamadas falham direto. **Backlog real** (confirmado pelo mantenedor, mesmo item do risco geral de retry
+  `RetryUtils` dentro do próprio `anilist`; quem usa `RetryUtils.withRateLimitRetry` em torno de
+  `AnilistSearchService` é o chamador, e só o step `ANILIST_SYNC` da ingestão faz isso — as
+  chamadas de `domain.anime` falham direto sob rate limit da AniList. **Backlog real** (confirmado pelo mantenedor, mesmo item do risco geral de retry
   ad hoc documentado em `ARQUITETURA_DO_SISTEMA.md`).

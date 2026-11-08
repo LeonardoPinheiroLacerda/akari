@@ -28,6 +28,9 @@ conjunto inteiro de arquivos de uma pasta, usada pra saber quais arquivos já es
   `tmdbPairing` (via `AnimeTmdbFilePairingService.getTmdbFilePairings`).
 - `listByFolder`: lista completa sem paginação, usada pela ingestão (`IngestionTaskService`)
   pra pular os arquivos que a pasta já tem, a partir de contextos sem transação ambiente.
+- `countByFolder`: conta os arquivos de uma pasta sem carregá-los (`VideoFile.countByFolderId`),
+  usado pela ingestão (`AnilistSyncStepService`) pra comparar com o número de episódios do
+  anime.
 - `listByFolderOrderedByNaturalSortKey`: lista completa sem paginação, na mesma ordem natural da
   listagem de episódios (`naturalSortKey NULLS LAST`, depois `id`); usada pelas resoluções de
   pairing do `anime` (anibridge e continuidade).
@@ -59,8 +62,9 @@ conjunto inteiro de arquivos de uma pasta, usada pra saber quais arquivos já es
   resolve com `videoFileService.findOrThrow(...)` ao iniciar sessão e ao reconciliar.
   Em todos os três casos o acoplamento é raso: busca pontual por id, sem leitura de campos além
   dos expostos pelo model — confirmado lendo os três services, não só por grep de import.
-- `ingestion` (`IngestionTaskService`) — lê os arquivos já cadastrados via `listByFolder` e
-  cadastra os novos via `createVideoFile`.
+- `ingestion` — `IngestionTaskService` lê os arquivos já cadastrados via `listByFolder` e
+  cadastra os novos via `createVideoFile`; `AnilistSyncStepService` conta os arquivos da pasta
+  via `countByFolder`.
 - `anime` (`AnimeTmdbFilePairingService`, `AnimeEpisodeService`, `EpisodePairingResolutionService`,
   `EpisodeContinuityResolutionService`) — pairing TMDB consumido nas listagens;
   `AnimeEpisodeService` consome `listVideoFilesOrderedByNaturalSortKey` direto; as duas
@@ -74,8 +78,8 @@ conjunto inteiro de arquivos de uma pasta, usada pra saber quais arquivos já es
 
 - `VideoFileResource` (implementa `VideoFileApi` gerado) — camada HTTP, delega 100% ao
   service.
-- `VideoFileService` — `listByFolder` e `createVideoFile` são chamados diretamente pela
-  ingestão, fora da camada HTTP; `listVideoFilesOrderedByNaturalSortKey` é chamado por
+- `VideoFileService` — `listByFolder`, `countByFolder` e `createVideoFile` são chamados
+  diretamente pela ingestão, fora da camada HTTP; `listVideoFilesOrderedByNaturalSortKey` é chamado por
   `AnimeEpisodeService` (sem resource próprio nesse domínio).
 
 ## Fluxos importantes
@@ -91,7 +95,7 @@ conjunto inteiro de arquivos de uma pasta, usada pra saber quais arquivos já es
   em ordem natural de nome) → mapeiam a página para DTO → buscam pairings TMDB em lote pelos
   `fileId`s da página → setam `tmdbPairing` em cada item (`null` quando não pareado) — mesmo
   helper privado (`toPageWithPairings`) nos dois casos.
-- `listByFolder`/`listByFolderOrderedByNaturalSortKey`: leitura sem paginação, anotadas
+- `listByFolder`/`listByFolderOrderedByNaturalSortKey`/`countByFolder`: leitura sem paginação, anotadas
   `@Transactional` mesmo sendo leitura, pra funcionar também chamadas de contextos sem
   transação ambiente (ex.: as threads virtuais da ingestão).
 

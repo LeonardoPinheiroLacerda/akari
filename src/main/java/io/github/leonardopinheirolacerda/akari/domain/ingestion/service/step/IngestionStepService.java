@@ -17,9 +17,10 @@ import java.util.Map;
  * tiver sido executado na task.
  *
  * <p>Também oferece aos steps o registro da própria execução ({@link IngestionStepExecution}) e
- * dos seus eventos ({@link IngestionStepEvent}). Cada um desses métodos é uma transação curta: a
- * linha do tempo fica visível enquanto o step roda e nenhuma transação fica aberta durante as
- * chamadas de rede dele.
+ * dos seus eventos ({@link IngestionStepEvent}): o {@link #start} devolve um {@link StepRun}, que
+ * grava os eventos e fecha aquela execução. Cada gravação é uma transação curta: a linha do tempo
+ * fica visível enquanto o step roda e nenhuma transação fica aberta durante as chamadas de rede
+ * dele.
  */
 public abstract class IngestionStepService {
 
@@ -58,10 +59,10 @@ public abstract class IngestionStepService {
      * da task.
      *
      * @param taskId id da task
-     * @return a execução criada, onde o step grava seus eventos
+     * @return a execução aberta, por onde o step grava seus eventos e fecha a execução
      */
     @Transactional
-    protected IngestionStepExecution start(Integer taskId) {
+    protected StepRun start(Integer taskId) {
         final IngestionStep step = step();
 
         final IngestionTask task = IngestionTask.findById(taskId);
@@ -79,13 +80,14 @@ public abstract class IngestionStepService {
 
         task.currentStep = step;
 
-        return execution;
+        return new StepRun(this, execution);
     }
 
     /**
-     * Grava um evento da execução.
+     * Grava um evento da execução — chamado pelos métodos do {@link StepRun}, um por tipo de
+     * evento.
      *
-     * @param stepExecution execução à qual o evento pertence, devolvida pelo {@link #start}
+     * @param stepExecution execução à qual o evento pertence
      * @param eventType tipo do evento
      * @param message descrição legível do evento
      * @param details dados estruturados do evento; {@code null} quando não há
@@ -111,9 +113,10 @@ public abstract class IngestionStepService {
      * Fecha a execução com o status final do step.
      *
      * <p>A execução recebida veio da transação do {@link #start} e está desanexada; por isso é
-     * buscada de novo pelo id — alterar a recebida não seria gravado.
+     * buscada de novo pelo id — alterar a recebida não seria gravado. Chamado pelo
+     * {@link StepRun#finish}.
      *
-     * @param stepExecution execução a fechar, devolvida pelo {@link #start}
+     * @param stepExecution execução a fechar
      * @param status status final: {@code COMPLETED}, {@code SKIPPED}, {@code WAITING_CURATION}
      *               ou {@code FAILED}
      */

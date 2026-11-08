@@ -133,16 +133,22 @@ log.
 **Contrato dos steps** (`IngestionStepService`, classe abstrata): cada step estende a classe sem
 conhecer os demais nem o orquestrador, e implementa `step()` (qual `IngestionStep` é) e
 `execute(task)`, que devolve o `IngestionStepStatus` final. A classe dá o `isExecuted(task)`
-padrão (alguma execução do step terminou `COMPLETED` ou `SKIPPED`) e os métodos de registro:
-`start` (abre a execução `RUNNING`, com o `attempt` seguinte, e marca `currentStep`), `record`
-(um evento) e `finish` (status final). Cada um é uma transação curta: a linha do tempo fica
-visível enquanto o step roda e nenhuma transação fica aberta durante as chamadas de rede dele.
+padrão (alguma execução do step terminou `COMPLETED` ou `SKIPPED`) e o `start`, que abre a
+execução `RUNNING` (com o `attempt` seguinte), marca `currentStep` e devolve um `StepRun`. O
+`StepRun` guarda aquela execução e grava os eventos por um método por `IngestionEventType`
+(`started`, `requestSent`, `matchSelected`, `error`, `completed`...), cada um com e sem
+`details`, e fecha a execução com `finish(status)` — o step não repassa a execução a cada
+chamada. É um objeto por execução, não um campo do step service, porque o service é
+`@ApplicationScoped` e um campo seria compartilhado entre execuções. Cada gravação é uma
+transação curta: a linha do tempo fica visível enquanto o step roda e nenhuma transação fica
+aberta durante as chamadas de rede dele.
 
 **Step `ANILIST_SYNC`** (`AnilistSyncStepService.execute`):
 
 1. `STARTED`. Pasta já vinculada a um anime: `MATCH_SELECTED` + `COMPLETED`, mantém o vínculo.
 2. `REQUEST_SENT` → busca o nome da pasta na AniList (5 resultados, com
-   `RetryUtils.withRateLimitRetry`) → `RESPONSE_RECEIVED` → `RESULTS_FOUND` com os candidatos.
+   `RetryUtils.withRateLimitRetry`) → `RESPONSE_RECEIVED` → `RESULTS_FOUND` com os resultados da
+   busca, como vieram da AniList.
 3. Procura um nome igual ao da pasta, sem diferenciar maiúsculas de minúsculas, nesta
    prioridade — cada nível olha todos os resultados antes de passar ao próximo:
    1. título (romaji, inglês, nativo, preferido) exato;
@@ -177,7 +183,8 @@ Qualquer exceção (AniList fora, bind recusado) vira `ERROR` com a mensagem →
   existente antes de criar evita o rollback silencioso da task.
 - `service/IngestionTaskExecutionService.java` — execução sequencial dos steps, retomada e
   status final da task.
-- `service/step/IngestionStepService.java` — contrato dos steps e registro de execuções e eventos.
+- `service/step/IngestionStepService.java` — contrato dos steps e abertura da execução.
+- `service/step/StepRun.java` — gravação dos eventos e fechamento de uma execução de step.
 - `service/step/AnilistSyncStepService.java` — escolha do título da AniList e bind; a regra de
   comparação de nomes decide o que é vinculado automaticamente.
 - `extractor/EpisodeNumberExtractor.java` — heurística de regex ajustada empiricamente contra ~10

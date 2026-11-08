@@ -6,9 +6,7 @@ import io.github.leonardopinheirolacerda.akari.api.dto.AnimeBindingRequest;
 import io.github.leonardopinheirolacerda.akari.domain.anilist.service.AnilistSearchService;
 import io.github.leonardopinheirolacerda.akari.domain.anime.model.Anime;
 import io.github.leonardopinheirolacerda.akari.domain.anime.service.AnimeService;
-import io.github.leonardopinheirolacerda.akari.domain.ingestion.model.IngestionStepExecution;
 import io.github.leonardopinheirolacerda.akari.domain.ingestion.model.IngestionTask;
-import io.github.leonardopinheirolacerda.akari.domain.ingestion.model.enums.IngestionEventType;
 import io.github.leonardopinheirolacerda.akari.domain.ingestion.model.enums.IngestionStep;
 import io.github.leonardopinheirolacerda.akari.domain.ingestion.model.enums.IngestionStepStatus;
 import io.github.leonardopinheirolacerda.akari.domain.mediafolder.model.MediaFolder;
@@ -32,8 +30,8 @@ import java.util.stream.Stream;
  * Step {@code ANILIST_SYNC} da ingestão: vincula a pasta da task a um anime da AniList, buscando
  * pelo nome da pasta.
  *
- * <p>Não conhece os demais steps: registra a própria execução e seus eventos pelos métodos
- * herdados de {@link IngestionStepService} e devolve o status final. Não tem
+ * <p>Não conhece os demais steps: registra a própria execução e seus eventos pelo
+ * {@code StepRun} que o {@link IngestionStepService#start} devolve e devolve o status final. Não tem
  * {@code @Transactional} próprio — cada chamada a outro service abre a sua transação, sem segurar
  * uma aberta durante as chamadas à AniList, que podem demorar sob rate limit
  * ({@link RetryUtils}).
@@ -90,65 +88,46 @@ public class AnilistSyncStepService extends IngestionStepService {
      */
     @Override
     public IngestionStepStatus execute(IngestionTask task) {
-        final IngestionStepExecution stepExecution = start(task.id);
+        final StepRun run = start(task.id);
 
         IngestionStepStatus status;
 
         try {
-            status = bindFolder(stepExecution, task.folder);
+            status = bindFolder(run, task.folder);
         } catch (RuntimeException e) {
             Log.warnf(e, "Vínculo AniList da pasta %d (%s) falhou", task.folder.id, task.folder.name);
 
-            record(
-                    stepExecution,
-                    IngestionEventType.ERROR,
-                    e.getMessage(),
-                    null
-            );
+            run.error(e.getMessage());
 
             status = IngestionStepStatus.FAILED;
         }
 
-        finish(stepExecution, status);
+        run.finish(status);
 
         return status;
     }
 
-    private IngestionStepStatus bindFolder(IngestionStepExecution stepExecution, MediaFolder folder) {
+    private IngestionStepStatus bindFolder(StepRun run, MediaFolder folder) {
         final Integer folderId = folder.id;
         final String folderName = folder.name;
 
-        record(
-                stepExecution,
-                IngestionEventType.STARTED,
-                "Vínculo da pasta com a AniList iniciado",
-                null
-        );
+        run.started("Vínculo da pasta com a AniList iniciado");
 
         final Optional<Anime> boundAnime = animeService.findByFolder(folderId);
 
         if (boundAnime.isPresent()) {
-            record(
-                    stepExecution,
-                    IngestionEventType.MATCH_SELECTED,
+            run.matchSelected(
                     "Pasta já vinculada a um anime",
                     Map.of("anilistId", boundAnime.get().anilistId)
             );
-            record(
-                    stepExecution,
-                    IngestionEventType.COMPLETED,
-                    "Vínculo com a AniList mantido",
-                    null
-            );
+            run.completed("Vínculo com a AniList mantido");
 
             return IngestionStepStatus.COMPLETED;
         }
 
         final long fileCount = videoFileService.countByFolder(folderId);
 
-        record(
-                stepExecution,
-                IngestionEventType.REQUEST_SENT,
+        run.requestSent(
                 "Busca enviada à AniList",
                 Map.of("query", folderName, "page", 0, "size", SEARCH_PAGE_SIZE)
         );
@@ -157,19 +136,12 @@ public class AnilistSyncStepService extends IngestionStepService {
                 () -> anilistSearchService.search(folderName, 0, SEARCH_PAGE_SIZE, false)
         ).getData();
 
-        record(
-                stepExecution,
-                IngestionEventType.RESPONSE_RECEIVED,
-                "Resposta da AniList recebida",
-                Map.of("results", results.size())
-        );
+        run.responseReceived("Resposta da AniList recebida", Map.of("results", results.size()));
 
         if (!results.isEmpty()) {
-            record(
-                    stepExecution,
-                    IngestionEventType.RESULTS_FOUND,
+            run.resultsFound(
                     "%d candidatos encontrados na AniList".formatted(results.size()),
-                    Map.of("candidates", candidatesOf(results))
+                    Map.of("candidates", results)
             );
         }
 
@@ -185,12 +157,7 @@ public class AnilistSyncStepService extends IngestionStepService {
                 .orElse(List.of());
 
         if (matches.isEmpty()) {
-            record(
-                    stepExecution,
-                    IngestionEventType.MATCH_NOT_FOUND,
-                    "Nenhum título da AniList tem nome igual ao da pasta",
-                    null
-            );
+            run.matchNotFound("Nenhum título da AniList tem nome igual ao da pasta");
 
             return IngestionStepStatus.WAITING_CURATION;
         }
@@ -198,11 +165,9 @@ public class AnilistSyncStepService extends IngestionStepService {
         final Optional<AnilistMediaSummary> match = untie(matches, fileCount);
 
         if (match.isEmpty()) {
-            record(
-                    stepExecution,
-                    IngestionEventType.MATCH_NOT_FOUND,
+            run.matchNotFound(
                     "Mais de um título da AniList tem nome igual ao da pasta, sem como desempatar",
-                    Map.of("candidates", candidatesOf(matches), "files", fileCount)
+                    Map.of("candidates", matches, "files", fileCount)
             );
 
             return IngestionStepStatus.WAITING_CURATION;
@@ -210,17 +175,13 @@ public class AnilistSyncStepService extends IngestionStepService {
 
         final Integer anilistId = match.get().getAnilistId();
 
-        record(
-                stepExecution,
-                IngestionEventType.MATCH_SELECTED,
+        run.matchSelected(
                 "Título da AniList com nome igual ao da pasta encontrado",
-                Map.of("anilistId", anilistId, "title", titleOf(match.get()))
+                Map.of("candidate", match.get())
         );
 
         if (animeService.find(anilistId).isPresent()) {
-            record(
-                    stepExecution,
-                    IngestionEventType.ERROR,
+            run.error(
                     "O anime encontrado já está sincronizado com outra pasta",
                     Map.of("anilistId", anilistId)
             );
@@ -231,9 +192,7 @@ public class AnilistSyncStepService extends IngestionStepService {
         final Integer episodes = match.get().getEpisodes();
 
         if (episodes != null && episodes != fileCount) {
-            record(
-                    stepExecution,
-                    IngestionEventType.WARNING,
+            run.warning(
                     "Quantidade de arquivos da pasta diferente do número de episódios do anime",
                     Map.of("anilistId", anilistId, "episodes", episodes, "files", fileCount)
             );
@@ -248,20 +207,9 @@ public class AnilistSyncStepService extends IngestionStepService {
                 }
         );
 
-        record(
-                stepExecution,
-                IngestionEventType.COMPLETED,
-                "Pasta vinculada ao anime da AniList",
-                Map.of("anilistId", anilistId)
-        );
+        run.completed("Pasta vinculada ao anime da AniList", Map.of("anilistId", anilistId));
 
         return IngestionStepStatus.COMPLETED;
-    }
-
-    private List<Map<String, Object>> candidatesOf(List<AnilistMediaSummary> summaries) {
-        return summaries.stream()
-                .map(summary -> Map.<String, Object>of("anilistId", summary.getAnilistId(), "title", titleOf(summary)))
-                .toList();
     }
 
     /**
@@ -340,18 +288,5 @@ public class AnilistSyncStepService extends IngestionStepService {
                 .replaceAll(" ")
                 .strip()
                 .toLowerCase(Locale.ROOT);
-    }
-
-    private String titleOf(AnilistMediaSummary summary) {
-        final AnilistTitle title = summary.getTitle();
-
-        if (title == null) {
-            return "";
-        }
-
-        return Stream.of(title.getUserPreferred(), title.getRomaji(), title.getEnglish())
-                .filter(Objects::nonNull)
-                .findFirst()
-                .orElse("");
     }
 }
