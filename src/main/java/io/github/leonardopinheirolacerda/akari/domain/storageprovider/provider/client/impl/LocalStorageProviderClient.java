@@ -2,6 +2,7 @@ package io.github.leonardopinheirolacerda.akari.domain.storageprovider.provider.
 
 import io.github.leonardopinheirolacerda.akari.domain.storageprovider.provider.client.StorageProviderClient;
 import io.github.leonardopinheirolacerda.akari.domain.storageprovider.provider.model.StorageItem;
+import io.github.leonardopinheirolacerda.akari.utils.FileNameUtils;
 import io.quarkus.logging.Log;
 
 import java.io.IOException;
@@ -72,18 +73,26 @@ public class LocalStorageProviderClient implements StorageProviderClient {
     }
 
     /**
-     * Lista só os arquivos de vídeo diretamente filhos do path, pelo MIME type.
+     * Lista só os arquivos de vídeo diretamente filhos do path: pelo MIME type e, quando ele não
+     * indica vídeo, pela extensão ({@link FileNameUtils#isVideoFile}). O MIME vem do detector do
+     * sistema ({@code Files.probeContentType}), que não reconhece todos os formatos — no macOS,
+     * por exemplo, devolve {@code null} pra {@code .mkv}.
      *
      * @param path path relativo a {@code root}
-     * @return os itens filhos cujo {@code mimeType} começa com {@code "video/"}
+     * @return os itens filhos cujo {@code mimeType} começa com {@code "video/"} ou cuja extensão é
+     *         de vídeo
      */
     @Override
     public List<StorageItem> listChildVideos(String path) {
         return listChildren(path)
                 .stream()
                 .filter(item -> !item.isDir())
-                .filter(item -> item.mimeType() != null && item.mimeType().startsWith("video/"))
+                .filter(item -> isVideoMimeType(item.mimeType()) || FileNameUtils.isVideoFile(item.name()))
                 .toList();
+    }
+
+    private static boolean isVideoMimeType(String mimeType) {
+        return mimeType != null && mimeType.startsWith("video/");
     }
 
     /**
