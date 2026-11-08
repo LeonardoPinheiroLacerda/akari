@@ -9,6 +9,7 @@ import io.github.leonardopinheirolacerda.akari.domain.anibridge.service.Anibridg
 import io.github.leonardopinheirolacerda.akari.domain.anime.mapper.AnimeTmdbFilePairingMapper;
 import io.github.leonardopinheirolacerda.akari.domain.anime.model.Anime;
 import io.github.leonardopinheirolacerda.akari.domain.anime.model.FilePairingResolution;
+import io.github.leonardopinheirolacerda.akari.domain.anime.model.FuzzyDate;
 import io.github.leonardopinheirolacerda.akari.domain.ingestion.extractor.EpisodeNumberExtractor;
 import io.github.leonardopinheirolacerda.akari.domain.tmdb.client.dtos.TmdbEpisodeResponse;
 import io.github.leonardopinheirolacerda.akari.domain.tmdb.service.TmdbService;
@@ -20,6 +21,9 @@ import io.quarkus.logging.Log;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
+import java.time.LocalDate;
+import java.time.YearMonth;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -32,13 +36,20 @@ import java.util.OptionalInt;
  * gravar nada — usado pela proposta de pairing do portal ({@link AnimeTmdbProposalService}) e
  * pelo pairing automático da ingestão ({@link AnimeTmdbFilePairingFillService}).
  *
- * <p>O número do episódio sai do nome do arquivo ({@link EpisodeNumberExtractor}), e o anibridge
+ * <p>O número do episódio sai do nome do arquivo, olhando a pasta inteira
+ * ({@link EpisodeNumberExtractor#extractForFolder}), e o anibridge
  * converte pra temporada/episódio do TMDB — só pelos segments que apontam pra série vinculada,
  * pra nunca aplicar a numeração de um título sobre outro. Cada episódio resolvido é confirmado no
- * TMDB, de onde sai a metadata do pairing.
+ * TMDB, de onde sai a metadata do pairing, e precisa ter ido ao ar perto do período de exibição
+ * do anime na AniList ({@link #AIR_WINDOW_TOLERANCE_DAYS}).
  */
 @ApplicationScoped
 public class EpisodePairingResolutionService {
+
+    // Folga, antes da estreia e depois do fim do anime na AniList, pra data do episódio no TMDB —
+    // absorve exibição em streaming, DVD e especiais lançados longe da exibição na TV, e ainda
+    // recusa o episódio de outra temporada ou de outro anime da franquia.
+    private static final int AIR_WINDOW_TOLERANCE_DAYS = 365;
 
     @Inject
     AnibridgeResolutionService anibridgeResolutionService;
@@ -62,7 +73,11 @@ public class EpisodePairingResolutionService {
      * cadeia de prequels, ver {@link AbsoluteEpisodeOffsetService}) e, numa pasta de 1 arquivo
      * com anime de 1 episódio, o episódio 1. Sem mapeamento do anibridge pra série vinculada, ou
      * com mapeamento conflitante, todos os arquivos saem com {@code NO_MAPPING} ou
-     * {@code CONFLICTING_MAPPING}.
+     * {@code CONFLICTING_MAPPING}. Quando a pasta inteira usa numeração absoluta (ver
+     * {@link #findFolderOffset}), o offset vale pra todos os arquivos, inclusive os cujo número
+     * também caberia no intervalo do anime. Episódio do TMDB exibido a mais de
+     * {@link #AIR_WINDOW_TOLERANCE_DAYS} dias antes da estreia ou depois do fim do anime na
+     * AniList sai com {@code OUT_OF_AIR_WINDOW}, sem pairing.
      *
      * @param anime anime com binding TMDB de série
      * @param folderId pasta do anime — passada à parte pra não depender do lazy load de
@@ -107,15 +122,39 @@ public class EpisodePairingResolutionService {
                 ? Optional.empty()
                 : anibridgeResolutionService.restrictToFullSeasonCoverage(safeSegments.get(), anime.episodes);
 
+        final List<String> fileNames = videoFiles.stream()
+                .map(videoFile -> videoFile.name)
+                .toList();
+
+        final List<OptionalInt> episodeNumbers = EpisodeNumberExtractor.extractForFolder(
+                fileNames,
+                anime.episodes
+        );
+
+        final OptionalInt folderOffset = offsetSegments.isPresent()
+                ? findFolderOffset(
+                        episodeNumbers,
+                        safeSegments.get(),
+                        offsetSegments.get(),
+                        absoluteOffsetCandidates
+                )
+                : OptionalInt.empty();
+
         final List<FilePairingResolution> resolutions = new ArrayList<>();
 
-        for (VideoFile videoFile : videoFiles) {
-            final OptionalInt episodeNumber = EpisodeNumberExtractor.extract(videoFile.name);
+        for (int i = 0; i < videoFiles.size(); i++) {
+            final VideoFile videoFile = videoFiles.get(i);
+            final OptionalInt episodeNumber = episodeNumbers.get(i);
 
             Optional<ResolvedEpisode> resolved = Optional.empty();
             boolean offsetNeededButIneligible = false;
 
-            if (episodeNumber.isPresent()) {
+            if (episodeNumber.isPresent() && folderOffset.isPresent()) {
+                resolved = anibridgeResolutionService.resolveEpisode(
+                        offsetSegments.get(),
+                        episodeNumber.getAsInt() - folderOffset.getAsInt()
+                );
+            } else if (episodeNumber.isPresent()) {
                 resolved = anibridgeResolutionService.resolveEpisode(
                         safeSegments.get(),
                         episodeNumber.getAsInt()
@@ -163,6 +202,17 @@ public class EpisodePairingResolutionService {
                 continue;
             }
 
+            if (!isWithinAirWindow(anime, episode.get())) {
+                resolutions.add(new FilePairingResolution(
+                        videoFile,
+                        TmdbFilePairingProposalStatus.OUT_OF_AIR_WINDOW,
+                        resolved.get(),
+                        null,
+                        null
+                ));
+                continue;
+            }
+
             final TmdbFilePairingRequest pairing = animeTmdbFilePairingMapper.toPairingRequest(episode.get());
 
             resolutions.add(new FilePairingResolution(
@@ -175,6 +225,139 @@ public class EpisodePairingResolutionService {
         }
 
         return resolutions;
+    }
+
+    /**
+     * Offset de numeração absoluta da pasta inteira, quando ela usa essa numeração: algum
+     * arquivo não resolve direto, e entre os offsets da cadeia de prequels fica o que resolve
+     * mais arquivos da pasta — desempate pelo mais próximo —, considerando só os offsets menores
+     * que todos os números da pasta. Aplicado a todos os arquivos, corrige o arquivo cujo número
+     * absoluto também cabe no intervalo do anime e seria resolvido direto, no episódio errado
+     * (ex.: {@code S01E12} no {@code 86 Part 2}, offset 11, viraria o episódio 12 em vez do 1),
+     * e o arquivo que um offset mais próximo resolveria errado (ex.: no {@code Boku no Hero
+     * Academia 7}, arquivos 139–159, o offset 125 resolve só 139–146, e o 138 resolve todos). A
+     * exigência de números maiores que o offset protege a pasta que mistura numeração local e
+     * absoluta, onde o offset deslocaria os arquivos de numeração local.
+     *
+     * @return o offset da pasta, ou vazio se nenhum arquivo precisa de offset ou nenhum offset
+     *         resolve arquivo da pasta
+     */
+    private OptionalInt findFolderOffset(List<OptionalInt> folderEpisodeNumbers,
+                                         List<MappingSegment> safeSegments,
+                                         List<MappingSegment> offsetSegments,
+                                         List<Integer> offsetCandidates) {
+
+        final List<Integer> episodeNumbers = folderEpisodeNumbers.stream()
+                .filter(OptionalInt::isPresent)
+                .map(OptionalInt::getAsInt)
+                .toList();
+
+        final boolean needsOffset = episodeNumbers.stream()
+                .anyMatch(episodeNumber -> anibridgeResolutionService.resolveEpisode(
+                        safeSegments,
+                        episodeNumber
+                ).isEmpty());
+
+        if (!needsOffset) {
+            return OptionalInt.empty();
+        }
+
+        OptionalInt folderOffset = OptionalInt.empty();
+        long folderOffsetCoverage = 0;
+
+        for (Integer offset : offsetCandidates) {
+            if (episodeNumbers.stream().anyMatch(episodeNumber -> episodeNumber <= offset)) {
+                continue;
+            }
+
+            final long coverage = episodeNumbers.stream()
+                    .filter(episodeNumber -> anibridgeResolutionService.resolveEpisode(
+                            offsetSegments,
+                            episodeNumber - offset
+                    ).isPresent())
+                    .count();
+
+            if (coverage > folderOffsetCoverage) {
+                folderOffset = OptionalInt.of(offset);
+                folderOffsetCoverage = coverage;
+            }
+        }
+
+        return folderOffset;
+    }
+
+    /**
+     * Confere se o episódio do TMDB foi ao ar dentro do período de exibição do anime na AniList,
+     * com {@link #AIR_WINDOW_TOLERANCE_DAYS} dias de folga em cada ponta. Data parcial da AniList
+     * vale pelo período inteiro que ela cobre (só o ano: do início ao fim do ano). Sem data de
+     * fim (anime em exibição), só o início limita; sem data do episódio no TMDB, ou com a do
+     * anime sem ano, não há o que comparar e o episódio é aceito.
+     */
+    private boolean isWithinAirWindow(Anime anime, TmdbEpisodeResponse episode) {
+        final Optional<LocalDate> airDate = parseAirDate(episode.airDate());
+
+        if (airDate.isEmpty()) {
+            return true;
+        }
+
+        final FuzzyDate startDate = anime.startDate;
+
+        if (startDate != null && startDate.year != null) {
+            final LocalDate windowStart = firstDayOf(startDate)
+                    .minusDays(AIR_WINDOW_TOLERANCE_DAYS);
+
+            if (airDate.get().isBefore(windowStart)) {
+                return false;
+            }
+        }
+
+        final FuzzyDate endDate = anime.endDate;
+
+        if (endDate == null || endDate.year == null) {
+            return true;
+        }
+
+        final LocalDate windowEnd = lastDayOf(endDate).plusDays(AIR_WINDOW_TOLERANCE_DAYS);
+
+        return !airDate.get().isAfter(windowEnd);
+    }
+
+    private static Optional<LocalDate> parseAirDate(String airDate) {
+        if (airDate == null || airDate.isBlank()) {
+            return Optional.empty();
+        }
+
+        try {
+            return Optional.of(LocalDate.parse(airDate));
+        } catch (DateTimeParseException e) {
+            Log.warnf("Data de exibição do TMDB fora do formato ISO: %s", airDate);
+            return Optional.empty();
+        }
+    }
+
+    private static LocalDate firstDayOf(FuzzyDate date) {
+        if (date.month == null) {
+            return LocalDate.of(date.year, 1, 1);
+        }
+
+        if (date.day == null) {
+            return LocalDate.of(date.year, date.month, 1);
+        }
+
+        return LocalDate.of(date.year, date.month, date.day);
+    }
+
+    private static LocalDate lastDayOf(FuzzyDate date) {
+        if (date.month == null) {
+            return LocalDate.of(date.year, 12, 31);
+        }
+
+        if (date.day == null) {
+            return YearMonth.of(date.year, date.month)
+                    .atEndOfMonth();
+        }
+
+        return LocalDate.of(date.year, date.month, date.day);
     }
 
     private List<FilePairingResolution> withStatus(List<VideoFile> videoFiles, TmdbFilePairingProposalStatus status) {

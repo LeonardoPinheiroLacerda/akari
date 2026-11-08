@@ -105,7 +105,7 @@ public class EpisodePairingComparisonService {
                     .episodeNumber(proposedEpisode.tmdbEpisode());
         }
 
-        // NOT_FOUND_IN_TMDB (anibridge) tem episódio, mas não é proposta.
+        // NOT_FOUND_IN_TMDB e OUT_OF_AIR_WINDOW (anibridge) têm episódio, mas não são proposta.
         if (!STATUSES_WITH_PROPOSAL.contains(resolution.status())) {
             return proposal;
         }

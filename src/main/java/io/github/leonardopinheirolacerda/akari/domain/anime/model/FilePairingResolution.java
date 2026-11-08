@@ -18,7 +18,7 @@ import io.github.leonardopinheirolacerda.akari.domain.videofile.model.VideoFile;
  * @param status pareado, ou o motivo de não ter pairing
  * @param resolvedEpisode temporada/episódio do TMDB resolvidos; {@code null} quando a estratégia
  *                        não chegou a um episódio (preenchido em {@code PAIRED} e, no anibridge,
- *                        em {@code NOT_FOUND_IN_TMDB})
+ *                        em {@code NOT_FOUND_IN_TMDB} e {@code OUT_OF_AIR_WINDOW})
  * @param pairing payload do pairing com a metadata do episódio no TMDB; só preenchido em
  *                {@code PAIRED} — na continuidade, pode vir {@code null} no arquivo que já tinha
  *                par, se o episódio gravado não existir mais no TMDB

@@ -33,7 +33,13 @@ Orquestrar chamadas a `storageprovider` (listar a árvore remota e os vídeos de
 - Step `TMDB_FILEPAIR` (`TmdbFilePairStepService`) — pareia os arquivos de vídeo da pasta com os
   episódios da série do TMDB, pelo anibridge.
 - Extração best-effort do número de episódio a partir do nome do arquivo
-  (`extractor/EpisodeNumberExtractor`), consumida por `anime` e `videofile`.
+  (`extractor/EpisodeNumberExtractor`), consumida por `anime` e `videofile`. O `extract` olha um
+  arquivo por vez; o `extractForFolder`, usado só pela resolução do pairing, olha a pasta
+  inteira quando o `extract` devolve o mesmo número em mais de um arquivo (temporada ou número
+  do título lido como episódio): troca o número desses arquivos pelo da posição, entre os
+  números isolados do nome, que tem um valor diferente em cada um; sem essa posição, numera
+  pela ordem dos nomes, só se a pasta tem exatamente o total de episódios do anime e todos os
+  nomes têm a mesma quantidade de números.
 
 ## Modelo
 
@@ -302,13 +308,12 @@ temporada como `NOT_FOUND_IN_TMDB`.
 - O retry de rate limit (`RetryUtils.withRateLimitRetry`) não tem limite de tentativas: sob rate
   limit prolongado da AniList, a task fica parada e os ciclos seguintes são pulados até ela
   terminar.
-- O `EpisodeNumberExtractor` não reconhece alguns padrões de nome, que deixam o arquivo sem
-  pairing no step `TMDB_FILEPAIR`: `Season 01 Episode 01` (extrai a temporada como episódio),
-  número de temporada colado ao título (`Love_Live!_School_Idol_Project_2_01` extrai o `2`) e
-  número entre underscores ou após prefixo (`_Sunshine!!_01[`, `_S2_01_v2_`, `_Season2_01_`,
-  `_E02 -`), que saem sem número. Mexer nos patterns exige comparar a extração antes e depois
-  sobre os nomes reais do catálogo, pelo risco de regressão descrito em "Arquivos críticos".
-  **Backlog real** (confirmado pelo mantenedor).
+- O `EpisodeNumberExtractor` não extrai número de alguns padrões de nome — número entre
+  underscores ou após prefixo (`_Sunshine!!_01[`, `_S2_01_v2_`, `_Season2_01_`, `_E02 -`) —, e
+  esses arquivos ficam sem pairing no step `TMDB_FILEPAIR`. O `extractForFolder` não cobre o
+  caso, porque só age sobre número repetido, não sobre arquivo sem número. Mexer nos patterns
+  exige comparar a extração antes e depois sobre os nomes reais do catálogo, pelo risco de
+  regressão descrito em "Arquivos críticos". **Backlog real** (confirmado pelo mantenedor).
 - `IngestionResource` não tem `@ApplicationScoped` explícito na classe (diferente de
   `CacheResource`); sem anotação de escopo, o CDI trata a classe como `@Dependent` — o JAX-RS
   resource funciona normalmente, só sem o pooling de `@ApplicationScoped`. **Backlog real**
