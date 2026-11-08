@@ -22,7 +22,7 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Binding anime↔pasta, fetch/sync na AniList e revisão da ingestão.
+ * Binding anime↔pasta, fetch/sync na AniList e status de revisão do anime.
  */
 @ApplicationScoped
 public class AnimeService {
@@ -58,8 +58,8 @@ public class AnimeService {
     }
 
     /**
-     * Mesmo bind de {@link #bindAnimeToFolder}, devolvendo o model em vez da resposta — usado
-     * pela ingestão, que não exibe o anime e assim não paga a resolução de franquias da resposta.
+     * Mesmo bind de {@link #bindAnimeToFolder}, devolvendo o model em vez da resposta — sem
+     * pagar a resolução de franquias que a resposta exige.
      *
      * @param anilistId id do anime na AniList
      * @param animeBindingRequest payload com o {@code folderId} a vincular
@@ -131,8 +131,9 @@ public class AnimeService {
 
     /**
      * Busca o model cru do anime vinculado à pasta, sem lançar se não houver. Usado por outros
-     * domínios (ex.: {@code ingestion}) que precisam checar o binding antes de agir, de contextos
-     * sem transação ambiente — por isso é {@code @Transactional} mesmo sendo leitura.
+     * domínios (ex.: {@code ingestion}, ao remover um subtree) que precisam checar o binding
+     * antes de agir; é {@code @Transactional} mesmo sendo leitura pra funcionar também chamado
+     * de contextos sem transação ambiente.
      *
      * @param folderId id da pasta no catalog
      * @return o anime vinculado, se houver
@@ -227,12 +228,11 @@ public class AnimeService {
     }
 
     /**
-     * Atualiza o status de revisão da ingestão, exceto se já estiver {@code REVIEWED} —
-     * revisão manual tem precedência sobre qualquer recálculo automático do auto-bind, mesmo
-     * que a pasta seja reprocessada numa reconciliação futura.
+     * Atualiza o status de revisão do anime, exceto se já estiver {@code REVIEWED} — revisão
+     * manual tem precedência sobre qualquer recálculo automático. Sem chamador hoje.
      *
      * @param anilistId id do anime na AniList
-     * @param status novo status calculado pelo auto-bind
+     * @param status novo status calculado automaticamente
      */
     @Transactional
     public void updateReviewStatusIfNotReviewed(Integer anilistId, AnimeReviewStatus status) {
@@ -246,8 +246,8 @@ public class AnimeService {
     }
 
     /**
-     * Confirma manualmente que a ingestão desse anime está correta — a partir daqui, o
-     * auto-bind nunca mais altera esse campo (ver {@link #updateReviewStatusIfNotReviewed}).
+     * Confirma manualmente que a ingestão desse anime está correta — a partir daqui, nenhum
+     * recálculo automático altera esse campo (ver {@link #updateReviewStatusIfNotReviewed}).
      *
      * @param anilistId id do anime na AniList
      * @return a metadata atualizada

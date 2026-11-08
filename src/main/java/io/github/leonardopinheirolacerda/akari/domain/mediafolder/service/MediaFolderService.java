@@ -29,7 +29,7 @@ import java.util.stream.Collectors;
 
 /**
  * Pastas do catalog: CRUD administrado pela API e os métodos de suporte usados pela ingestão
- * (resolução de pai por path, criação em lote, remoção em lote por raízes do subtree).
+ * (busca ou criação por path com resolução do pai, remoção em lote por raízes do subtree).
  */
 @ApplicationScoped
 public class MediaFolderService {
@@ -284,20 +284,34 @@ public class MediaFolderService {
     }
 
     /**
-     * Cria a pasta, resolvendo o pai automaticamente pelo path — diferente de
-     * {@link #createFolder}, não valida se já existe uma pasta com esse caminho (quem chama já
-     * sabe que não existe); pensado pra reconciliação em lote da ingestão, onde cada pasta é
-     * persistida em sua própria transação antes da próxima (filha) ser processada.
+     * Devolve a pasta do provider com esse {@code path}, criando-a se ainda não existir.
+     *
+     * <p>Na criação, o pai é resolvido pelo path ({@code parentOf(path)}); se o pai ainda não
+     * estiver no catalog, a pasta fica sem pai. Por isso a ingestão cria as pastas da mais rasa
+     * pra mais funda, cada uma na sua transação. Pasta já existente é devolvida como está, sem
+     * atualizar {@code name}, {@code mediaType} nem o pai. Não há constraint de unicidade em
+     * {@code (storage_provider_id, path)}: duas chamadas concorrentes pro mesmo path podem
+     * criar duplicatas.
      *
      * @param storageProviderId id do provider
-     * @param path path completo da pasta
-     * @param name nome da pasta
-     * @param mediaType tipo de mídia
-     * @return a pasta recém-criada
+     * @param path path completo da pasta no provider
+     * @param name nome da pasta, gravado só na criação
+     * @param mediaType tipo de mídia, gravado só na criação
+     * @return a pasta existente ou a recém-criada
+     * @throws ResourceNotFoundException se a pasta não existir e o {@code storageProviderId}
+     *         também não
      */
     @Transactional
-    public MediaFolder create(Integer storageProviderId, String path, String name, MediaType mediaType) {
+    public MediaFolder findOrCreate(Integer storageProviderId, String path, String name, MediaType mediaType) {
+
+        final Optional<MediaFolder> optFolder = MediaFolder.findByProviderAndPath(storageProviderId, path);
+
+        if (optFolder.isPresent()) {
+            return optFolder.get();
+        }
+
         final StorageProvider storageProvider = storageProviderService.findOrThrow(storageProviderId);
+
         final String parentPath = DirectoryUtils.parentOf(path);
         final MediaFolder parent = MediaFolder.findByProviderAndPath(storageProviderId, parentPath)
                 .orElse(null);

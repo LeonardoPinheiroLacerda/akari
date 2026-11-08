@@ -38,17 +38,11 @@ criação (`notify()`), usado internamente — não há endpoint de criação na
 
 ## Módulos relacionados
 
-- `ingestion` (`FolderAutoBindService`, `IngestionService`) — único produtor hoje: chama
-  `notificationService.notify()` para sinalizar conclusão, falha geral e falhas parciais do
-  binding automático de cada pasta (9+ pontos de chamada em `FolderAutoBindService`, 2 em
-  `IngestionService`). O domínio `notification` nunca lê nada de `ingestion`; a relação é
-  unidirecional — `notification` é escrito por fora e lido só pela própria API (e pelo stream
-  SSE, que todo cliente inscrito recebe).
-- `coverImageUrl` chega preenchido nas chamadas de `FolderAutoBindService` feitas depois que a
-  pasta já tem anime vinculado à AniList (`coverImageOf` → `AnimeOverrideService.resolveThumbnailMedium`
-  — override do TMDB se setado, senão a capa da AniList, já como URL absoluta). As 3 chamadas de
-  `bindAnilist` (busca/bind na AniList) e as 2 de `IngestionService` (sem pasta única associada)
-  mandam `null` — `notification` não resolve nem valida a URL recebida, só a persiste e repassa.
+- Nenhum domínio produz notificação hoje: `notificationService.notify()` não tem chamador. O
+  domínio `notification` não lê nada de outros domínios — é escrito por fora e lido só pela
+  própria API (e pelo stream SSE, que todo cliente inscrito recebe).
+- `coverImageUrl` é repassado como chega: `notification` não resolve nem valida a URL recebida,
+  só a persiste e repassa.
 
 ## Pontos de entrada
 
@@ -57,8 +51,8 @@ criação (`notify()`), usado internamente — não há endpoint de criação na
   `markNotificationRead`).
 - `resource/NotificationEventResource` — code-first, expõe `/v1/notifications/events` (SSE), sem
   interface gerada, no mesmo molde de `CacheEventResource`.
-- `service/NotificationService.notify()` — chamado diretamente por `FolderAutoBindService` e
-  `IngestionService`, fora da camada HTTP; é o único produtor de `Notification` no código.
+- `service/NotificationService.notify()` — ponto de criação interno, fora da camada HTTP; único
+  produtor possível de `Notification` no código, sem chamador hoje.
 - `scheduler/NotificationScheduler` — dispara `NotificationService.pruneClosedSseConnections()` a
   cada 60s; nada externo chama esse método diretamente.
 

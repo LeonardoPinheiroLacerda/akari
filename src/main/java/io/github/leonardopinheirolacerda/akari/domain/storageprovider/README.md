@@ -47,8 +47,8 @@ quem o chama precisar saber se ele é local ou remoto.
 ## Módulos relacionados
 
 Consumido por (dependência de `storageprovider` neles, não o inverso):
-- `domain/ingestion` (`IngestionService`, `ReconciliationService`) — varre/baixa arquivos do
-  provider durante a ingestão.
+- `domain/ingestion` (`IngestionService`) — lista a árvore de pastas e os vídeos diretos de
+  cada pasta do provider durante a ingestão.
 - `domain/cache` (`CacheQueueProcessorService`) — baixa arquivos remotos pro cache local.
 - `domain/playback` (`PlaybackService`) — resolve o arquivo físico para transcode.
 - `domain/mediaprobe` (`MediaProbeService`, via `utils/VideoFileLocationUtils`) — resolve o

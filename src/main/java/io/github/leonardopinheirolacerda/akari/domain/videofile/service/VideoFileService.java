@@ -4,6 +4,7 @@ import io.github.leonardopinheirolacerda.akari.api.dto.TmdbFilePairingResponse;
 import io.github.leonardopinheirolacerda.akari.api.dto.VideoFilePage;
 import io.github.leonardopinheirolacerda.akari.api.dto.VideoFileRequest;
 import io.github.leonardopinheirolacerda.akari.api.dto.VideoFileResponse;
+import io.github.leonardopinheirolacerda.akari.exceptions.ConflictException;
 import io.github.leonardopinheirolacerda.akari.model.PageResult;
 import io.github.leonardopinheirolacerda.akari.exceptions.ResourceNotFoundException;
 import io.github.leonardopinheirolacerda.akari.domain.anime.service.AnimeTmdbFilePairingService;
@@ -19,13 +20,14 @@ import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
  * Arquivos de vídeo do catalog: CRUD administrado pela API e os métodos de suporte usados pela
- * ingestão (listagem sem paginação pra reconciliação em lote).
+ * ingestão (listagem sem paginação dos arquivos já cadastrados numa pasta).
  */
 @ApplicationScoped
 public class VideoFileService {
@@ -48,6 +50,7 @@ public class VideoFileService {
      * @param videoFileRequest dados do arquivo a criar
      * @return o arquivo recém-criado
      * @throws ResourceNotFoundException se o {@code folderId} não existir
+     * @throws ConflictException se a pasta já tiver um arquivo com o mesmo {@code path}
      */
     @Transactional
     public VideoFileResponse createVideoFile(VideoFileRequest videoFileRequest) {
@@ -55,11 +58,19 @@ public class VideoFileService {
 
         final MediaFolder folder = mediaFolderService.findOrThrow(videoFileRequest.getFolderId());
 
+        final String path = DirectoryUtils.join(folder.path, videoFileRequest.getName());
+
+        final Optional<VideoFile> optVideoFile = VideoFile.findByFolderAndPath(folder, path);
+
+        if(optVideoFile.isPresent()) {
+            throw new ConflictException("Pasta já possui um arquivo com o path informado");
+        }
+
         final VideoFile videoFile = new VideoFile();
 
         videoFile.folder = folder;
         videoFile.name = videoFileRequest.getName();
-        videoFile.path = DirectoryUtils.join(folder.path, videoFileRequest.getName());
+        videoFile.path = path;
         videoFile.sizeBytes = videoFileRequest.getSizeBytes();
         videoFile.format = videoFileRequest.getFormat();
         videoFile.naturalSortKey = naturalSortKeyOf(videoFile.name);
@@ -180,9 +191,9 @@ public class VideoFileService {
     }
 
     /**
-     * Lista todos os arquivos de uma pasta, sem paginação. Usado pela ingestão (reconciliação e
-     * pairing automático) de contextos sem transação ambiente — por isso é {@code @Transactional}
-     * mesmo sendo leitura.
+     * Lista todos os arquivos de uma pasta, sem paginação. Usado pela ingestão pra saber quais
+     * arquivos da pasta já estão cadastrados; é {@code @Transactional} mesmo sendo leitura pra
+     * funcionar também chamado de contextos sem transação ambiente.
      *
      * @param folderId id da pasta no catalog
      * @return os arquivos da pasta
@@ -194,9 +205,9 @@ public class VideoFileService {
 
     /**
      * Lista todos os arquivos de uma pasta, sem paginação, na ordem natural dos nomes (a mesma
-     * da listagem de episódios). Usado pela resolução de pairing de episódios, que roda tanto em
-     * request quanto na ingestão (sem transação ambiente) — por isso é {@code @Transactional}
-     * mesmo sendo leitura.
+     * da listagem de episódios). Usado pela resolução de pairing de episódios; é
+     * {@code @Transactional} mesmo sendo leitura pra funcionar também chamado de contextos sem
+     * transação ambiente.
      *
      * @param folderId id da pasta no catalog
      * @return os arquivos da pasta, em ordem natural
@@ -208,8 +219,8 @@ public class VideoFileService {
 
     /**
      * Preenche a chave de ordenação natural de um arquivo já catalogado, se ainda não tiver
-     * uma — usado pela reconciliação ao reencontrar, numa nova varredura, um arquivo ingerido
-     * antes dessa coluna existir. Arquivo que já tem a chave não é recalculado.
+     * uma — pensado pra arquivos ingeridos antes dessa coluna existir. Arquivo que já tem a
+     * chave não é recalculado. Sem chamador hoje.
      *
      * @param videoFile arquivo já existente no catalog
      */
@@ -264,7 +275,8 @@ public class VideoFileService {
 
     /**
      * Calcula a chave de ordenação natural de um arquivo a partir do número de episódio
-     * extraído do nome (mesma heurística do pairing automático, {@link EpisodeNumberExtractor}
+     * extraído do nome (mesma heurística da resolução do pairing de episódios,
+     * {@link EpisodeNumberExtractor}
      * — nunca duplicar essa extração por conta própria). Sem número extraído (ex.: filme sem
      * numeração, só nome de arco), cai pro próprio nome em minúsculas, pra ordenar
      * alfabeticamente.

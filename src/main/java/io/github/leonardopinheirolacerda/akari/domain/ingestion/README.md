@@ -2,76 +2,142 @@
 
 ## Objetivo do módulo
 
-Reconciliar o subtree de um storage provider com o catalog: pastas/arquivos já registrados são preservados, novos são criados e os que não existem mais no provider são removidos — e, opcionalmente, vincular automaticamente cada pasta nova a um anime (AniList/TMDB) e parear seus episódios.
+Registrar no catalog as pastas e os arquivos de vídeo de um subtree de storage provider, gravando
+cada disparo como uma `Ingestion` com uma `IngestionTask` por pasta, e permitir consultar e
+desingerir subtrees.
 
 ## Responsabilidade principal
 
-Orquestrar chamadas a `storageprovider` (listar árvore remota) e a `mediafolder`/`videofile` (sincronizar catalog), sem persistir estado de negócio próprio. O único estado que o módulo mantém é de controle de execução, em memória (`IngestionRunRegistry`), não uma entidade de domínio.
+Orquestrar chamadas a `storageprovider` (listar a árvore remota e os vídeos de cada pasta) e a
+`mediafolder`/`videofile` (cadastrar pastas e arquivos), e persistir o estado da ingestão em
+quatro tabelas próprias (`ingestion`, `ingestion_task`, `ingestion_step_execution`,
+`ingestion_step_event`).
 
 ## Funcionalidades existentes
 
-- `PUT`/`POST /v1/ingestion/providers/{providerId}` (operationId `ingestProviderSubtree`) — dispara a reconciliação de um subtree em background e devolve `202 STARTED` de imediato (`IngestionResource.ingestProviderSubtree` → `IngestionService.ingestProviderSubtree`).
-- `GET /v1/ingestion/providers/{providerId}/available-folders` — lista a árvore de pastas remotas do provider marcando quais já foram ingeridas (`IngestionResource.listAvailableFolders` → `IngestionService.listAvailableFolders`).
-- `DELETE /v1/ingestion/providers/{providerId}/available-folders` — remove do catalog tudo que foi ingerido sob um subtree, idempotente (`IngestionResource.removeIngestedSubtree` → `IngestionService.removeIngestedSubtree`).
-- Dedup de execuções concorrentes por `(providerId, rootPath)` (`IngestionRunRegistry`).
-- Extração best-effort do número de episódio a partir do nome do arquivo, usada no pairing automático (`EpisodeNumberExtractor`).
-- Auto-bind de pasta nova: busca/vincula AniList → resolve/vincula TMDB via anibridge → pareia episódios (`FolderAutoBindService`).
-- Remoção de pastas + anime vinculado, reutilizada pelo `DELETE` explícito e pelo Step 2 da reconciliação (`FolderRemovalService`).
+- `POST /v1/ingestion/providers/{providerId}` (operationId `ingestProviderSubtree`) — cria as
+  pastas do subtree, grava a ingestão e dispara em background o cadastro dos vídeos e a task de
+  cada pasta; devolve `202 STARTED` (`IngestionResource.ingestProviderSubtree` →
+  `IngestionService.createIngestionTasks`).
+- `GET /v1/ingestion/providers/{providerId}/available-folders` — lista a árvore de pastas remotas
+  do provider marcando quais já foram ingeridas (`IngestionService.listAvailableFolders`).
+- `DELETE /v1/ingestion/providers/{providerId}/available-folders` — remove do catalog tudo que foi
+  ingerido sob um subtree, junto com os animes vinculados e as tasks das pastas, idempotente
+  (`IngestionService.removeIngestedSubtree`).
+- Extração best-effort do número de episódio a partir do nome do arquivo
+  (`extractor/EpisodeNumberExtractor`), consumida por `anime` e `videofile`.
+
+## Modelo
+
+- `Ingestion` — um disparo. `status` (`IngestionStatus`) gravado como `PENDING`.
+- `IngestionTask` — o processamento de uma pasta dentro da ingestão. `status`
+  (`IngestionTaskStatus`) gravado como `PENDING`; `anime` e `currentStep` ficam `null`.
+- `IngestionStepExecution` — uma tentativa de uma etapa (`IngestionStep`: `ANILIST_SYNC`,
+  `TMDB_BIND`, `TMDB_OVERRIDES`, `TMDB_FILEPAIR`) de uma task, com `attempt` a partir de 1.
+- `IngestionStepEvent` — evento da linha do tempo de uma tentativa (`IngestionEventType`), com
+  `details` em `JSONB`.
+
+Nenhum fluxo avança os status, executa etapas ou grava `IngestionStepExecution`/
+`IngestionStepEvent` hoje: a ingestão termina no cadastro de pastas, arquivos e tasks.
+
+FKs (`V20__create-ingestion-tables.sql`): task → ingestão, execução → task e evento → execução
+com `ON DELETE CASCADE`; `ingestion_task.folder_id` com `ON DELETE CASCADE` (a task some com a
+pasta); `ingestion_task.anime_id` com `ON DELETE SET NULL` (remover o anime só limpa o vínculo).
 
 ## Dependências internas e externas
 
-- `domain/storageprovider` (`StorageProvider`, `StorageProviderService`, `StorageProviderClientFactory`, `StorageProviderClient`, `StorageItem`) — lista a árvore remota e verifica existência de `rootPath`.
-- `domain/mediafolder` (`MediaFolder`, `MediaFolderService`) — cria/busca/remove pastas do catalog.
-- `domain/videofile` (`VideoFile`, `VideoFileService`) — cria/lista/remove arquivos de vídeo do catalog.
-- `domain/anime` (`Anime`, `AnimeService`, `AnimeOverrideService`, `AnimeRelationsService`, `AnimeTmdbService`, `AnimeTmdbFilePairingService`) — binding de anime à pasta, resolução da capa efetiva (override TMDB ou AniList) pras notificações, e atualização de `reviewStatus`.
-- `domain/anilist` (`AnilistSearchService`) — busca de candidato na AniList pelo nome da pasta.
-- `domain/anibridge` (`AnibridgeResolutionService`, `MappingSegment`, `ResolvedEpisode`, `TmdbMappingCandidate`) — resolve o mapeamento AniList ↔ TMDB e o episódio TMDB a partir do número extraído.
-- `domain/tmdb` (`TmdbService`, `TmdbEpisodeResponse`) — bind TMDB e metadata de episódio (thumbnail, nome, overview etc.).
-- `domain/notification` (`NotificationService`) — reporta conclusão/erro da reconciliação e falhas pontuais de auto-bind (`INFO`/`WARNING`/`ERROR`).
+- `domain/storageprovider` (`StorageProvider`, `StorageProviderService`,
+  `StorageProviderClientFactory`, `StorageProviderClient`, `StorageItem`) — lista a árvore remota,
+  os vídeos diretos de cada pasta e verifica existência de `rootPath` na listagem de pastas.
+- `domain/mediafolder` (`MediaFolder`, `MediaFolderService`) — busca/cria (`findOrCreate`),
+  lista (`findSubtree`) e remove (`deleteRoots`) pastas do catalog.
+- `domain/videofile` (`VideoFileService`) — lista os arquivos já cadastrados de uma pasta e cria
+  os novos.
+- `domain/anime` (`Anime`, `AnimeService`) — remove o anime vinculado a cada pasta antes de
+  remover um subtree; `IngestionTask.anime` referencia `Anime`.
 - `domain/setting` (`SettingService`) — precheck de `tmdb.api-key` configurado.
-- `extractor/EpisodeNumberExtractor` — sem subpacote `model`/`mapper` compartilhado com os demais; é o único ponto por onde `videofile` (`VideoFileService.naturalSortKeyOf`) e `anime` (`EpisodePairingResolutionService`) também consomem esse domínio, reaproveitando a mesma extração pra não duplicá-la.
+- Executor de threads virtuais do Quarkus (`@VirtualThreads ExecutorService`) — roda a criação
+  de cada task.
 - `exceptions/` (`BusinessRuleException`, `IntegrationException`, `ResourceNotFoundException`).
-- `utils/` (`DirectoryUtils`, `FileNameUtils`, `ThreadUtils`, `RetryUtils`).
+- `utils/` (`DirectoryUtils`, `FileNameUtils`).
 
 ## Módulos relacionados
 
-`domain/videofile` (`VideoFileService`, pra calcular `naturalSortKey`) e `domain/anime` (`EpisodePairingResolutionService`, na resolução do pairing) importam `extractor/EpisodeNumberExtractor` — as únicas classes fora de `domain/ingestion` que importam algo daqui. Fora essa exceção, o módulo continua um orquestrador de ponta — consome vários domínios, não é consumido por nenhum outro.
+`domain/videofile` (`VideoFileService`, pra calcular `naturalSortKey`) e `domain/anime`
+(`EpisodePairingResolutionService`, na resolução do pairing) importam
+`extractor/EpisodeNumberExtractor` — as únicas classes fora de `domain/ingestion` que importam
+algo daqui. Fora essa exceção, o módulo é um orquestrador de ponta: consome vários domínios, não
+é consumido por nenhum outro.
 
 ## Pontos de entrada
 
-- `resource/IngestionResource` — implementa `IngestionApi` (gerado do contrato), único ponto de entrada HTTP do domínio.
-- `service/IngestionService` — ponto de entrada lógico; dispara a thread virtual que roda o restante do fluxo em background.
+- `resource/IngestionResource` — implementa `IngestionApi` (gerado do contrato), único ponto de
+  entrada HTTP do domínio.
+- `service/IngestionService` — ponto de entrada lógico do disparo, da listagem e da remoção.
+- `service/IngestionTaskService` — chamado só pelo `IngestionService`, dentro das threads
+  virtuais.
 
 ## Fluxos importantes
 
-**Disparo** (`IngestionService.ingestProviderSubtree`): valida provider existente e TMDB configurado (síncrono, pode devolver `404`/`400`); tenta registrar a execução em `IngestionRunRegistry` — se já há uma rodando para o mesmo `(providerId, rootPath)`, devolve `202 STARTED` sem nova thread; caso contrário, inicia `Thread.ofVirtual()` executando `runReconciliation` e devolve `202 STARTED` imediatamente.
+**Disparo** (`IngestionService.createIngestionTasks`), em duas fases:
 
-**Reconciliação em background** (`IngestionService.runReconciliation`), 4 etapas:
-1. Lista a árvore remota (`StorageProviderClient.listTree`); falha aqui gera notificação `ERROR` e aborta.
-2. `ReconciliationService.reconcileRemovals` (Step 2, uma transação) — remove do catalog pastas/arquivos cujo path não existe mais no provider, via `FolderRemovalService`.
-3. Para cada diretório remoto, em ordem de profundidade ascendente, `ReconciliationService.reconcileFolder` (Step 3, uma transação por pasta) — cria a pasta se não existir e os `VideoFile`s diretos novos; arquivo direto já catalogado que ainda não tem `naturalSortKey` (ver README de `videofile`) recebe a chave aqui mesmo, via `VideoFileService.backfillNaturalSortKeyIfMissing`.
-4. Para cada pasta recém/já existente com vídeos diretos, `FolderAutoBindService.autoBindFolder` (Step 4) — processado uma pasta por vez, com `sleep` de 1500ms entre pastas (throttle proativo para AniList/TMDB).
+1. Síncrona, na thread da requisição: valida TMDB configurado (`400`) e provider existente
+   (`404`) → lista a árvore remota a partir de `rootPath` (`null` vira a raiz do provider) e
+   acrescenta o próprio `rootPath` como pasta (`StorageItem.withSyntheticRoot` — o `listTree` só
+   devolve descendentes) → ordena da pasta mais rasa pra mais funda (`StorageItem.sortedByDepth`)
+   → persiste a `Ingestion` como `PENDING` (transação própria) → pra cada pasta, nessa ordem,
+   `MediaFolderService.findOrCreate` (transação própria) e lista os vídeos diretos dela.
+2. Paralela, uma thread virtual por pasta: `IngestionTaskService.createIngestionTask` cadastra os
+   vídeos novos e cria a `IngestionTask` como `PENDING`, numa transação só. Toda pasta ganha
+   task, inclusive as sem vídeos diretos.
 
-Ao final (ou em caso de falha irrecuperável no listTree), a chave é liberada em `IngestionRunRegistry.finish` (bloco `finally`), e uma notificação `INFO` resume quantas pastas foram criadas e quantas passaram por auto-bind.
+A resposta `202` sai depois de submeter as tasks, sem esperar por elas. A criação das pastas fica
+na fase sequencial, não nas tasks, porque o `findOrCreate` resolve o `parent` buscando o pai pelo
+path: com pastas criadas em paralelo, o filho não acharia o pai ainda não commitado e ficaria
+sem pai.
 
-**Auto-bind** (`FolderAutoBindService.autoBindFolder`, nunca lança): bind AniList (busca por nome, pula candidato já vinculado a outra pasta) → bind TMDB via `AnibridgeResolutionService.resolveBestCandidate` → se TV, pareamento episódio a episódio: a resolução fica em `anime` (`EpisodePairingResolutionService`, compartilhada com a proposta de pairing do portal — ver README de `anime`: número do episódio pelo `EpisodeNumberExtractor`, segments do anibridge só da série vinculada, fallbacks de offset absoluto e de pasta de episódio único, confirmação no TMDB). A resolução passa pela mesma comparação com os pares gravados da proposta do portal (`EpisodePairingComparisonService`), e o `FolderAutoBindService` grava só o que o portal deixaria marcado (`selectedByDefault`): arquivo sem par gravado (`NEW`) com episódio que nenhum outro arquivo usa. Arquivo que já tem par — manual ou de uma ingestão anterior — **nunca é alterado**, nem quando o anibridge resolve outro episódio pra ele (`REPLACE`) nem quando resolve o mesmo (`SAME`, não é regravado); a origem do par não é persistida, então a proteção vale pros dois. Pra efeito de `reviewStatus` e notificações, conta como pareado o arquivo que já tinha par e o recém-gravado; as notificações falam só dos arquivos que continuam sem par: mapeamento conflitante (nada é pareado), numeração absoluta sem cobertura segura, episódio inexistente no TMDB (temporada inexistente, episódio fora da temporada ou falha na busca — diz quantos arquivos ficaram de fora e em quais temporadas: o anibridge pode estar dessincronizado do TMDB, ex.: apontar pra uma temporada que o TMDB não tem, e gravar o pairing sem metadata faria o arquivo aparecer como pareado sem thumbnail) e o resumo "X de Y arquivos pareados" (não enviado quando não há mapeamento usável). Sem mapeamento pra série vinculada, nada é pareado nem notificado. Atualiza `reviewStatus` do anime para `PENDING_REVIEW` (todo arquivo da pasta com par) ou `PARTIAL` (algum sem), nunca sobrescrevendo um `REVIEWED` manual — então um anime pareado inteiro à mão fica `PENDING_REVIEW` mesmo sem mapeamento no anibridge.
+**Cadastro dos vídeos** (`IngestionTaskService.createIngestionTask`): lê os nomes já cadastrados
+na pasta (`VideoFileService.listByFolder`) e só chama `createVideoFile` pros novos. A checagem é
+feita antes, e não capturando o `ConflictException` do `createVideoFile`: a exceção, mesmo
+capturada, marca a transação da task pra rollback e a task inteira se perderia no commit. Falha
+de uma task fica só no log (`Falha ao criar a tarefa de ingestão da pasta ...`), sem afetar as
+demais.
 
-As notificações `WARNING` disparadas depois que o anime já está vinculado à AniList (falha no bind TMDB, conflito/numeração absoluta/episódio inexistente no TMDB/pareamento parcial) levam a capa do anime (`FolderAutoBindService.coverImageOf` → `AnimeOverrideService.resolveThumbnailMedium`). As 3 notificações do próprio `bindAnilist` (busca/bind na AniList falhou ou sem resultado) e a do `listTree`/resumo em `IngestionService` não têm capa — ainda não existe (ou nunca existirá, no caso do resumo que cobre várias pastas) um anime único pra ilustrar.
-
-**Remoção** (`FolderRemovalService.removeFolders`): remove o anime vinculado a cada pasta antes da pasta, porque a FK `anime.folder_id` não tem cascade.
+**Remoção** (`IngestionService.removeIngestedSubtree`, uma transação): busca as pastas do subtree
+→ remove o anime vinculado a cada uma (a FK `anime.folder_id` não tem cascade) → remove as raízes
+do conjunto (`deleteRoots`); o `ON DELETE CASCADE` leva subpastas, arquivos e tasks.
 
 ## Arquivos críticos
 
-- `service/IngestionService.java` — ponto único de disparo e orquestração do fluxo completo; concentra as validações síncronas e o `runReconciliation`.
-- `service/ReconciliationService.java` — Steps 2-3; cada método é sua própria transação (chamado de uma thread virtual sem transação JTA ambiente).
-- `service/FolderAutoBindService.java` — orquestra o auto-bind e traduz a resolução do pairing (`anime.EpisodePairingResolutionService`) e a comparação com os pares gravados (`anime.EpisodePairingComparisonService`) em gravação, notificações e `reviewStatus`.
-- `extractor/EpisodeNumberExtractor.java` — heurística de regex ajustada empiricamente contra ~10 mil arquivos reais; qualquer alteração de pattern tem risco real de regressão silenciosa no pairing.
-- `registry/IngestionRunRegistry.java` — único guardião contra reconciliação concorrente duplicada sobre o mesmo subtree.
+- `service/IngestionService.java` — disparo em duas fases; a ordem e a transação por pasta da
+  fase sequencial garantem o `parent` das pastas.
+- `service/IngestionTaskService.java` — cadastro dos vídeos e da task; a checagem de arquivo
+  existente antes de criar evita o rollback silencioso da task.
+- `extractor/EpisodeNumberExtractor.java` — heurística de regex ajustada empiricamente contra ~10
+  mil arquivos reais; qualquer alteração de pattern tem risco real de regressão silenciosa no
+  pairing e na ordem da listagem de episódios.
+- `src/main/resources/db/V20__create-ingestion-tables.sql` — tabelas e FKs do domínio.
 
 ## Observações técnicas e débitos identificados
 
-- Confirmado lendo o código: `ingestion` não tem nenhuma entidade Panache própria (sem `@Entity` em todo o domínio) — a descrição da tag no `openapi.yaml` ("não persiste estado próprio") é fiel ao código. O único estado mantido é o `Set` em memória do `IngestionRunRegistry`, explicitamente documentado como não precisando sobreviver a restart.
-- `model/FolderReconciliationResult` é um record interno de transporte entre `ReconciliationService` e `IngestionService` (carrega `folderName` para evitar reabrir a `MediaFolder` fora de transação na thread virtual) — não é um "model" de persistência, diferente do que o nome do subpacote sugeriria em outros domínios.
-- `IngestionResource` não injeta nada além de `IngestionService` e não tem `@ApplicationScoped` explícito na classe (diferente de `CacheResource`); **confirmado:** sem anotação de escopo, o CDI trata a classe como `@Dependent` (pseudo-escopo padrão) — uma instância nova por injeção/requisição, não compartilhada — então o JAX-RS resource continua funcionando normalmente, só sem o pooling de `@ApplicationScoped`. É inconsistência de anotação frente ao padrão "resource burra" dos demais domínios. **Backlog real** (confirmado pelo mantenedor).
-- `runReconciliation` roda em thread virtual sem transação ambiente; cada chamada a `ReconciliationService`/`FolderRemovalService` abre sua própria transação — qualquer novo método adicionado a esses services precisa manter esse padrão (um `@Transactional` por chamada), senão quebra a premissa de que o pai sempre existe no catalog antes do filho ser processado.
-- O throttle de 1500ms entre pastas no Step 4 é fixo no código (`AUTO_BIND_THROTTLE_MILLIS`), não configurável via `SettingService`. **Backlog real** (confirmado pelo mantenedor): vale externalizar se o rate limit de AniList/TMDB mudar.
+- Sem deduplicação de execuções: dois disparos simultâneos sobre o mesmo subtree rodam juntos.
+  Como não há constraint de unicidade em `media_folder (storage_provider_id, path)` nem em
+  `video_file (folder_id, path)`, a checagem-antes-de-criar de pastas e arquivos não impede
+  duplicatas nesse cenário.
+- A listagem da árvore, a listagem dos vídeos de cada pasta (uma chamada ao provider por pasta) e
+  a criação das pastas rodam na thread da requisição: em árvores grandes num provider remoto, a
+  resposta demora.
+- Falha na listagem do provider no disparo sobe sem tradução (`500`), diferente de
+  `listAvailableFolders`, que a embrulha em `IntegrationException` (`502`).
+- `rootPath` não é validado contra o provider no disparo. Com um provider que devolve lista
+  vazia pra diretório inexistente (`LocalStorageProviderClient`), a pasta do `rootPath` é criada
+  no catalog mesmo assim.
+- As tasks rodam sem limite de paralelismo — uma thread virtual por pasta, cada uma com sua
+  transação, disputando o pool de conexões do datasource.
+- Pastas e arquivos que sumiram do provider não são removidos do catalog.
+- Pasta já existente é reaproveitada como está pelo `findOrCreate`: `mediaType` e `parent` não são
+  atualizados, então uma pasta gravada sem pai continua sem pai numa nova ingestão.
+- `IngestionResource` não tem `@ApplicationScoped` explícito na classe (diferente de
+  `CacheResource`); sem anotação de escopo, o CDI trata a classe como `@Dependent` — o JAX-RS
+  resource funciona normalmente, só sem o pooling de `@ApplicationScoped`. **Backlog real**
+  (confirmado pelo mantenedor).

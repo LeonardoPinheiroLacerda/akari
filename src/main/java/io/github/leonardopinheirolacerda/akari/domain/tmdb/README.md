@@ -76,13 +76,10 @@ Externa:
   (dentro de `TmdbMappingCandidate`) para resolver o melhor candidato de binding anime↔TMDB.
 - `domain.anime.service.EpisodePairingResolutionService` — usa `getSeasonEpisodes` e
   `TmdbEpisodeResponse` diretamente pra confirmar no TMDB o episódio resolvido pelo anibridge e
-  montar a metadata do pairing (pairing automático da ingestão e proposta de pairing do portal).
+  montar a metadata do pairing na proposta de pairing do portal.
 - `domain.anime.service.EpisodeContinuityResolutionService` — usa `getTvDetails` (temporadas
   regulares) e `getSeasonEpisodes` pra achar o episódio seguinte ao da âncora na proposta por
   continuidade.
-- `domain.ingestion.service.FolderAutoBindService` — orquestra o binding automático de pasta
-  (chama `AnimeTmdbService`/`EpisodePairingResolutionService`/`AnimeTmdbFilePairingService`/
-  `AnibridgeResolutionService`), sem chamar o `TmdbService` direto.
 
 `utils.TmdbImageUtils` é explicitamente documentado como compartilhado entre `tmdb` e `anime`
 para garantir os mesmos tamanhos de imagem nos dois domínios.
@@ -119,7 +116,7 @@ fixa. Preferência vazia/nula lança `IntegrationNotConfiguredException` (503).
 vira `IntegrationException` (502), com log de erro antes.
 
 **Enriquecimento cross-domain (fora deste domínio, mas disparado a partir dele):** quando
-`domain.anime` ou `domain.ingestion` precisam da ficha completa (detalhes, imagens, traduções,
+`domain.anime` precisa da ficha completa (detalhes, imagens, traduções,
 temporada/episódios) de um filme/série já vinculado a um anime, chamam `TmdbService`
 diretamente — a lógica de cache-first e tradução de erro é reaproveitada integralmente; a
 responsabilidade do domínio `anime` é só decidir *quando* buscar e *como* usar o resultado
@@ -149,7 +146,7 @@ responsabilidade do domínio `anime` é só decidir *quando* buscar e *como* usa
   múltiplas páginas nem corte/slice.
 - **Normalização camelCase é dupla, por camadas diferentes.** Os DTOs de `client/dtos` já
   convertem `snake_case`→camelCase na própria desserialização Jackson (via `@JsonProperty`), e é
-  isso que o restante do sistema consome (incluindo `anime`/`anibridge`/`ingestion`). O
+  isso que o restante do sistema consome (incluindo `anime`/`anibridge`). O
   `TmdbMapper` faz uma segunda conversão, mas só para os DTOs de busca expostos no contrato HTTP
   deste domínio (`TmdbMovieSearchResult`/`TmdbTvSearchResult`) — os demais DTOs de detalhe,
   imagem, tradução e temporada são usados "crus" (sem mapper) pelos consumidores cruzados.
@@ -164,16 +161,15 @@ responsabilidade do domínio `anime` é só decidir *quando* buscar e *como* usa
   `TmdbMovieDetailsResponse`/`TmdbTvDetailsResponse`/`TmdbEpisodeResponse`, nunca importados
   soltos fora deste pacote.
 - **`TmdbService` não é só "busca".** É o client interno de detalhes/imagens/traduções/temporada
-  usado por `anime`/`anibridge`/`ingestion`, não só os dois endpoints de busca HTTP. O resource
+  usado por `anime`/`anibridge`, não só os dois endpoints de busca HTTP. O resource
   HTTP continua `TmdbSearchResource` (esse, sim, cobre só a busca).
-- **Acoplamento direto service→service entre domínios.** `anime`, `anibridge` e `ingestion`
-  injetam `TmdbService` diretamente, sem passar por `TmdbSearchResource`/contrato HTTP —
-  consistente com a convenção do projeto (sem camada comum/hexagonal), mas significa que
-  qualquer mudança de assinatura em `TmdbService` tem raio de impacto em três domínios
-  fora de `tmdb`.
+- **Acoplamento direto service→service entre domínios.** `anime` e `anibridge` injetam
+  `TmdbService` diretamente, sem passar por `TmdbSearchResource`/contrato HTTP — consistente com
+  a convenção do projeto (sem camada comum/hexagonal), mas significa que qualquer mudança de
+  assinatura em `TmdbService` tem raio de impacto em dois domínios fora de `tmdb`.
 - **Erros de rede/5xx fora de 404 não distinguem causa.** Todo erro não-404 vindo do TMDB (rate
   limit 429, 401 por token inválido, timeout) é tratado igual: vira `IntegrationException`
   genérica (502). O retry para rate limit (`RetryUtils.withRateLimitRetry`) é feito pelos
-  chamadores (`domain.anime`, `domain.ingestion`, `domain.anibridge`) — `TmdbService` não tem
+  chamadores (`domain.anime`, `domain.anibridge`) — `TmdbService` não tem
   retry; seus métodos falham direto num 429. **Backlog real**
   (confirmado pelo mantenedor, mesmo item do risco geral de retry ad hoc).

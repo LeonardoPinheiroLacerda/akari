@@ -41,16 +41,14 @@ tags:
       obscurecidas para clientes da API.
   - name: Ingestion
     description: |
-      Reconciliação subtree ↔ catalog por storage provider.
+      Ingestão de subtrees de storage provider no catalog.
 
-      Reconcilia o subtree de um storage provider com o catalog e permite consultar/desingerir
-      subtrees. Não persiste estado próprio — só orquestra chamadas ao provider (via port) e ao
-      catalog (via port).
+      Registra no catalog as pastas e os arquivos de vídeo de um subtree do provider e permite
+      consultar/desingerir subtrees. Cada disparo grava uma ingestão com uma tarefa por pasta.
 
-      Ingestão é uma reconciliação do subtree com o catalog: pastas/arquivos já registrados são
-      preservados, novos são criados e os que não existem mais no provider são removidos do
-      catalog. O `rootPath` limita o subtree a processar; ausente ou vazio opera sobre a raiz
-      inteira do provider.
+      Pastas/arquivos já registrados são preservados e os novos são criados; o que não existe
+      mais no provider não é removido do catalog. O `rootPath` limita o subtree a processar;
+      ausente ou vazio opera sobre a raiz inteira do provider.
   - name: MediaFolder
     description: |
       Pastas ingeridas do storage provider.
@@ -173,7 +171,7 @@ tags:
         `mediaType` propostos.
       - `POST /v1/metadata/tmdb/file-pairing-proposals` — dado o `anilistId` de um anime já
         vinculado à pasta e a uma série do TMDB, propõe a temporada/episódio de cada arquivo da
-        pasta: pelo anibridge, exatamente como o pairing automático faria (`ANIBRIDGE`), ou pelo
+        pasta: pelo anibridge (`ANIBRIDGE`), ou pelo
         episódio seguinte ao do arquivo pareado anterior (`CONTINUITY`), comparando com o par
         gravado de cada arquivo. Pra efetivar, o portal manda o `pairing` de cada arquivo em
         `PUT /v1/metadata/files/{fileId}/tmdb-pairing`.
@@ -189,9 +187,7 @@ tags:
       Notificações de observabilidade.
 
       Lista paginada de notificações de observabilidade, conta as não-lidas (badge) e marca como
-      lidas (individual/todas). Hoje, todas as notificações são emitidas pelo domínio `ingestion`
-      (falhas de integração com storage provider/AniList/TMDB e problemas de qualidade do
-      auto-bind/pairing); nenhum outro domínio emite notificação ainda.
+      lidas (individual/todas). Hoje nenhum domínio emite notificação.
 
       O push em tempo real é um stream SSE em `GET /v1/notifications/events`, no mesmo molde do
       `/v1/cache/events`: o endpoint **não é descrito em `paths`** (o gerador `jaxrs-spec` não
@@ -319,30 +315,25 @@ paths:
       operationId: ingestProviderSubtree
       summary: Ingere um subtree do provider no catalog
       description: |
-        Dispara a reconciliação do subtree indicado por `rootPath` (ou a raiz, se omitido)
-        com o catalog **em background** e retorna `202` imediatamente, sem aguardar o resultado.
+        Ingere o subtree indicado por `rootPath` (ou a raiz, se omitido) no catalog e retorna
+        `202` sem aguardar o cadastro dos arquivos.
 
-        Só são síncronos a validação do payload (`400`), o precheck de que o TMDB está
-        configurado — `400` se a preferência `tmdb.api-key` estiver vazia, já que sem TMDB
-        nenhum anime completaria o binding automático — e o precheck de existência do
-        provider (`404`). Todo o resto roda depois da resposta — inclusive a verificação de
-        que o `rootPath` existe no provider. O resultado é reportado pelo módulo
-        `notification`: uma notificação `INFO` ao concluir, ou `ERROR` se a ingestão falhar.
+        Síncronos, antes da resposta: a validação do payload (`400`), o precheck de que o TMDB
+        está configurado (`400` se a preferência `tmdb.api-key` estiver vazia), o precheck de
+        existência do provider (`404`), a listagem da árvore do subtree no provider e a criação
+        das pastas. Uma falha na listagem do provider responde `500`. A existência do `rootPath`
+        no provider não é validada.
 
         Etapas, em ordem:
 
-        1. Lista a árvore do subtree no provider.
-        2. Remove do catalog as pastas/arquivos do subtree que não existem mais no provider.
-        3. Cria as pastas novas (pai antes do filho) com o `mediaType` recebido — pastas já
-           registradas mantêm o `mediaType` que tinham — e os arquivos de vídeo novos.
-        4. Cada pasta com vídeos diretos é vinculada automaticamente, antes de a próxima ser
-           processada: busca na AniList → binding AniList → binding TMDB → pairing de episódios
-           (este só quando o TMDB mapeado é série). Uma falha numa dessas etapas vira notificação
-           `WARNING`/`ERROR` sem interromper a ingestão. O binding automático roda
-           independentemente do `mediaType`.
+        1. Lista a árvore do subtree no provider, incluindo a própria pasta do `rootPath`.
+        2. Cria as pastas novas (pai antes do filho) com o `mediaType` recebido — pastas já
+           registradas mantêm o `mediaType` que tinham.
+        3. Grava a ingestão e, em background, uma tarefa por pasta — inclusive as sem vídeos —,
+           cadastrando os arquivos de vídeo novos diretos da pasta.
 
-        Um disparo para o mesmo `(providerId, rootPath)` enquanto outro está em andamento é
-        ignorado — a resposta é a mesma `202`, sem iniciar uma segunda ingestão.
+        Disparos repetidos para o mesmo subtree não são deduplicados: cada um grava sua própria
+        ingestão.
       requestBody:
         $ref: '#/components/requestBodies/IngestSubtreeRequestBody'
       responses:
@@ -360,8 +351,8 @@ paths:
       summary: Remove um subtree ingerido do catalog
       description: |
         Remove do catalog as pastas/arquivos correspondentes ao subtree indicado por
-        `rootPath` (ou tudo do provider, se omitido), junto com os bindings de metadata
-        (`animemetadata`) dessas pastas. **Não** toca no provider upstream. Operação
+        `rootPath` (ou tudo do provider, se omitido), junto com os animes vinculados a essas
+        pastas e as tarefas de ingestão delas. **Não** toca no provider upstream. Operação
         idempotente — devolve `204` mesmo quando nada casa, inclusive se o `providerId` não
         existir (não há precheck).
       parameters:
@@ -1045,8 +1036,8 @@ paths:
       operationId: markAnimeAsReviewed
       summary: Confirma manualmente que a ingestão desse anime está correta
       description: |
-        Marca `reviewStatus` como `REVIEWED`. A partir daqui, o auto-bind da ingestão nunca
-        mais altera esse campo, mesmo reprocessando a pasta numa reconciliação futura.
+        Marca `reviewStatus` como `REVIEWED`. A partir daqui, nenhum recálculo automático
+        altera esse campo.
       responses:
         '200':
           $ref: '#/components/responses/AnimeOk'
@@ -1380,8 +1371,7 @@ paths:
         (título, sinopse, pôster, backdrop e logo) e os pairings TMDB de todos os arquivos da
         pasta do anime — eles apontam pra temporadas/episódios do título desvinculado e ficariam
         errados num novo binding. Um novo `POST .../tmdb/binding` volta a pré-preencher backdrop e
-        logo; os pairings precisam ser refeitos (manualmente, pela proposta de pairing ou numa
-        nova ingestão).
+        logo; os pairings precisam ser refeitos (manualmente ou pela proposta de pairing).
       responses:
         '204':
           $ref: '#/components/responses/TmdbBindingDeleted'
@@ -1401,8 +1391,8 @@ paths:
         da AniList no portal).
 
         A proposta é o melhor candidato do dataset do anibridge (snapshot local, atualizado de
-        hora em hora) pro `anilistId` — com fallback pelo id do MyAnimeList, lido da AniList —, o
-        mesmo critério do bind automático da ingestão: entre vários candidatos, prefere o que não
+        hora em hora) pro `anilistId` — com fallback pelo id do MyAnimeList, lido da AniList.
+        Entre vários candidatos, prefere o que não
         tem sobreposição de episódios nem cobre mais episódios do que o anime tem, e desempata
         pela cobertura. O candidato é confirmado no TMDB, e a resposta traz a ficha do título
         (`details`) pra o admin conferir antes de vincular.
@@ -1438,8 +1428,7 @@ paths:
         gravar nada. O anime precisa estar vinculado à pasta e a uma série do TMDB. A
         `strategy` escolhe como a proposta é calculada (`ANIBRIDGE` quando ausente):
 
-        - `ANIBRIDGE` — a mesma resolução do pairing automático da ingestão: o número do
-          episódio sai do nome do arquivo, e o anibridge (snapshot local) converte pra
+        - `ANIBRIDGE` — o número do episódio sai do nome do arquivo, e o anibridge (snapshot local) converte pra
           temporada/episódio do TMDB — com fallback de numeração absoluta (offset calculado pela
           cadeia de prequels) e de pasta com um único episódio. Só valem os mapeamentos do
           anibridge que apontam pra série vinculada: se o binding foi feito pra outra série,
@@ -3938,12 +3927,14 @@ components:
     AnimeReviewStatus:
       type: string
       description: |
-        Estado de revisão da ingestão automática de um anime.
-        - `PENDING_REVIEW`: ingestão completa (AniList + TMDB + todos os arquivos pareados),
+        Estado de revisão de um anime. Hoje só `REVIEWED` é gravado, pela confirmação manual;
+        nenhum fluxo grava `PENDING_REVIEW` nem `PARTIAL`.
+        - `PENDING_REVIEW`: vínculo completo (AniList + TMDB + todos os arquivos pareados),
           aguardando confirmação manual.
-        - `PARTIAL`: ingestão incompleta (TMDB não vinculado, temporadas conflitantes, ou nem
+        - `PARTIAL`: vínculo incompleto (TMDB não vinculado, temporadas conflitantes, ou nem
           todo arquivo pareado) — precisa de atenção.
-        - `REVIEWED`: confirmado manualmente; o auto-bind nunca sobrescreve esse estado.
+        - `REVIEWED`: confirmado manualmente; nenhum recálculo automático sobrescreve esse
+          estado.
       enum:
         - PENDING_REVIEW
         - PARTIAL
@@ -4135,7 +4126,7 @@ components:
         reviewStatus:
           allOf: [{ $ref: '#/components/schemas/AnimeReviewStatus' }]
           nullable: true
-          description: '`null` até o auto-bind terminar de processar a pasta pela primeira vez'
+          description: '`null` até o anime ser confirmado manualmente'
 
     AnimeTagResponse:
       type: object
@@ -4814,8 +4805,7 @@ components:
         Como a proposta de pairing é calculada.
 
         - `ANIBRIDGE` — número do episódio extraído do nome do arquivo, convertido pelo
-          anibridge pra temporada/episódio da série vinculada (o mesmo do pairing automático da
-          ingestão).
+          anibridge pra temporada/episódio da série vinculada.
         - `CONTINUITY` — episódio seguinte ao do arquivo pareado anterior, pela estrutura da
           série no TMDB; não consulta o anibridge.
       enum:
@@ -5072,8 +5062,7 @@ components:
     NotificationResponse:
       type: object
       description: |
-        Notificação de observabilidade — hoje geradas pela ingestão (conclusão, falha geral e
-        falhas parciais do binding automático de cada título).
+        Notificação de observabilidade — hoje nenhum domínio gera notificação.
       required: [id, level, message, read, createdAt]
       properties:
         id:
@@ -5090,8 +5079,7 @@ components:
           nullable: true
           description: |
             Pasta do catalog do título a que a notificação se refere — o portal usa para linkar a
-            revisão. `null` quando a notificação não é sobre um título (ex.: conclusão da
-            ingestão).
+            revisão. `null` quando a notificação não é sobre um título.
         title:
           type: string
           nullable: true

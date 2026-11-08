@@ -18,9 +18,7 @@ import java.util.stream.Collectors;
 
 /**
  * Compara a resolução de pairing de cada arquivo com o par gravado nele e monta a proposta do
- * portal: par atual, {@code change}, quem já usa o episódio proposto e a pré-seleção. O pairing
- * automático da ingestão usa a mesma comparação e grava só as propostas pré-selecionadas —
- * nunca altera um arquivo que já tem par.
+ * portal: par atual, {@code change}, quem já usa o episódio proposto e a pré-seleção.
  *
  * <p>Não sabe qual estratégia gerou as resoluções ({@link EpisodePairingResolutionService} ou
  * {@link EpisodeContinuityResolutionService}) — a regra é a mesma pras duas e pra qualquer
@@ -38,8 +36,8 @@ public class EpisodePairingComparisonService {
      * Lê os pares gravados dos arquivos da pasta — só os que têm temporada e episódio
      * preenchidos, que é o que conta como par pra comparação e pra âncora da continuidade.
      *
-     * <p>{@code @Transactional} mesmo sendo leitura: também é chamado pelo pairing automático da
-     * ingestão, que roda numa thread virtual sem transação nem request context.
+     * <p>{@code @Transactional} mesmo sendo leitura, pra funcionar também chamado de contextos
+     * sem transação ambiente.
      *
      * @param folderId pasta do anime
      * @return temporada/episódio gravados, por {@code fileId}; arquivos sem par não aparecem

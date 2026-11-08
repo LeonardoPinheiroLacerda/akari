@@ -92,9 +92,8 @@ public class NotificationService {
     }
 
     /**
-     * Cria uma notificação e publica no stream SSE de {@code /v1/notifications/events}. Primeiro
-     * produtor do projeto — hoje só a ingestão gera notificação (conclusão, falha geral e falhas
-     * parciais do binding automático de cada pasta).
+     * Cria uma notificação e publica no stream SSE de {@code /v1/notifications/events}. Nenhum
+     * domínio chama este método hoje.
      *
      * @param level severidade
      * @param title título, ou {@code null}

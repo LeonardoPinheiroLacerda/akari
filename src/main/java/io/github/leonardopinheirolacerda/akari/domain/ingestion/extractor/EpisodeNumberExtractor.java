@@ -5,9 +5,10 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Extrai o número de episódio do nome de um arquivo de vídeo — best-effort, usado pela ingestão
- * pra tentar o pairing TMDB automático. Arquivo sem nenhum padrão reconhecido simplesmente não é
- * pareado (nunca bloqueia a ingestão).
+ * Extrai o número de episódio do nome de um arquivo de vídeo — best-effort, usado pela resolução
+ * do pairing TMDB ({@code EpisodePairingResolutionService}) e pela chave de ordenação natural dos
+ * arquivos ({@code VideoFileService}). Arquivo sem nenhum padrão reconhecido simplesmente fica sem
+ * número.
  *
  * <p>Pipeline de 4 padrões, o primeiro que casar ganha: marcador {@code SxxExx} colado sem
  * separador (ex.: {@code "CANAAN.S01E01.mkv"}), número isolado por separador (ex.:
