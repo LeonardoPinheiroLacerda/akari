@@ -148,7 +148,7 @@ anime           → anilist, tmdb, anibridge, mediafolder, videofile, setting, i
                   (extractor.EpisodeNumberExtractor)
 playback        → videofile, mediaprobe, storageprovider, setting, cache (direto via
                   CacheService.findCacheItemByFileId, e indireto via utils pro path do arquivo)
-ingestion       → storageprovider, mediafolder, videofile, anime, anilist, setting
+ingestion       → storageprovider, mediafolder, videofile, anime, anilist, anibridge, setting
 ```
 
 Nenhum domínio depende de `playback`, `mediaprobe`, `cache` ou `notification` — são "topo" do
@@ -224,7 +224,7 @@ itens abaixo são backlog real (a corrigir aos poucos), exceto onde indicado "Ac
    sessão MEGA cacheada stale no rclone; só reiniciar o `rcd` resolve (`fscache/clear` não é
    suficiente). Afeta diretamente `GET /v1/storage/providers/{id}/health` para providers MEGA.
 4. **Retry de rate-limit ad hoc, não centralizado**: `RetryUtils.withRateLimitRetry` é aplicado em
-   alguns call sites específicos (`anime.prefillImageOverrides`,
+   alguns call sites específicos (os steps `ANILIST_SYNC` e `TMDB_BIND` da ingestão,
    `anibridge.AnibridgeResolutionService`) e, dentro dos services de integração, só em
    `TmdbService.getSeasonEpisodes` — no resto dos services `anilist`/`tmdb`, quem chama e esquece de
    envolver a chamada corre risco de falha dura sob rate limit do upstream.

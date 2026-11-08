@@ -53,7 +53,7 @@ Organização em franquias (`AnimeFranchiseService`, portal):
 - Achar o prequel direto de um anime, usado pelo `AbsoluteEpisodeOffsetService` pra calcular o deslocamento de numeração absoluta no pairing de episódios (`findDirectPrequelId`).
 
 Eixo TMDB:
-- Vincular o anime a uma série/filme do TMDB, validando a existência do id e pré-preenchendo backdrop/logo com a imagem mais votada (melhor esforço) (`bindTmdb`).
+- Vincular o anime a uma série/filme do TMDB, validando a existência do id (`bindTmdb`). O bind não preenche os overrides de imagem.
 - Remover o binding TMDB, limpando junto os overrides e os pairings TMDB de todos os arquivos da pasta (`clearTmdbBinding`, via `TmdbFilePairing.deleteByFolderId`) — os pairings apontam pra temporadas/episódios do título desvinculado. Um novo bind volta a pré-preencher backdrop/logo; os pairings precisam ser refeitos.
 - Ler o estado TMDB atual (binding + overrides) (`getTmdbState`). O estado devolvido por `getTmdbState`, `bindTmdb` e `updateTmdbOverrides` traz sempre `details`, a ficha resumida da série/filme vinculado como está no TMDB (título, título original, data, temporadas/episódios, pôster e backdrop principais, sem overrides), pra conferir se o binding aponta pro título certo. A ficha é lida cache-first, sem `language` (textos no idioma padrão do TMDB, `en-US`); se o TMDB falhar, a operação falha com o erro do TMDB (`502`/`503`) — no `updateTmdbOverrides`, desfazendo a gravação dos overrides.
 - Substituir o bloco de overrides inteiro (`updateTmdbOverrides`).
@@ -113,19 +113,19 @@ O acoplamento alto do domínio como um todo (7 domínios externos: `anilist`, `t
 
 ## Módulos relacionados
 
-- **`ingestion`** usa `AnimeService` no step `ANILIST_SYNC` (`AnilistSyncStepService`): `findByFolder` pra manter um vínculo já existente, `find` pra recusar um título já sincronizado com outra pasta e `bindAnime` pra vincular; o fim de cada task grava o anime da pasta (`findByFolder`) em `IngestionTask.anime` (`anime_id`, com `ON DELETE SET NULL` — remover o anime só limpa o vínculo da task). No sentido contrário, `anime` usa de `ingestion` só o `extractor.EpisodeNumberExtractor` (no `EpisodePairingResolutionService`) — mesma exceção que `videofile` já tem.
+- **`ingestion`** usa `AnimeService` no step `ANILIST_SYNC` (`AnilistSyncStepService`): `findByFolder` pra manter um vínculo já existente, `find` pra recusar um título já sincronizado com outra pasta e `bindAnime` pra vincular; no step `TMDB_BIND` (`TmdbBindStepService`), usa `AnimeTmdbService.fetchDetails` pra conferir se o título escolhido existe no TMDB e `AnimeTmdbService.bindTmdb` pra vincular o anime; o fim de cada task grava o anime da pasta (`findByFolder`) em `IngestionTask.anime` (`anime_id`, com `ON DELETE SET NULL` — remover o anime só limpa o vínculo da task). No sentido contrário, `anime` usa de `ingestion` só o `extractor.EpisodeNumberExtractor` (no `EpisodePairingResolutionService`) — mesma exceção que `videofile` já tem.
 - **`mediafolder`**: `MediaFolderService.listFolders` embute `AnimeBindingSummary` via `AnimeService.getAnimeBindings`; `Anime.folder` referencia `MediaFolder`.
 - **`videofile`**: `VideoFileService.listVideoFiles`/`listVideoFilesOrderedByNaturalSortKey` embutem `TmdbFilePairingResponse` via `AnimeTmdbFilePairingService.getTmdbFilePairings`; `AnimeEpisodeService` delega a listagem de episódios inteira pro `VideoFileService.listVideoFilesOrderedByNaturalSortKey`.
 - **`anilist`** e **`tmdb`**: fontes de dados externos consumidas via seus `*SearchService`.
-- **`anibridge`**: `AnimeTmdbProposalService` usa `AnibridgeResolutionService.resolveBestCandidate` pra propor o binding TMDB.
-- **`setting`**: fornece a preferência de idioma usada no pré-preenchimento de imagens TMDB.
+- **`anibridge`**: `AnimeTmdbProposalService` usa `AnibridgeResolutionService.resolveBestCandidate` pra propor o binding TMDB, passando o formato do anime na AniList pro desempate entre filme e série.
+- **`setting`**: `AnimeTmdbService` injeta o `SettingService` e mantém o `selectImage` (escolha da imagem mais votada por idioma), ambos sem uso desde que o bind deixou de pré-preencher as imagens.
 
 ## Pontos de entrada
 
 HTTP, via os sete `*Resource` (`/v1/metadata/animes/...`, `/v1/metadata/folders/{folderId}/anime`, `/v1/metadata/anime-relations`, `/v1/metadata/files/{fileId}/tmdb-pairing`, `/v1/metadata/animes/{anilistId}/episodes`, `/v1/metadata/tmdb/binding-proposals`, `/v1/metadata/franchises`) — ver `openapi.yaml`, tags `Anime`, `AnimeRelations`, `AnimeFranchise`, `AnimeTmdb`, `AnimeTmdbFilePairing`, `AnimeEpisodes`, `AnimeTmdbProposal`.
 
 Programático, pra outros domínios (sem HTTP):
-- `AnimeService.getAnimeBindings` (usado por `mediafolder`), `.findByFolder`, `.find` e `.bindAnime` (usados por `ingestion`). `findOrThrow` também é público, mas só usado dentro do domínio `anime`.
+- `AnimeService.getAnimeBindings` (usado por `mediafolder`), `.findByFolder`, `.find` e `.bindAnime` (usados por `ingestion`); `AnimeTmdbService.bindTmdb` (usado por `ingestion`, além do resource) e `.fetchDetails` (usado por `ingestion` e pelo `AnimeTmdbProposalService`). `findOrThrow` também é público, mas só usado dentro do domínio `anime`.
 - `AnimeTmdbFilePairingService.getTmdbFilePairings`.
 - `AnimeTmdbService.findTvBoundAnimeOrThrow` (uso intra-domínio, mas público).
 
@@ -145,7 +145,7 @@ Programático, pra outros domínios (sem HTTP):
 
 **Resolução de overrides (`AnimeOverrideService`):** usada pelo próprio `toResponse`/`toBindingSummary` dele (chamados por `AnimeService`, `AnimeRelationsService` e `AnimeFranchiseService`) e pelos nós do grafo em `AnimeRelationsService` pra decidir, campo a campo, entre o override manual (TMDB) e o dado cru (AniList); banner e logo só existem via override (a AniList não tem esses campos).
 
-**Bind TMDB (`AnimeTmdbService.bindTmdb`):** valida que o anime existe e ainda não tem binding → confirma o `tmdbId` no TMDB pro `mediaType` informado → grava o binding → `prefillImageOverrides` tenta preencher backdrop/logo com a imagem mais votada no idioma preferido (`SettingService`), com `RetryUtils.withRateLimitRetry`; falha aqui é engolida (log + segue sem imagem), nunca aborta o bind.
+**Bind TMDB (`AnimeTmdbService.bindTmdb`):** valida que o anime existe e ainda não tem binding → confirma o `tmdbId` no TMDB pro `mediaType` informado → grava `tmdbId`, `tmdbMediaType` e `tmdbBoundAt`. Não mexe nos overrides de imagem.
 
 ## Arquivos críticos
 
@@ -165,7 +165,7 @@ Programático, pra outros domínios (sem HTTP):
 
 ## Observações técnicas e débitos identificados
 
-- **Uso inconsistente de `RetryUtils`:** dentro do domínio, só têm retry de rate limit o `AnimeTmdbService.prefillImageOverrides` e a busca de episódios das temporadas nas duas estratégias de pairing (`EpisodePairingResolutionService`, `EpisodeContinuityResolutionService`), envolvendo `TmdbService.getSeasonEpisodes` em `RetryUtils.withRateLimitRetry` (cada tentativa passa pelo proxy do `TmdbService` com a transação dela, então a espera do retry não segura conexão). As demais chamadas de rede — `anilistSearchService.findById` (bind e sync pelo portal, cascata de `syncRelations`, proposta de binding), `tmdbService.getTvDetails/getMovieDetails` (bind e estado TMDB, schemas, temporadas da continuidade), traduções/imagens do schema de overrides e `tmdbService.getSeason` (file-pairing schema) — não têm retry nem tratamento de rate limit. Sob rate limiting da AniList/TMDB, esses caminhos falham direto. **Backlog real** (confirmado pelo mantenedor, mesmo item do risco geral de retry ad hoc).
+- **Uso inconsistente de `RetryUtils`:** dentro do domínio, só têm retry de rate limit a busca de episódios das temporadas nas duas estratégias de pairing (`EpisodePairingResolutionService`, `EpisodeContinuityResolutionService`), envolvendo `TmdbService.getSeasonEpisodes` em `RetryUtils.withRateLimitRetry` (cada tentativa passa pelo proxy do `TmdbService` com a transação dela, então a espera do retry não segura conexão). As demais chamadas de rede — `anilistSearchService.findById` (bind e sync pelo portal, cascata de `syncRelations`, proposta de binding), `tmdbService.getTvDetails/getMovieDetails` (bind e estado TMDB, schemas, temporadas da continuidade), traduções/imagens do schema de overrides e `tmdbService.getSeason` (file-pairing schema) — não têm retry nem tratamento de rate limit. Sob rate limiting da AniList/TMDB, esses caminhos falham direto. **Backlog real** (confirmado pelo mantenedor, mesmo item do risco geral de retry ad hoc).
 - **`syncRelations` roda recursão não limitada dentro de uma única `@Transactional`:** cada vizinho ainda não visitado dispara uma nova chamada de rede à AniList antes de continuar a recursão. Em franquias grandes, isso significa N chamadas de rede sequenciais dentro de uma transação de banco só, sem timeout ou circuit breaker visível — risco de transação longa/timeout proporcional ao tamanho da franquia. **Backlog real** (confirmado pelo mantenedor).
 - **`getTmdbFilePairingSchema` faz uma chamada por temporada** (`tmdbService.getSeason`), sequencial, um N+1 clássico sobre a API do TMDB — **confirmado**: `getSeason` é cache-first via `IntegrationCache` (mesmo padrão dos demais métodos de `TmdbService`), então chamadas repetidas pela mesma temporada não batem de novo no upstream; o N+1 em si (N chamadas sequenciais na primeira vez) continua existindo, mas o custo de rede real só ocorre uma vez por temporada por TTL.
 - **`clearTmdbBinding` não toca em `TmdbFilePairing`:** ao remover o binding TMDB, os overrides do anime são zerados, mas os pairings de episódio dos vídeos da pasta (nome, sinopse, thumbnail vindos do TMDB) permanecem intactos, agora desvinculados de qualquer binding TMDB ativo. **Lacuna a cobrir** (confirmado pelo mantenedor): o comportamento correto é limpar/invalidar os pairings junto ao remover o binding; vai pro backlog.

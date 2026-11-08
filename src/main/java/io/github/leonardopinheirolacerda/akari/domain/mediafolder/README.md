@@ -30,8 +30,9 @@ provider e remoção em lote por raízes de um conjunto de pastas.
 
 - `storageprovider` (model `StorageProvider`, service `StorageProviderService`) — toda pasta
   pertence a um provider; `findOrThrow` usado em `createFolder`/`updateFolder`.
-- `videofile` (model `VideoFile`) — associação `@OneToMany` só para contagem/filtro
-  `hasFiles` (`size(videoFiles)`), sem leitura via cascata.
+- `videofile` (model `VideoFile`) — associação `@OneToMany` usada pelo filtro `hasFiles` da
+  listagem (`size(videoFiles)` no JPQL) e pelo campo `hasFiles` da resposta
+  (`MediaFolder.hasFiles()`, chamado pelo `MediaFolderMapper`), que carrega a coleção.
 - `anime` (service `AnimeService`) — `getAnimeBindings` para enriquecer a listagem.
 - `anime`/`videofile` por **nome de entidade em HQL**, não por import Java — os filtros
   `reviewStatus`/`hasAnilist`/`hasTmdb`/`allEpisodesPaired` de `findPage` usam subquery
@@ -88,6 +89,9 @@ provider e remoção em lote por raízes de um conjunto de pastas.
   constraint de unicidade em `(storage_provider_id, path)`: duas chamadas concorrentes pro mesmo
   path (ex.: duas ingestões simultâneas sobre o mesmo subtree) podem criar pastas duplicadas sem
   erro.
+- O campo `hasFiles` da resposta vem de `MediaFolder.hasFiles()`, que carrega a coleção
+  `videoFiles` inteira: na listagem paginada, cada pasta da página carrega todos os seus
+  arquivos só pra saber se tem algum (uma consulta por pasta).
 - O filtro `hasFiles` em `findPage` usa `size(videoFiles) > 0`/`= 0` em JPQL — potencialmente
   custoso em pastas com muitos arquivos; não há índice dedicado visível no código para essa
   contagem. **Aceito** (confirmado pelo mantenedor): escala de uso pessoal/doméstico não

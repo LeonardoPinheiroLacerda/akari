@@ -78,7 +78,8 @@ public class AnimeTmdbProposalService {
         final Optional<TmdbMappingCandidate> candidate = anibridgeResolutionService.resolveBestCandidate(
                 anilistId,
                 anilistMedia.idMal(),
-                anilistMedia.episodes()
+                anilistMedia.episodes(),
+                anilistMedia.format()
         );
 
         if (candidate.isEmpty()) {

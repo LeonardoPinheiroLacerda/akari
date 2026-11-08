@@ -1354,8 +1354,8 @@ paths:
         Remove o binding TMDB do anime e limpa junto tudo que dependia dele: os overrides
         (título, sinopse, pôster, backdrop e logo) e os pairings TMDB de todos os arquivos da
         pasta do anime — eles apontam pra temporadas/episódios do título desvinculado e ficariam
-        errados num novo binding. Um novo `POST .../tmdb/binding` volta a pré-preencher backdrop e
-        logo; os pairings precisam ser refeitos (manualmente ou pela proposta de pairing).
+        errados num novo binding. Os pairings precisam ser refeitos (manualmente ou pela
+        proposta de pairing).
       responses:
         '204':
           $ref: '#/components/responses/TmdbBindingDeleted'
@@ -1376,9 +1376,9 @@ paths:
 
         A proposta é o melhor candidato do dataset do anibridge (snapshot local, atualizado de
         hora em hora) pro `anilistId` — com fallback pelo id do MyAnimeList, lido da AniList.
-        Entre vários candidatos, prefere o que não
-        tem sobreposição de episódios nem cobre mais episódios do que o anime tem, e desempata
-        pela cobertura. O candidato é confirmado no TMDB, e a resposta traz a ficha do título
+        Entre vários candidatos, prefere o que não tem sobreposição de episódios nem cobre mais
+        episódios do que o anime tem, desempata pela cobertura e, por fim, pelo tipo que combina
+        com o formato do anime na AniList (`MOVIE` → filme; `TV`, `TV_SHORT` e `ONA` → série). O candidato é confirmado no TMDB, e a resposta traz a ficha do título
         (`details`) pra o admin conferir antes de vincular.
 
         O anibridge pode estar dessincronizado do TMDB (ex.: apontar uma temporada que o título
@@ -4000,9 +4000,8 @@ components:
     AnimeResponse:
       type: object
       description: |
-        Vista pública de um anime. `banner`/`logo` só são preenchidos quando há binding TMDB —
-        o bind já escolhe a imagem mais votada automaticamente, e um override manual pode
-        trocar essa escolha depois. `synopsis` vem em HTML quando a fonte é AniList (pode
+        Vista pública de um anime. `banner`/`logo` só são preenchidos quando há binding TMDB e
+        um override de imagem gravado — o bind não escolhe imagem. `synopsis` vem em HTML quando a fonte é AniList (pode
         conter `<br>`, `<i>`, `<b>`).
       required: [anilistId, franchiseAssignment]
       properties:

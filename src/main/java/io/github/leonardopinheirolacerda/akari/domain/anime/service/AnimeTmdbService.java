@@ -21,7 +21,6 @@ import io.github.leonardopinheirolacerda.akari.exceptions.BusinessRuleException;
 import io.github.leonardopinheirolacerda.akari.exceptions.IntegrationException;
 import io.github.leonardopinheirolacerda.akari.exceptions.IntegrationNotConfiguredException;
 import io.github.leonardopinheirolacerda.akari.exceptions.ResourceNotFoundException;
-import io.github.leonardopinheirolacerda.akari.utils.RetryUtils;
 import io.github.leonardopinheirolacerda.akari.utils.TmdbImageUtils;
 import io.quarkus.logging.Log;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -54,9 +53,7 @@ public class AnimeTmdbService {
 
     /**
      * Cria o binding TMDB do anime, confirmando antes que o {@code tmdbId} existe no TMDB pro
-     * {@code mediaType} informado. Também pré-preenche {@code overrideBackdropPath}/
-     * {@code overrideLogoPath} com a imagem mais votada da galeria do TMDB (ver
-     * {@link #prefillImageOverrides}) — melhor esforço, nunca falha o bind.
+     * {@code mediaType} informado. Não mexe nos overrides de imagem.
      *
      * @param anilistId id do anime na AniList
      * @param tmdbBindingRequest payload com {@code tmdbId} e {@code mediaType}
@@ -90,8 +87,6 @@ public class AnimeTmdbService {
         anime.tmdbId = tmdbId;
         anime.tmdbMediaType = mediaType;
         anime.tmdbBoundAt = OffsetDateTime.now();
-
-        prefillImageOverrides(anime, tmdbId, mediaType);
 
         Log.infof("Anime %d vinculado ao TMDB %d com sucesso", anilistId, tmdbId);
 
@@ -236,7 +231,8 @@ public class AnimeTmdbService {
      * Lê a ficha da série ou do filme no TMDB (cache-first) e converte pro resumo do contrato.
      *
      * <p>Público pra {@code AnimeTmdbProposalService} montar a mesma ficha na proposta de
-     * binding, sem duplicar a escolha entre série e filme.
+     * binding, sem duplicar a escolha entre série e filme, e pro step {@code TMDB_BIND} da
+     * ingestão conferir se o título existe no TMDB antes do bind.
      *
      * @param tmdbId id da série/filme no TMDB
      * @param mediaType se o binding é série ({@code TV}) ou filme ({@code MOVIE})
@@ -275,36 +271,6 @@ public class AnimeTmdbService {
         }
 
         return anime;
-    }
-
-    /**
-     * Pré-preenche backdrop e logo com a imagem mais votada da galeria do TMDB, priorizando o
-     * idioma configurado em {@code tmdb.image.backdrop-language}/{@code tmdb.image.logo-language}
-     * (ver {@link #selectImage}). Só roda no bind inicial — o anime nunca chega aqui de novo com
-     * esses campos já preenchidos, já que {@link #bindTmdb} só executa uma vez por anime. Falha
-     * aqui nunca aborta o bind: sem imagens, os campos simplesmente ficam {@code null}, igual um
-     * override manual que ainda não foi preenchido.
-     */
-    private void prefillImageOverrides(Anime anime, Integer tmdbId, TmdbMediaType mediaType) {
-        final TmdbImagesResponse images;
-
-        try {
-            images = RetryUtils.withRateLimitRetry(() -> fetchImages(tmdbId, mediaType, false));
-
-        } catch (IntegrationException | ResourceNotFoundException e) {
-            Log.warnf(e, "Busca de imagens no TMDB %d falhou, binding segue sem backdrop/logo", tmdbId);
-            return;
-        }
-
-        anime.overrideBackdropPath = selectImage(
-                images.backdrops(),
-                settingService.getTmdbImageBackdropLanguage()
-        );
-
-        anime.overrideLogoPath = selectImage(
-                images.logos(),
-                settingService.getTmdbImageLogoLanguage()
-        );
     }
 
     private TmdbImagesResponse fetchImages(Integer tmdbId, TmdbMediaType mediaType, Boolean forceRefresh) {

@@ -1,6 +1,7 @@
 package io.github.leonardopinheirolacerda.akari.domain.anibridge.service;
 
 import io.github.leonardopinheirolacerda.akari.api.dto.TmdbMediaType;
+import io.github.leonardopinheirolacerda.akari.domain.anibridge.model.CandidateResolution;
 import io.github.leonardopinheirolacerda.akari.domain.anibridge.model.CoverageResult;
 import io.github.leonardopinheirolacerda.akari.domain.anibridge.model.MappingSegment;
 import io.github.leonardopinheirolacerda.akari.domain.anibridge.model.ResolvedEpisode;
@@ -12,13 +13,12 @@ import io.github.leonardopinheirolacerda.akari.utils.RetryUtils;
 import io.quarkus.logging.Log;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
@@ -40,60 +40,82 @@ public class AnibridgeResolutionService {
 
     /**
      * Escolhe o candidato TMDB pro anime — primeiro tenta pelo {@code anilistId}, cai pro
-     * {@code malId} se não achar nada. Entre os candidatos de um mesmo anime (`tmdbId`s
-     * diferentes), descarta a prioridade de cobertura maior pra candidato "suspeito" (ver
-     * {@link #isSuspicious}) — sobreposição interna, ou cobertura além do que o anime tem de
-     * verdade — e só usa a cobertura (já descontada a sobreposição, ver {@link #analyzeCoverage})
-     * como critério de desempate dentro do mesmo nível. Sem isso, um segment com número
-     * inflado (por sobreposição ou por erro de dado) podia ganhar de outro candidato correto só
-     * por ter um total maior, mesmo sendo maior que a própria série.
+     * {@code malId} se não achar nada. Entre os candidatos de um mesmo anime ({@code tmdbId}s
+     * diferentes), nesta ordem: candidato não suspeito ganha de suspeito (ver {@link #isSuspicious})
+     * — sobreposição interna, ou cobertura além do que o anime tem de verdade —; depois a maior
+     * cobertura (já descontada a sobreposição, ver {@link #analyzeCoverage}); por fim o tipo que
+     * combina com o formato do anime na AniList ({@code MOVIE} → filme; {@code TV},
+     * {@code TV_SHORT} e {@code ONA} → série). Sem isso, um segment com número inflado podia
+     * ganhar de outro candidato correto só por ter um total maior, e um filme que também aparece
+     * como especial da série empatava com ela. Empate que sobra fica com o primeiro candidato, sem
+     * ordem definida — ver {@link #resolveCandidates}.
      *
      * @param anilistId id do anime na AniList
      * @param malId id do anime no MyAnimeList, ou {@code null} se não houver
      * @param totalEpisodes total de episódios do anime segundo a AniList ({@code anime.episodes}),
      *                       ou {@code null} se desconhecido — sem ele, só a sobreposição é
      *                       considerada suspeita
+     * @param format formato do anime na AniList (ex.: {@code TV}, {@code MOVIE}), ou {@code null}
+     *               se desconhecido — sem ele, o tipo não desempata
      * @return o melhor candidato, ou vazio se o anibridge não tem nada pra esse anime
      */
-    public Optional<TmdbMappingCandidate> resolveBestCandidate(Integer anilistId, Integer malId, Integer totalEpisodes) {
-        List<MappingSegment> segments = anibridgeMappingService.findByAnilistId(anilistId);
+    public Optional<TmdbMappingCandidate> resolveBestCandidate(Integer anilistId,
+                                                               Integer malId,
+                                                               Integer totalEpisodes,
+                                                               String format) {
+        return Optional.ofNullable(resolveCandidates(anilistId, malId, totalEpisodes, format).best());
+    }
 
-        if (segments.isEmpty() && malId != null) {
-            segments = anibridgeMappingService.findByMalId(malId);
+    /**
+     * Escolhe o melhor candidato pelos mesmos critérios do {@link #resolveBestCandidate} e diz,
+     * na mesma busca, quantos candidatos existem, se o melhor é suspeito e se ele empata com o
+     * segundo em todos os critérios — o que quem decide automaticamente precisa pra não confiar
+     * numa escolha sem critério. A cobertura de cada candidato é calculada uma vez só.
+     *
+     * @param anilistId id do anime na AniList
+     * @param malId id do anime no MyAnimeList, ou {@code null} se não houver
+     * @param totalEpisodes total de episódios do anime segundo a AniList, ou {@code null}
+     * @param format formato do anime na AniList, ou {@code null}
+     * @return a escolha; {@code best} nulo e contagem zero se o anibridge não tem nada pra esse
+     *         anime
+     */
+    public CandidateResolution resolveCandidates(Integer anilistId,
+                                                 Integer malId,
+                                                 Integer totalEpisodes,
+                                                 String format) {
+        final List<TmdbMappingCandidate> candidates = findSegments(anilistId, malId)
+                .stream()
+                .collect(Collectors.groupingBy(segment -> segment.tmdbId + ":" + segment.tmdbMediaType))
+                .values()
+                .stream()
+                .map(segments -> new TmdbMappingCandidate(
+                        segments.get(0).tmdbId,
+                        segments.get(0).tmdbMediaType,
+                        segments
+                ))
+                .toList();
+
+        if (candidates.isEmpty()) {
+            return new CandidateResolution(null, 0, false, false);
         }
 
-        if (segments.isEmpty()) {
-            return Optional.empty();
-        }
+        final Map<TmdbMappingCandidate, CoverageResult> coverages = candidates.stream()
+                .collect(Collectors.toMap(Function.identity(), candidate -> analyzeCoverage(candidate.segments())));
 
-        final Map<String, List<MappingSegment>> byCandidate = new HashMap<>();
+        final Comparator<TmdbMappingCandidate> order = candidateOrder(coverages, totalEpisodes, format);
 
-        for (MappingSegment segment : segments) {
-            final String key = segment.tmdbId + ":" + segment.tmdbMediaType;
-            byCandidate.computeIfAbsent(key, ignored -> new ArrayList<>()).add(segment);
-        }
+        final List<TmdbMappingCandidate> ranked = candidates.stream()
+                .sorted(order)
+                .toList();
 
-        List<MappingSegment> bestSegments = null;
-        CoverageResult bestCoverage = null;
+        final TmdbMappingCandidate best = ranked.get(0);
 
-        for (List<MappingSegment> candidateSegments : byCandidate.values()) {
-            final CoverageResult coverage = analyzeCoverage(candidateSegments);
-
-            if (isBetterCandidate(coverage, bestCoverage, totalEpisodes)) {
-                bestCoverage = coverage;
-                bestSegments = candidateSegments;
-            }
-        }
-
-        final MappingSegment first = bestSegments.get(0);
-
-        final TmdbMappingCandidate response = new TmdbMappingCandidate(
-                first.tmdbId,
-                first.tmdbMediaType,
-                bestSegments
+        return new CandidateResolution(
+                best,
+                ranked.size(),
+                isSuspicious(coverages.get(best), totalEpisodes),
+                ranked.size() > 1 && order.compare(best, ranked.get(1)) == 0
         );
-
-        return Optional.of(response);
     }
 
     /**
@@ -288,22 +310,51 @@ public class AnibridgeResolutionService {
     }
 
     /**
-     * Candidato não suspeito sempre ganha de um suspeito, independente da cobertura — dentro do
-     * mesmo nível (os dois suspeitos, ou os dois não), a maior cobertura desempata.
+     * Segments do anime pelo {@code anilistId}; se não houver nenhum, pelo {@code malId}.
      */
-    private static boolean isBetterCandidate(CoverageResult candidate, CoverageResult current, Integer totalEpisodes) {
-        if (current == null) {
-            return true;
+    private List<MappingSegment> findSegments(Integer anilistId, Integer malId) {
+        final List<MappingSegment> segments = anibridgeMappingService.findByAnilistId(anilistId);
+
+        if (segments.isEmpty() && malId != null) {
+            return anibridgeMappingService.findByMalId(malId);
         }
 
-        final boolean candidateSuspicious = isSuspicious(candidate, totalEpisodes);
-        final boolean currentSuspicious = isSuspicious(current, totalEpisodes);
+        return segments;
+    }
 
-        if (candidateSuspicious != currentSuspicious) {
-            return !candidateSuspicious;
+    /**
+     * Ordem dos candidatos, do melhor pro pior: não suspeito antes de suspeito, maior cobertura
+     * antes, e tipo que combina com o formato do anime antes.
+     */
+    private Comparator<TmdbMappingCandidate> candidateOrder(Map<TmdbMappingCandidate, CoverageResult> coverages,
+                                                            Integer totalEpisodes,
+                                                            String format) {
+        final TmdbMediaType preferredMediaType = preferredMediaTypeOf(format);
+
+        return Comparator
+                .comparing((TmdbMappingCandidate candidate) -> isSuspicious(coverages.get(candidate), totalEpisodes))
+                .thenComparing(
+                        candidate -> coverages.get(candidate).episodeCount(),
+                        Comparator.reverseOrder()
+                )
+                .thenComparing(candidate -> candidate.mediaType() != preferredMediaType);
+    }
+
+    /**
+     * Tipo do TMDB que combina com o formato da AniList: {@code MOVIE} → filme; {@code TV},
+     * {@code TV_SHORT} e {@code ONA} → série; os demais ({@code OVA}, {@code SPECIAL}...) e o
+     * formato desconhecido não têm preferência.
+     */
+    private static TmdbMediaType preferredMediaTypeOf(String format) {
+        if (format == null) {
+            return null;
         }
 
-        return candidate.episodeCount() > current.episodeCount();
+        return switch (format) {
+            case "MOVIE" -> TmdbMediaType.MOVIE;
+            case "TV", "TV_SHORT", "ONA" -> TmdbMediaType.TV;
+            default -> null;
+        };
     }
 
     /**

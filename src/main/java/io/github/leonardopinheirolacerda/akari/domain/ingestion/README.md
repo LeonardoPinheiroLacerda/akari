@@ -26,6 +26,8 @@ Orquestrar chamadas a `storageprovider` (listar a árvore remota e os vídeos de
   `IngestionStepExecution` por step e os `IngestionStepEvent`s dela.
 - Step `ANILIST_SYNC` (`AnilistSyncStepService`) — vincula a pasta a um anime da AniList cujo
   nome seja igual ao da pasta.
+- Step `TMDB_BIND` (`TmdbBindStepService`) — vincula o anime da pasta à série ou filme do TMDB
+  indicado pelo anibridge.
 - Extração best-effort do número de episódio a partir do nome do arquivo
   (`extractor/EpisodeNumberExtractor`), consumida por `anime` e `videofile`.
 
@@ -60,8 +62,13 @@ pasta); `ingestion_task.anime_id` com `ON DELETE SET NULL` (remover o anime só 
   cria (`createVideoFile`) os arquivos de uma pasta.
 - `domain/anime` (`Anime`, `AnimeService`) — o step `ANILIST_SYNC` checa o anime já vinculado à
   pasta (`findByFolder`), se o título escolhido já tem metadata salva (`find`) e vincula
-  (`bindAnime`); o fim da task grava em `IngestionTask.anime` o anime da pasta (`findByFolder`).
+  (`bindAnime`); o step `TMDB_BIND` lê o anime da pasta (`findByFolder`), confere se o título
+  escolhido existe no TMDB (`AnimeTmdbService.fetchDetails`) e vincula
+  (`AnimeTmdbService.bindTmdb`); o fim da task grava em `IngestionTask.anime` o anime da pasta
+  (`findByFolder`).
 - `domain/anilist` (`AnilistSearchService`) — busca dos candidatos pelo nome da pasta.
+- `domain/anibridge` (`AnibridgeResolutionService.resolveCandidates`) — melhor candidato TMDB do
+  anime no step `TMDB_BIND`, com contagem, suspeita e empate numa busca só.
 - `domain/setting` (`SettingService`) — precheck de `tmdb.api-key` configurado.
 - Executor de threads virtuais do Quarkus (`@VirtualThreads ExecutorService`) — roda a criação
   de cada task.
@@ -175,6 +182,29 @@ aberta durante as chamadas de rede dele.
 
 Qualquer exceção (AniList fora, bind recusado) vira `ERROR` com a mensagem → `FAILED`.
 
+**Step `TMDB_BIND`** (`TmdbBindStepService.execute`):
+
+1. `STARTED`. Pasta sem anime vinculado: `ERROR` → `FAILED`. Anime já vinculado ao TMDB:
+   `MATCH_SELECTED` + `COMPLETED`, mantém o vínculo.
+2. Resolve os candidatos do anibridge (`AnibridgeResolutionService.resolveCandidates`) pelo
+   `anilistId` (ou `malId`), com o total de episódios e o formato do anime, todos já salvos —
+   sem chamar a AniList. Nenhum candidato → `MATCH_NOT_FOUND` → `WAITING_CURATION`.
+3. Também vai pra `WAITING_CURATION` com `MATCH_NOT_FOUND`:
+   - quando há mais de um candidato e o melhor é suspeito (sobreposição ou cobertura maior que
+     o anime). Com um candidato só, a sobreposição não impede o bind: costuma ser o anibridge
+     numerando os mesmos episódios de dois jeitos na mesma série, o que só importa pro pairing
+     de episódios;
+   - quando o melhor empata com outro em todos os critérios (`CandidateResolution.tied`) — típico de
+     OVA/especial que existe no TMDB como filme e como especial da série.
+4. `MATCH_SELECTED` → confere o título no TMDB (`AnimeTmdbService.fetchDetails`, com retry de
+   rate limit): inexistente (dado do anibridge desatualizado) → `MATCH_NOT_FOUND` →
+   `WAITING_CURATION`. A conferência é separada do bind pra que só o 404 do título vá pra
+   curadoria, e deixa a ficha em cache pro bind.
+5. `AnimeTmdbService.bindTmdb` (com retry de rate limit) → `COMPLETED`. O bind não preenche os
+   overrides de imagem.
+
+Qualquer outra exceção (TMDB fora, bind recusado) vira `ERROR` com a mensagem → `FAILED`.
+
 ## Arquivos críticos
 
 - `service/IngestionService.java` — disparo em duas fases; a ordem e a transação por pasta da
@@ -187,6 +217,8 @@ Qualquer exceção (AniList fora, bind recusado) vira `ERROR` com a mensagem →
 - `service/step/StepRun.java` — gravação dos eventos e fechamento de uma execução de step.
 - `service/step/AnilistSyncStepService.java` — escolha do título da AniList e bind; a regra de
   comparação de nomes decide o que é vinculado automaticamente.
+- `service/step/TmdbBindStepService.java` — escolha do título do TMDB pelo anibridge e bind; as
+  regras de suspeita e empate decidem o que vai pra curadoria.
 - `extractor/EpisodeNumberExtractor.java` — heurística de regex ajustada empiricamente contra ~10
   mil arquivos reais; qualquer alteração de pattern tem risco real de regressão silenciosa no
   pairing e na ordem da listagem de episódios.

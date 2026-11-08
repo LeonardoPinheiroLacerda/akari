@@ -64,8 +64,7 @@ Externa:
 `TmdbSearchResource`) por:
 - `domain.anime.service.AnimeTmdbService` — usa `getTvDetails`/`getMovieDetails`,
   `getTvImages`/`getMovieImages`, `getTvTranslations`/`getMovieTranslations` para montar o
-  schema de overrides (`TmdbOverridesSchema`) e pré-preencher poster/backdrop/logo do anime
-  vinculado. `getTvDetails`/`getMovieDetails` também validam o `tmdbId` no bind e montam a
+  schema de overrides (`TmdbOverridesSchema`). `getTvDetails`/`getMovieDetails` também validam o `tmdbId` no bind e montam a
   ficha (`details`) devolvida em todo estado TMDB do anime (`TmdbAnimeStateResponse`).
 - `domain.anime.service.AnimeTmdbFilePairingService` — usa `getSeason` (via
   `TmdbSeasonSummaryResponse`/`TmdbSeasonResponse`) para montar o schema de pareamento de
