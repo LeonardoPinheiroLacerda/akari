@@ -3,8 +3,8 @@
 ## Objetivo do módulo
 
 Registrar no catalog as pastas e os arquivos de vídeo de um subtree de storage provider, gravando
-cada disparo como uma `Ingestion` com uma `IngestionTask` por pasta, e permitir consultar e
-desingerir subtrees.
+cada disparo como uma `Ingestion` com uma `IngestionTask` por pasta, e permitir consultar quais
+pastas do provider já foram ingeridas.
 
 ## Responsabilidade principal
 
@@ -15,15 +15,12 @@ quatro tabelas próprias (`ingestion`, `ingestion_task`, `ingestion_step_executi
 
 ## Funcionalidades existentes
 
-- `POST /v1/ingestion/providers/{providerId}` (operationId `ingestProviderSubtree`) — cria as
+- `POST /v1/ingestion/providers/{providerId}` (operationId `createIngestionTasks`) — cria as
   pastas do subtree, grava a ingestão e dispara em background o cadastro dos vídeos e a task de
-  cada pasta; devolve `202 STARTED` (`IngestionResource.ingestProviderSubtree` →
+  cada pasta; devolve `202 STARTED` (`IngestionResource.createIngestionTasks` →
   `IngestionService.createIngestionTasks`).
 - `GET /v1/ingestion/providers/{providerId}/available-folders` — lista a árvore de pastas remotas
   do provider marcando quais já foram ingeridas (`IngestionService.listAvailableFolders`).
-- `DELETE /v1/ingestion/providers/{providerId}/available-folders` — remove do catalog tudo que foi
-  ingerido sob um subtree, junto com os animes vinculados e as tasks das pastas, idempotente
-  (`IngestionService.removeIngestedSubtree`).
 - Extração best-effort do número de episódio a partir do nome do arquivo
   (`extractor/EpisodeNumberExtractor`), consumida por `anime` e `videofile`.
 
@@ -49,12 +46,11 @@ pasta); `ingestion_task.anime_id` com `ON DELETE SET NULL` (remover o anime só 
 - `domain/storageprovider` (`StorageProvider`, `StorageProviderService`,
   `StorageProviderClientFactory`, `StorageProviderClient`, `StorageItem`) — lista a árvore remota,
   os vídeos diretos de cada pasta e verifica existência de `rootPath` na listagem de pastas.
-- `domain/mediafolder` (`MediaFolder`, `MediaFolderService`) — busca/cria (`findOrCreate`),
-  lista (`findSubtree`) e remove (`deleteRoots`) pastas do catalog.
+- `domain/mediafolder` (`MediaFolder`, `MediaFolderService`) — busca/cria (`findOrCreate`) e
+  lista (`findSubtree`) pastas do catalog.
 - `domain/videofile` (`VideoFileService`) — lista os arquivos já cadastrados de uma pasta e cria
   os novos.
-- `domain/anime` (`Anime`, `AnimeService`) — remove o anime vinculado a cada pasta antes de
-  remover um subtree; `IngestionTask.anime` referencia `Anime`.
+- `domain/anime` (`Anime`) — `IngestionTask.anime` referencia `Anime`.
 - `domain/setting` (`SettingService`) — precheck de `tmdb.api-key` configurado.
 - Executor de threads virtuais do Quarkus (`@VirtualThreads ExecutorService`) — roda a criação
   de cada task.
@@ -73,7 +69,7 @@ algo daqui. Fora essa exceção, o módulo é um orquestrador de ponta: consome 
 
 - `resource/IngestionResource` — implementa `IngestionApi` (gerado do contrato), único ponto de
   entrada HTTP do domínio.
-- `service/IngestionService` — ponto de entrada lógico do disparo, da listagem e da remoção.
+- `service/IngestionService` — ponto de entrada lógico do disparo e da listagem.
 - `service/IngestionTaskService` — chamado só pelo `IngestionService`, dentro das threads
   virtuais.
 
@@ -102,10 +98,6 @@ feita antes, e não capturando o `ConflictException` do `createVideoFile`: a exc
 capturada, marca a transação da task pra rollback e a task inteira se perderia no commit. Falha
 de uma task fica só no log (`Falha ao criar a tarefa de ingestão da pasta ...`), sem afetar as
 demais.
-
-**Remoção** (`IngestionService.removeIngestedSubtree`, uma transação): busca as pastas do subtree
-→ remove o anime vinculado a cada uma (a FK `anime.folder_id` não tem cascade) → remove as raízes
-do conjunto (`deleteRoots`); o `ON DELETE CASCADE` leva subpastas, arquivos e tasks.
 
 ## Arquivos críticos
 

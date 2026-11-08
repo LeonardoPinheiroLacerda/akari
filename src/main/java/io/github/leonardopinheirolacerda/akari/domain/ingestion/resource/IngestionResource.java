@@ -39,7 +39,7 @@ public class IngestionResource implements IngestionApi {
      *         (preferência {@code tmdb.api-key})
      */
     @Override
-    public IngestionStartedResponse ingestProviderSubtree(
+    public IngestionStartedResponse createIngestionTasks(
             Integer providerId,
             IngestSubtreeRequest ingestSubtreeRequest) {
         return ingestionService.createIngestionTasks(providerId, ingestSubtreeRequest);
@@ -62,22 +62,5 @@ public class IngestionResource implements IngestionApi {
     @Override
     public AvailableFolderNode listAvailableFolders(Integer providerId, String rootPath) {
         return ingestionService.listAvailableFolders(providerId, rootPath);
-    }
-
-    /**
-     * {@code DELETE /v1/ingestion/providers/{providerId}/available-folders} — remove do catalog
-     * tudo que foi ingerido sob um subtree do provider.
-     *
-     * <p>Leva junto o anime vinculado a cada pasta, os arquivos e as {@code IngestionTask}s das
-     * pastas. Sempre devolve {@code 204}, mesmo com {@code providerId} inexistente (sem
-     * checagem prévia) ou quando nada no catalog corresponde ao subtree.
-     *
-     * @param providerId id do storage provider
-     * @param rootPath subtree a remover; vazio ou {@code null} remove a árvore inteira ingerida
-     *                 do provider
-     */
-    @Override
-    public void removeIngestedSubtree(Integer providerId, String rootPath) {
-        ingestionService.removeIngestedSubtree(providerId, rootPath);
     }
 }

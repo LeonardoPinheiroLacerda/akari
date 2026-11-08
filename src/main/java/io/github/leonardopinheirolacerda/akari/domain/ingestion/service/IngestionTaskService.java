@@ -6,7 +6,6 @@ import io.github.leonardopinheirolacerda.akari.domain.ingestion.model.IngestionT
 import io.github.leonardopinheirolacerda.akari.domain.ingestion.model.enums.IngestionTaskStatus;
 import io.github.leonardopinheirolacerda.akari.domain.mediafolder.model.MediaFolder;
 import io.github.leonardopinheirolacerda.akari.domain.mediafolder.service.MediaFolderService;
-import io.github.leonardopinheirolacerda.akari.domain.storageprovider.provider.client.StorageProviderClient;
 import io.github.leonardopinheirolacerda.akari.domain.storageprovider.provider.model.StorageItem;
 import io.github.leonardopinheirolacerda.akari.domain.videofile.service.VideoFileService;
 import io.github.leonardopinheirolacerda.akari.exceptions.ResourceNotFoundException;

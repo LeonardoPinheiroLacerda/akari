@@ -156,8 +156,8 @@ grafo, consumidos só pela camada HTTP (ou, no caso de `notification`, sem nenhu
 nunca lido de volta por outro domínio).
 
 **Ciclos deliberados `videofile` ↔ `ingestion` e `anime` ↔ `ingestion`:** `ingestion` depende
-de `videofile` (lista e cria os arquivos de vídeo das pastas) e de `anime` (remove o anime
-vinculado ao remover um subtree; `IngestionTask` referencia `Anime`), e os dois
+de `videofile` (lista e cria os arquivos de vídeo das pastas) e de `anime` (`IngestionTask`
+referencia `Anime`), e os dois
 dependem de `ingestion` só por `extractor.EpisodeNumberExtractor` — uma classe utilitária
 estática, sem service: `videofile` reaproveita a heurística de extração de episódio pra calcular
 a chave de ordenação natural (`VideoFileService.naturalSortKeyOf`), e `anime` pra resolver o
@@ -241,9 +241,7 @@ itens abaixo são backlog real (a corrigir aos poucos), exceto onde indicado "Ac
 7. **`mediafolder`/`videofile`**: `MediaFolderService.findOrCreate()` e
    `VideoFileService.createVideoFile()` checam duplicidade de path antes de inserir, mas não há
    constraint de unicidade no banco (chamadas concorrentes passam as duas) e
-   `VideoFileService.updateVideoFile()` não checa; `deleteRoots()` de `mediafolder` é documentado no próprio código como workaround para
-   um falso positivo do Hibernate (`TransientPropertyValueException`) e só funciona corretamente se
-   todas as pastas do subtree vierem da mesma consulta `findSubtree`; `listVideoFiles` devolve
+   `VideoFileService.updateVideoFile()` não checa; `listVideoFiles` devolve
    página vazia (não 404) para `folderId` inexistente, podendo mascarar um id inválido do chamador.
 8. **`setting`**: escrita (`PUT /v1/settings/{key}`) não valida formato/tipo — falha só no próximo
    uso do getter tipado, em runtime; preferência nova sem seed/migração só quebra no primeiro uso,

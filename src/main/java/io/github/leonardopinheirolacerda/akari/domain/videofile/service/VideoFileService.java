@@ -218,22 +218,6 @@ public class VideoFileService {
     }
 
     /**
-     * Preenche a chave de ordenação natural de um arquivo já catalogado, se ainda não tiver
-     * uma — pensado pra arquivos ingeridos antes dessa coluna existir. Arquivo que já tem a
-     * chave não é recalculado. Sem chamador hoje.
-     *
-     * @param videoFile arquivo já existente no catalog
-     */
-    @Transactional
-    public void backfillNaturalSortKeyIfMissing(VideoFile videoFile) {
-        if (videoFile.naturalSortKey != null) {
-            return;
-        }
-
-        videoFile.naturalSortKey = naturalSortKeyOf(videoFile.name);
-    }
-
-    /**
      * Busca um arquivo por id, ou lança se não existir.
      *
      * @param fileId id do arquivo

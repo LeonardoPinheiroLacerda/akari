@@ -23,9 +23,8 @@ provider e remoção em lote por raízes de um conjunto de pastas.
   registrado, a pasta vira raiz (`parentId` nulo), não é erro.
 - Enriquecimento cross-domain na listagem: cada pasta da página recebe `animeBinding` (via
   `AnimeService.getAnimeBindings`), evitando round-trip extra do client.
-- Suporte à ingestão: `findOrCreate()` (devolve a pasta do path ou cria, resolvendo o pai),
-  `findSubtree()` por provider/prefixo de path, `deleteRoots()` para remoção em lote só das
-  raízes de um conjunto.
+- Suporte à ingestão: `findOrCreate()` (devolve a pasta do path ou cria, resolvendo o pai) e
+  `findSubtree()` por provider/prefixo de path.
 
 ## Dependências internas e externas
 
@@ -47,8 +46,7 @@ provider e remoção em lote por raízes de um conjunto de pastas.
 ## Módulos relacionados
 
 - `ingestion` (`IngestionService`, `IngestionTaskService`) — maior consumidor externo; chama
-  `findOrCreate()`, `findOrThrow()`, `findSubtree()`, `deleteRoots()` diretamente, fora do fluxo
-  HTTP. `ingestion_task.folder_id` referencia `media_folder` com `ON DELETE CASCADE`: remover a
+  `findOrCreate()`, `findOrThrow()` e `findSubtree()` diretamente, fora do fluxo HTTP. `ingestion_task.folder_id` referencia `media_folder` com `ON DELETE CASCADE`: remover a
   pasta remove as tasks dela.
 - `videofile` — todo `VideoFile` referencia uma `MediaFolder` (FK obrigatória).
 - `anime` — bindings de anime por pasta, usados no enriquecimento da listagem.
@@ -59,7 +57,7 @@ provider e remoção em lote por raízes de um conjunto de pastas.
 - `MediaFolderResource` (implementa `MediaFolderApi` gerado) — camada HTTP, delega 100% ao
   service.
 - `MediaFolderService` — também chamado diretamente por serviços de ingestão (`findOrCreate`,
-  `findOrThrow`, `findSubtree`, `deleteRoots`), fora da camada HTTP.
+  `findOrThrow`, `findSubtree`), fora da camada HTTP.
 
 ## Fluxos importantes
 
@@ -74,21 +72,15 @@ provider e remoção em lote por raízes de um conjunto de pastas.
   por isso a ingestão chama em sequência, da pasta mais rasa pra mais funda.
 - `listFolders`: pagina → mapeia a página para DTO → busca bindings de anime em lote pelos
   `folderId`s da página → seta `animeBinding` em cada item (`null` quando não vinculado).
-- `deleteRoots` (chamado pela ingestão): `Panache.flush()` explícito antes (garante que
-  remoções pendentes de outras entidades referenciadas, ex. `Anime` vinculado, já estejam no
-  banco) → identifica as raízes do subconjunto recebido (pastas cujo `parent` não está no
-  próprio conjunto) → `delete` em lote por query para cada raiz (evita que o Hibernate valide o
-  grafo de entidades no flush e lance `TransientPropertyValueException` por associações
-  `@ManyToOne` ainda não resolvidas entre os irmãos carregados na mesma sessão). A cascata de
-  DDL remove descendentes, arquivos abrigados e as `IngestionTask`s das pastas.
+- `deleteFolder`: remove a pasta; a cascata de DDL remove descendentes, arquivos abrigados e
+  as `IngestionTask`s das pastas.
 
 ## Arquivos críticos
 
 - `model/MediaFolder.java` — queries estáticas (`find`, `findByProviderAndPath`,
   `findSubtree`, `findPage`) e a modelagem da árvore via `parent`/`path`.
-- `service/MediaFolderService.java` — `deleteRoots()` concentra a lógica mais sensível do
-  domínio (flush explícito + delete em lote por query, motivado por um falso positivo do
-  Hibernate confirmado empiricamente, segundo o javadoc do método).
+- `service/MediaFolderService.java` — CRUD, `findOrCreate()` usado pela ingestão e o
+  enriquecimento da listagem com os bindings de anime.
 
 ## Observações técnicas e débitos identificados
 
@@ -96,10 +88,6 @@ provider e remoção em lote por raízes de um conjunto de pastas.
   constraint de unicidade em `(storage_provider_id, path)`: duas chamadas concorrentes pro mesmo
   path (ex.: duas ingestões simultâneas sobre o mesmo subtree) podem criar pastas duplicadas sem
   erro.
-- `deleteRoots()` depende de todas as pastas do subtree estarem carregadas na mesma sessão
-  (vindas de um único `findSubtree`) para calcular corretamente quais são raízes; chamado fora
-  desse padrão (ex. com uma lista parcial) pode remover pastas incorretamente ou deixar
-  órfãs fora do alcance da cascata.
 - O filtro `hasFiles` em `findPage` usa `size(videoFiles) > 0`/`= 0` em JPQL — potencialmente
   custoso em pastas com muitos arquivos; não há índice dedicado visível no código para essa
   contagem. **Aceito** (confirmado pelo mantenedor): escala de uso pessoal/doméstico não
@@ -117,6 +105,5 @@ provider e remoção em lote por raízes de um conjunto de pastas.
 - **Confirmado nas migrations:** `media_folder.parent_id` e `video_file.folder_id` têm
   `ON DELETE CASCADE` na DDL (`V2__create-catalog-tables.sql`) — a cascata de descendentes e
   arquivos ao deletar uma pasta é real. Já `anime.folder_id` (`V6__create-anime-table.sql`)
-  **não tem** cascade — por isso `IngestionService.removeIngestedSubtree` apaga explicitamente
-  o `Anime` vinculado a cada pasta antes de chamar `deleteRoots()`; sem esse passo, a remoção
-  falharia por violação de FK.
+  **não tem** cascade — remover uma pasta com anime vinculado (`deleteFolder`) falha por
+  violação de FK; o anime precisa ser removido antes.

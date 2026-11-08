@@ -44,7 +44,8 @@ tags:
       Ingestão de subtrees de storage provider no catalog.
 
       Registra no catalog as pastas e os arquivos de vídeo de um subtree do provider e permite
-      consultar/desingerir subtrees. Cada disparo grava uma ingestão com uma tarefa por pasta.
+      consultar quais pastas do provider já foram ingeridas. Cada disparo grava uma ingestão com
+      uma tarefa por pasta.
 
       Pastas/arquivos já registrados são preservados e os novos são criados; o que não existe
       mais no provider não é removido do catalog. O `rootPath` limita o subtree a processar;
@@ -312,7 +313,7 @@ paths:
       - $ref: '#/components/parameters/StorageProviderIdPathParam'
     post:
       tags: [Ingestion]
-      operationId: ingestProviderSubtree
+      operationId: createIngestionTasks
       summary: Ingere um subtree do provider no catalog
       description: |
         Ingere o subtree indicado por `rootPath` (ou a raiz, se omitido) no catalog e retorna
@@ -343,23 +344,6 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
-    delete:
-      tags: [Ingestion]
-      operationId: removeIngestedSubtree
-      summary: Remove um subtree ingerido do catalog
-      description: |
-        Remove do catalog as pastas/arquivos correspondentes ao subtree indicado por
-        `rootPath` (ou tudo do provider, se omitido), junto com os animes vinculados a essas
-        pastas e as tarefas de ingestão delas. **Não** toca no provider upstream. Operação
-        idempotente — devolve `204` mesmo quando nada casa, inclusive se o `providerId` não
-        existir (não há precheck).
-      parameters:
-        - $ref: '#/components/parameters/RootPathParam'
-      responses:
-        '204':
-          $ref: '#/components/responses/IngestionRemoved'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -2169,13 +2153,11 @@ components:
             $ref: '#/components/schemas/AvailableFolderNode'
     IngestionStarted:
       description: >-
-        Ingestão aceita e iniciada em background (ou já em andamento para o mesmo subtree)
+        Ingestão aceita: pastas criadas e tarefas disparadas em background
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/IngestionStartedResponse'
-    IngestionRemoved:
-      description: Subtree removido (inclusive quando nada casa — idempotente)
 
     # ---------- catalog ----------
     MediaFolderPageOk:

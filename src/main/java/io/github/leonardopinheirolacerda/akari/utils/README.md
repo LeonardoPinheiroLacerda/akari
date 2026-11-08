@@ -10,7 +10,7 @@ Oferecer funções estáticas, sem injeção CDI (todas as classes são `final` 
 - **`CacheUtils`** — `buildKey(String...)` monta chave de cache normalizada (trim+lowercase, unida por `:`); `resolve(forceRefresh, ttl, cacheReader, loader, writer)` implementa o fluxo cache-first (serve do cache se fresco, senão busca no upstream e grava). Usa `model.CacheEntry` (subpacote deste `utils/`, não o `model/` raiz do projeto).
 - **`model.CacheEntry<T>`** — `record(payload, fetchedAt)`: par payload/timestamp lido do cache do chamador de `CacheUtils.resolve`, agnóstico da entidade concreta.
 - **`DirectoryUtils`** — `parentOf`, `join`, `lastSegmentOf`, `depthOf` para paths relativos lógicos (sempre `/`, nunca `File.separator`) do catalog/storage provider.
-- **`FileNameUtils`** — `extensionOf(name)` e `isVideoFile(name)` (checa extensão contra whitelist: mkv, mp4, avi, mov, wmv, webm, ts, m2ts, flv), usado pela ingestão.
+- **`FileNameUtils`** — `extensionOf(name)` (extensão sem o ponto, ou `null`), usado pela ingestão, e `isVideoFile(name)` (checa extensão contra whitelist: mkv, mp4, avi, mov, wmv, webm, ts, m2ts, flv).
 - **`HttpErrorUtils`** — `isNotFound(Exception)` identifica se uma falha de REST client é um `404` upstream.
 - **`PaginationUtils`** — `toSort(sort, sortableFields)` converte specs `campo[:asc|desc]` da API num `Sort` do Panache, validando contra whitelist do chamador; lança `RequestValidationException` em campo/direção inválidos.
 - **`RetryUtils`** — `withRateLimitRetry(Supplier<T>)` retenta indefinidamente com backoff exponencial (2s a 60s) só em `429`, propagando qualquer outro erro na primeira tentativa.

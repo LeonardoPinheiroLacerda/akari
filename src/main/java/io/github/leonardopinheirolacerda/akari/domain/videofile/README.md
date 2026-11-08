@@ -31,9 +31,6 @@ conjunto inteiro de arquivos de uma pasta, usada pra saber quais arquivos já es
 - `listByFolderOrderedByNaturalSortKey`: lista completa sem paginação, na mesma ordem natural da
   listagem de episódios (`naturalSortKey NULLS LAST`, depois `id`); usada pelas resoluções de
   pairing do `anime` (anibridge e continuidade).
-- `backfillNaturalSortKeyIfMissing`: preenche `naturalSortKey` de um arquivo já catalogado que
-  ainda não tem uma (arquivo ingerido antes dessa coluna existir). Não recalcula se já tiver
-  uma. Sem chamador hoje.
 
 ## Dependências internas e externas
 
@@ -97,16 +94,13 @@ conjunto inteiro de arquivos de uma pasta, usada pra saber quais arquivos já es
 - `listByFolder`/`listByFolderOrderedByNaturalSortKey`: leitura sem paginação, anotadas
   `@Transactional` mesmo sendo leitura, pra funcionar também chamadas de contextos sem
   transação ambiente (ex.: as threads virtuais da ingestão).
-- `backfillNaturalSortKeyIfMissing`: no-op se o arquivo já tem `naturalSortKey`; senão calcula
-  via `naturalSortKeyOf(name)`, mesmo helper privado usado em `createVideoFile`/
-  `updateVideoFile`. Não busca nada — recebe a entidade já carregada pelo chamador.
 
 ## Arquivos críticos
 
 - `model/VideoFile.java` — queries estáticas (`find`, `findByFolderAndPath`, `findByFolderId`,
   `findPage`, `findPageOrderedByNaturalSortKey`).
 - `service/VideoFileService.java` — `createVideoFile`/`updateVideoFile` (derivação de `path` e
-  `naturalSortKey`), as duas listagens paginadas e `backfillNaturalSortKeyIfMissing`.
+  `naturalSortKey`) e as duas listagens paginadas.
 
 ## Observações técnicas e débitos identificados
 

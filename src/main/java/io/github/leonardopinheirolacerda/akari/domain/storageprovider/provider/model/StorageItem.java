@@ -64,17 +64,4 @@ public record StorageItem(
                 .toList();
     }
 
-    /**
-     * Filtra só os itens cujo pai direto é {@code parentPath}.
-     *
-     * @param items itens a filtrar
-     * @param parentPath path do pai
-     * @return os filhos diretos
-     */
-    public static List<StorageItem> directChildrenOf(List<StorageItem> items, String parentPath) {
-        return items.stream()
-                .filter(item -> DirectoryUtils.parentOf(item.path()).equals(parentPath))
-                .toList();
-    }
-
 }

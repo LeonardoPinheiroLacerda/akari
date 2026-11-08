@@ -48,7 +48,7 @@ não há tabela compartilhada entre domínios além das FKs explícitas abaixo.
   backfill).
 - **V16** — adiciona `natural_sort_key` em `video_file` (nullable) + índice, sem backfill na
   migration. Arquivos criados depois recebem a chave na criação; linhas anteriores ficam `NULL`
-  — `VideoFileService.backfillNaturalSortKeyIfMissing` existe, mas não tem chamador.
+  — nenhum fluxo preenche a chave delas.
 - **V17** — insere três preferências novas em `setting` (`playback.default.audio-language`,
   `playback.default.subtitle-language`, `playback.default.subtitle-forced`) — mesmo padrão de
   seed do V3, incremental.

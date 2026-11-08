@@ -2,7 +2,8 @@ package io.github.leonardopinheirolacerda.akari.utils;
 
 /**
  * Espera bloqueante que não propaga {@link InterruptedException} — usada como throttle
- * proativo entre chamadas a APIs externas. Sem chamador hoje.
+ * proativo entre chamadas a APIs externas (ex.: a espera entre tentativas do
+ * {@code RetryUtils}).
  */
 public final class ThreadUtils {
 

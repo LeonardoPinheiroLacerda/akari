@@ -113,7 +113,7 @@ O acoplamento alto do domínio como um todo (7 domínios externos: `anilist`, `t
 
 ## Módulos relacionados
 
-- **`ingestion`** usa `AnimeService` (`findByFolder`, `deleteAnime`) pra remover o anime vinculado a cada pasta antes de remover um subtree, e a `IngestionTask` referencia `Anime` (`anime_id`, com `ON DELETE SET NULL` — remover o anime só limpa o vínculo da task). No sentido contrário, `anime` usa de `ingestion` só o `extractor.EpisodeNumberExtractor` (no `EpisodePairingResolutionService`) — mesma exceção que `videofile` já tem.
+- **`ingestion`** não chama services de `anime`; só a `IngestionTask` referencia `Anime` (`anime_id`, com `ON DELETE SET NULL` — remover o anime só limpa o vínculo da task). No sentido contrário, `anime` usa de `ingestion` só o `extractor.EpisodeNumberExtractor` (no `EpisodePairingResolutionService`) — mesma exceção que `videofile` já tem.
 - **`mediafolder`**: `MediaFolderService.listFolders` embute `AnimeBindingSummary` via `AnimeService.getAnimeBindings`; `Anime.folder` referencia `MediaFolder`.
 - **`videofile`**: `VideoFileService.listVideoFiles`/`listVideoFilesOrderedByNaturalSortKey` embutem `TmdbFilePairingResponse` via `AnimeTmdbFilePairingService.getTmdbFilePairings`; `AnimeEpisodeService` delega a listagem de episódios inteira pro `VideoFileService.listVideoFilesOrderedByNaturalSortKey`.
 - **`anilist`** e **`tmdb`**: fontes de dados externos consumidas via seus `*SearchService`.
@@ -125,7 +125,7 @@ O acoplamento alto do domínio como um todo (7 domínios externos: `anilist`, `t
 HTTP, via os sete `*Resource` (`/v1/metadata/animes/...`, `/v1/metadata/folders/{folderId}/anime`, `/v1/metadata/anime-relations`, `/v1/metadata/files/{fileId}/tmdb-pairing`, `/v1/metadata/animes/{anilistId}/episodes`, `/v1/metadata/tmdb/binding-proposals`, `/v1/metadata/franchises`) — ver `openapi.yaml`, tags `Anime`, `AnimeRelations`, `AnimeFranchise`, `AnimeTmdb`, `AnimeTmdbFilePairing`, `AnimeEpisodes`, `AnimeTmdbProposal`.
 
 Programático, pra outros domínios (sem HTTP):
-- `AnimeService.findByFolder`, `.deleteAnime`, `.exists`, `.find`, `.findOrThrow`, `.getAnimeBindings`. `bindAnime` e `updateReviewStatusIfNotReviewed` também são públicos, mas sem chamador fora do próprio service hoje.
+- `AnimeService.getAnimeBindings` (usado por `mediafolder`). `bindAnime`, `find` e `findOrThrow` também são públicos, mas só usados dentro do domínio `anime`.
 - `AnimeTmdbFilePairingService.getTmdbFilePairings`.
 - `AnimeTmdbService.findTvBoundAnimeOrThrow` (uso intra-domínio, mas público).
 
@@ -173,4 +173,4 @@ Programático, pra outros domínios (sem HTTP):
 - **Custo da resolução de franquias:** `FranchiseResolver.resolve()` lê a coleção inteira (duas consultas) a cada chamada, inclusive pra preencher o `franchiseRootId` de um único `AnimeResponse` (`AnimeService.toResponse`), e as listagens administrativas (`listFranchises`, `listHiddenAnimes`) filtram em memória antes de paginar no banco. Com a coleção atual (~900 animes) o custo é baixo; cresce linearmente com ela.
 - Nenhum `TODO`/`FIXME`/`XXX` encontrado no domínio.
 - Tratamento de concorrência no bind TMDB/AniList: não há lock explícito nem verificação de condição de corrida entre a checagem de duplicidade (`Anime.find`/`anime.tmdbId != null`) e o `persist()`/commit — duas requisições simultâneas pro mesmo `anilistId` podem ambas passar a validação antes de uma persistir (mitigado só pela constraint de PK no banco, que faria a segunda falhar com exceção não tratada especificamente aqui). **Backlog real** (confirmado pelo mantenedor, mesmo item do risco geral de corrida no bind).
-- Boa prática observada: leituras usadas fora do contexto de request HTTP (`findByFolder`, `exists`, `find` em `AnimeService`) foram corretamente marcadas `@Transactional` mesmo sendo apenas leitura, pra funcionar também chamadas fora de uma transação ambiente — mostra atenção deliberada a esse detalhe, não um padrão acidental.
+- Boa prática observada: leituras usadas fora do contexto de request HTTP (`find` em `AnimeService`) foram corretamente marcadas `@Transactional` mesmo sendo apenas leitura, pra funcionar também chamadas fora de uma transação ambiente — mostra atenção deliberada a esse detalhe, não um padrão acidental.

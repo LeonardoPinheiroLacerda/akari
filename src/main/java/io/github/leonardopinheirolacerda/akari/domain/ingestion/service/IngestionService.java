@@ -1,7 +1,6 @@
 package io.github.leonardopinheirolacerda.akari.domain.ingestion.service;
 
 import io.github.leonardopinheirolacerda.akari.api.dto.*;
-import io.github.leonardopinheirolacerda.akari.domain.anime.service.AnimeService;
 import io.github.leonardopinheirolacerda.akari.domain.ingestion.model.Ingestion;
 import io.github.leonardopinheirolacerda.akari.domain.ingestion.model.enums.IngestionStatus;
 import io.github.leonardopinheirolacerda.akari.domain.mediafolder.model.MediaFolder;
@@ -31,8 +30,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.stream.Collectors;
 
 /**
- * Ingestão de subtrees de storage provider no catalog: dispara a ingestão, lista as pastas
- * remotas marcando as já ingeridas e remove o que foi ingerido sob um subtree.
+ * Ingestão de subtrees de storage provider no catalog: dispara a ingestão e lista as pastas
+ * remotas marcando as já ingeridas.
  *
  * <p>O disparo roda em duas fases. A primeira é sequencial, na thread da requisição: cria as
  * {@code MediaFolder}s do subtree da mais rasa pra mais funda, cada uma na sua transação, pra
@@ -62,9 +61,6 @@ public class IngestionService {
     @Inject
     @VirtualThreads
     ExecutorService executorService;
-
-    @Inject
-    AnimeService animeService;
 
     /**
      * Registra no catalog as pastas e os arquivos de vídeo de um subtree do provider e cria uma
@@ -156,35 +152,6 @@ public class IngestionService {
     @Transactional
     public void createIngestion(Ingestion ingestion) {
         Ingestion.persist(ingestion);
-    }
-
-    /**
-     * Remove do catalog tudo que foi ingerido sob um subtree do provider, numa transação só.
-     *
-     * <p>Remove primeiro o anime vinculado a cada pasta, porque a FK {@code anime.folder_id}
-     * não tem cascade, e depois as pastas raiz do conjunto — o {@code ON DELETE CASCADE} leva
-     * subpastas, arquivos e as {@code IngestionTask}s das pastas. Não checa se o provider
-     * existe; sem pasta correspondente, não faz nada.
-     *
-     * @param providerId id do storage provider
-     * @param rootPath subtree a remover; {@code null} ou vazio remove tudo que foi ingerido do
-     *                 provider
-     */
-    @Transactional
-    public void removeIngestedSubtree(Integer providerId, String rootPath) {
-        final String normalizedRootPath = Objects.requireNonNullElse(rootPath, "");
-
-        Log.infof("Removendo subtree ingerido do provider %d (rootPath=%s)", providerId, normalizedRootPath);
-
-        final List<MediaFolder> folders = mediaFolderService.findSubtree(providerId, rootPath);
-
-        for (MediaFolder folder : folders) {
-            animeService.findByFolder(folder.id)
-                    .map(anime -> anime.anilistId)
-                    .ifPresent(animeService::deleteAnime);
-        }
-
-        mediaFolderService.deleteRoots(folders);
     }
 
     /**

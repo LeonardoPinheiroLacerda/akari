@@ -130,35 +130,8 @@ public class AnimeService {
     }
 
     /**
-     * Busca o model cru do anime vinculado à pasta, sem lançar se não houver. Usado por outros
-     * domínios (ex.: {@code ingestion}, ao remover um subtree) que precisam checar o binding
-     * antes de agir; é {@code @Transactional} mesmo sendo leitura pra funcionar também chamado
-     * de contextos sem transação ambiente.
-     *
-     * @param folderId id da pasta no catalog
-     * @return o anime vinculado, se houver
-     */
-    @Transactional
-    public Optional<Anime> findByFolder(Integer folderId) {
-        return Anime.findByFolderId(folderId);
-    }
-
-    /**
-     * Confirma se já existe metadata salva pro anime. Mesma motivação de {@link #findByFolder}
-     * — leitura marcada {@code @Transactional} pra funcionar fora de contexto de request.
-     *
-     * @param anilistId id do anime na AniList
-     * @return {@code true} se já existe metadata salva
-     */
-    @Transactional
-    public boolean exists(Integer anilistId) {
-        return Anime.find(anilistId).isPresent();
-    }
-
-    /**
-     * Busca o model cru do anime pelo {@code anilistId}, sem lançar se não houver. Mesma
-     * motivação de {@link #findByFolder} — leitura marcada {@code @Transactional} pra funcionar
-     * fora de contexto de request.
+     * Busca o model cru do anime pelo {@code anilistId}, sem lançar se não houver — leitura
+     * marcada {@code @Transactional} pra funcionar fora de contexto de request.
      *
      * @param anilistId id do anime na AniList
      * @return o anime, se houver metadata salva
@@ -228,26 +201,8 @@ public class AnimeService {
     }
 
     /**
-     * Atualiza o status de revisão do anime, exceto se já estiver {@code REVIEWED} — revisão
-     * manual tem precedência sobre qualquer recálculo automático. Sem chamador hoje.
-     *
-     * @param anilistId id do anime na AniList
-     * @param status novo status calculado automaticamente
-     */
-    @Transactional
-    public void updateReviewStatusIfNotReviewed(Integer anilistId, AnimeReviewStatus status) {
-        final Anime anime = findOrThrow(anilistId);
-
-        if (anime.reviewStatus == AnimeReviewStatus.REVIEWED) {
-            return;
-        }
-
-        anime.reviewStatus = status;
-    }
-
-    /**
      * Confirma manualmente que a ingestão desse anime está correta — a partir daqui, nenhum
-     * recálculo automático altera esse campo (ver {@link #updateReviewStatusIfNotReviewed}).
+     * recálculo automático deve alterar esse campo.
      *
      * @param anilistId id do anime na AniList
      * @return a metadata atualizada
