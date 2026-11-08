@@ -7,6 +7,7 @@ import io.github.leonardopinheirolacerda.akari.domain.ingestion.model.enums.Inge
 import io.github.leonardopinheirolacerda.akari.domain.ingestion.service.step.AnilistSyncStepService;
 import io.github.leonardopinheirolacerda.akari.domain.ingestion.service.step.IngestionStepService;
 import io.github.leonardopinheirolacerda.akari.domain.ingestion.service.step.TmdbBindStepService;
+import io.github.leonardopinheirolacerda.akari.domain.ingestion.service.step.TmdbOverridesStepService;
 import io.quarkus.logging.Log;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -34,6 +35,9 @@ public class IngestionTaskExecutionService {
     TmdbBindStepService tmdbBindStepService;
 
     @Inject
+    TmdbOverridesStepService tmdbOverridesStepService;
+
+    @Inject
     AnimeService animeService;
 
     /**
@@ -55,7 +59,8 @@ public class IngestionTaskExecutionService {
         try {
             final List<IngestionStepService> steps = List.of(
                     anilistSyncStepService,
-                    tmdbBindStepService
+                    tmdbBindStepService,
+                    tmdbOverridesStepService
             );
 
             for (IngestionStepService step : steps) {

@@ -43,10 +43,11 @@ Todas essas operações são cache-first (TTL via preferência `tmdb.cache.ttl`)
 Internas (outros domínios usados por este):
 - `domain.cache.model.IntegrationCache` — entidade de cache genérico usada por
   `TmdbService` via `CacheUtils.resolve`.
-- `domain.setting.service.SettingService` — todas as preferências `tmdb.*`:
-  `tmdb.api-key` (token), `tmdb.cache.ttl`, `tmdb.default-language`, `tmdb.include-adult`,
-  `tmdb.image.logo-language`, `tmdb.image.backdrop-language`. Usado tanto em
-  `TmdbService` quanto em `TmdbAuthHeadersFactory`.
+- `domain.setting.service.SettingService` — as preferências `tmdb.api-key` (token),
+  `tmdb.cache.ttl`, `tmdb.default-language` e `tmdb.include-adult`. Usado tanto em
+  `TmdbService` quanto em `TmdbAuthHeadersFactory`. As preferências de idioma dos overrides
+  (`tmdb.image.logo-language`, `tmdb.override.*`) são lidas pelo domínio `anime`, não por
+  este.
 - `utils.CacheUtils`, `utils.HttpErrorUtils`, `utils.RetryUtils`, `utils.TmdbImageUtils` —
   helpers compartilhados (cache-aside, classificação de erro HTTP 404, retry em rate limit,
   montagem de URL de CDN).

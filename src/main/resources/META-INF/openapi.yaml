@@ -4585,7 +4585,9 @@ components:
         language:
           type: string
           nullable: true
-          description: ISO 639-1; `null` quando o TMDB não informa
+          description: |
+            ISO 639-1, seguido do país ISO 3166-1 quando o TMDB informa (`pt-BR`, `zh-TW`);
+            `null` quando o TMDB não informa.
 
     TmdbImageOption:
       type: object

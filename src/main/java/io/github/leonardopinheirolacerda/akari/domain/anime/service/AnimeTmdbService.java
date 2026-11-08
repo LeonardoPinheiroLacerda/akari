@@ -11,7 +11,6 @@ import io.github.leonardopinheirolacerda.akari.api.dto.TmdbOverridesSchema;
 import io.github.leonardopinheirolacerda.akari.domain.anime.mapper.AnimeTmdbMapper;
 import io.github.leonardopinheirolacerda.akari.domain.anime.model.Anime;
 import io.github.leonardopinheirolacerda.akari.domain.anime.model.TmdbFilePairing;
-import io.github.leonardopinheirolacerda.akari.domain.setting.service.SettingService;
 import io.github.leonardopinheirolacerda.akari.domain.tmdb.client.dtos.TmdbImageResponse;
 import io.github.leonardopinheirolacerda.akari.domain.tmdb.client.dtos.TmdbImagesResponse;
 import io.github.leonardopinheirolacerda.akari.domain.tmdb.client.dtos.TmdbTranslationDataResponse;
@@ -28,9 +27,7 @@ import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
-import java.util.Objects;
 import java.util.function.Function;
 
 /**
@@ -47,9 +44,6 @@ public class AnimeTmdbService {
 
     @Inject
     TmdbService tmdbService;
-
-    @Inject
-    SettingService settingService;
 
     /**
      * Cria o binding TMDB do anime, confirmando antes que o {@code tmdbId} existe no TMDB pro
@@ -180,27 +174,17 @@ public class AnimeTmdbService {
 
         final Integer tmdbId = anime.tmdbId;
 
-        final TmdbBindingDetails details = fetchDetails(tmdbId, anime.tmdbMediaType, forceRefresh);
-
-        final List<TmdbTranslationEntryResponse> translations = anime.tmdbMediaType == TmdbMediaType.TV
-                ? tmdbService.getTvTranslations(tmdbId, forceRefresh).translations()
-                : tmdbService.getMovieTranslations(tmdbId, forceRefresh).translations();
+        final List<TmdbTranslationEntryResponse> translations = fetchTranslations(
+                tmdbId,
+                anime.tmdbMediaType,
+                forceRefresh
+        );
 
         final TmdbImagesResponse images = fetchImages(tmdbId, anime.tmdbMediaType, forceRefresh);
 
         return new TmdbOverridesSchema()
-                .title(collectTexts(
-                        details.getTitle(),
-                        details.getOriginalLanguage(),
-                        translations,
-                        TmdbTranslationDataResponse::localizedName
-                ))
-                .synopsis(collectTexts(
-                        details.getOverview(),
-                        details.getOriginalLanguage(),
-                        translations,
-                        TmdbTranslationDataResponse::overview
-                ))
+                .title(collectTexts(translations, TmdbTranslationDataResponse::localizedName))
+                .synopsis(collectTexts(translations, TmdbTranslationDataResponse::overview))
                 .posterPath(toImageOptions(images.posters(), TmdbImageUtils::posterMedium))
                 .backdropPath(toImageOptions(images.backdrops(), TmdbImageUtils::backdrop))
                 .logoPath(toImageOptions(images.logos(), TmdbImageUtils::logo));
@@ -243,26 +227,23 @@ public class AnimeTmdbService {
      *                                           não estiver em cache
      */
     public TmdbBindingDetails fetchDetails(Integer tmdbId, TmdbMediaType mediaType) {
-        return fetchDetails(tmdbId, mediaType, false);
-    }
-
-    private TmdbBindingDetails fetchDetails(Integer tmdbId, TmdbMediaType mediaType, Boolean forceRefresh) {
         if (mediaType == TmdbMediaType.TV) {
-            return animeTmdbMapper.toDetails(tmdbService.getTvDetails(tmdbId, forceRefresh));
+            return animeTmdbMapper.toDetails(tmdbService.getTvDetails(tmdbId, false));
         }
 
-        return animeTmdbMapper.toDetails(tmdbService.getMovieDetails(tmdbId, forceRefresh));
+        return animeTmdbMapper.toDetails(tmdbService.getMovieDetails(tmdbId, false));
     }
 
     /**
      * Busca o anime e confirma que ele tem binding TMDB, ou lança 404 — usado pelas operações
-     * sobre um binding existente e por {@link #findTvBoundAnimeOrThrow}.
+     * sobre um binding existente, por {@link #findTvBoundAnimeOrThrow} e pelo
+     * {@link AnimeTmdbOverridesFillService}.
      *
      * @param anilistId id do anime na AniList
      * @return o anime, com {@code tmdbId} garantidamente preenchido
      * @throws ResourceNotFoundException se o anime não existir ou não tiver binding TMDB
      */
-    private Anime findBoundAnimeOrThrow(Integer anilistId) {
+    public Anime findBoundAnimeOrThrow(Integer anilistId) {
         final Anime anime = animeService.findOrThrow(anilistId);
 
         if (anime.tmdbId == null) {
@@ -273,7 +254,38 @@ public class AnimeTmdbService {
         return anime;
     }
 
-    private TmdbImagesResponse fetchImages(Integer tmdbId, TmdbMediaType mediaType, Boolean forceRefresh) {
+    /**
+     * Traduções da série ou do filme no TMDB (cache-first). Package-private pra
+     * {@link AnimeTmdbOverridesFillService} reusar a escolha entre série e filme.
+     *
+     * @param tmdbId id da série/filme no TMDB
+     * @param mediaType se é série ({@code TV}) ou filme ({@code MOVIE})
+     * @param forceRefresh se {@code true}, ignora o cache local e re-busca do TMDB
+     * @return as traduções do título
+     */
+    List<TmdbTranslationEntryResponse> fetchTranslations(Integer tmdbId,
+                                                         TmdbMediaType mediaType,
+                                                         Boolean forceRefresh) {
+
+        if (mediaType == TmdbMediaType.TV) {
+            return tmdbService.getTvTranslations(tmdbId, forceRefresh)
+                    .translations();
+        }
+
+        return tmdbService.getMovieTranslations(tmdbId, forceRefresh)
+                .translations();
+    }
+
+    /**
+     * Imagens da série ou do filme no TMDB (cache-first). Package-private pra
+     * {@link AnimeTmdbOverridesFillService} reusar a escolha entre série e filme.
+     *
+     * @param tmdbId id da série/filme no TMDB
+     * @param mediaType se é série ({@code TV}) ou filme ({@code MOVIE})
+     * @param forceRefresh se {@code true}, ignora o cache local e re-busca do TMDB
+     * @return as imagens do título
+     */
+    TmdbImagesResponse fetchImages(Integer tmdbId, TmdbMediaType mediaType, Boolean forceRefresh) {
         if (mediaType == TmdbMediaType.TV) {
             return tmdbService.getTvImages(tmdbId, forceRefresh);
         }
@@ -281,41 +293,7 @@ public class AnimeTmdbService {
         return tmdbService.getMovieImages(tmdbId, forceRefresh);
     }
 
-    /**
-     * Escolhe a imagem mais popular (maior {@code voteCount}, desempate por {@code voteAverage},
-     * depois por largura) dentro do idioma preferido; sem nenhuma imagem nesse idioma, cai pra
-     * popularidade entre todas — nem todo título tem logo japonês ou backdrop sem idioma
-     * catalogado no TMDB.
-     *
-     * @param images galeria de imagens do TMDB (backdrops ou logos)
-     * @param preferredLanguage {@code iso_639_1} preferido, ou {@code null} pra imagem sem idioma
-     * @return o {@code filePath} escolhido, ou {@code null} se a galeria estiver vazia
-     */
-    private static String selectImage(List<TmdbImageResponse> images, String preferredLanguage) {
-        if (images == null || images.isEmpty()) {
-            return null;
-        }
-
-        final List<TmdbImageResponse> filtered = images.stream()
-                .filter(image -> Objects.equals(image.iso6391(), preferredLanguage))
-                .toList();
-
-        final List<TmdbImageResponse> candidates = filtered.isEmpty()
-                ? images
-                : filtered;
-
-        return candidates.stream()
-                .max(Comparator
-                        .comparing(TmdbImageResponse::voteCount, Comparator.nullsFirst(Comparator.naturalOrder()))
-                        .thenComparing(TmdbImageResponse::voteAverage, Comparator.nullsFirst(Comparator.naturalOrder()))
-                        .thenComparing(TmdbImageResponse::width, Comparator.nullsFirst(Comparator.naturalOrder())))
-                .map(TmdbImageResponse::filePath)
-                .orElse(null);
-    }
-
     private static List<TmdbLocalizedOption> collectTexts(
-            String defaultValue,
-            String defaultLanguage,
             List<TmdbTranslationEntryResponse> translations,
             Function<TmdbTranslationDataResponse, String> valueExtractor) {
 
@@ -323,13 +301,30 @@ public class AnimeTmdbService {
 
         for (TmdbTranslationEntryResponse entry : translations) {
             if (entry.data() != null) {
-                addIfHasText(result, valueExtractor.apply(entry.data()), entry.iso6391());
+                addIfHasText(result, valueExtractor.apply(entry.data()), toLanguageTag(entry));
             }
         }
 
-        addIfHasText(result, defaultValue, defaultLanguage);
-
         return result;
+    }
+
+    /**
+     * Idioma da tradução com o país, quando o TMDB informa ({@code pt-BR}) — o país diferencia
+     * variantes do mesmo idioma ({@code zh-CN}/{@code zh-TW}, {@code pt-BR}/{@code pt-PT}).
+     *
+     * @param entry tradução do TMDB
+     * @return {@code idioma-PAÍS}, só o idioma sem país, ou {@code null} sem idioma
+     */
+    private static String toLanguageTag(TmdbTranslationEntryResponse entry) {
+        if (entry.iso6391() == null) {
+            return null;
+        }
+
+        if (entry.iso31661() == null || entry.iso31661().isBlank()) {
+            return entry.iso6391();
+        }
+
+        return entry.iso6391() + "-" + entry.iso31661();
     }
 
     private static void addIfHasText(List<TmdbLocalizedOption> options, String value, String language) {

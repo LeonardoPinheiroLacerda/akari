@@ -26,6 +26,8 @@ Cada faceta bem distinta tem seu próprio par resource/service, todos compartilh
 
 `EpisodePairingResolutionService` e `AbsoluteEpisodeOffsetService` também não têm resource próprio: são a resolução do pairing TMDB dos arquivos de uma pasta pela estratégia do anibridge, usada pela proposta de pairing do portal (`AnimeTmdbProposalService`, que só devolve) — moram aqui, junto do pairing, e não em `ingestion` (que já depende de `anime`; o contrário faria um ciclo de services). `EpisodeContinuityResolutionService` (estratégia de continuidade) e `EpisodePairingComparisonService` (comparação da resolução com os pares gravados), também usados só pela proposta, também não têm resource.
 
+`AnimeTmdbOverridesFillService` também não tem resource: preenche os overrides a partir do TMDB pro step `TMDB_OVERRIDES` da ingestão, fora do `AnimeTmdbService` pra não inchar o service do binding com as regras de escolha por idioma.
+
 `AnimeOverrideService` **não tem resource próprio** — confirmado no código: é um `@ApplicationScoped` puro, sem endpoint HTTP, que resolve campo a campo qual valor prevalece (override manual do TMDB, quando setado, ou o dado cru da AniList). Existe pra não duplicar essa regra nos services que exibem `Anime`: também monta o `AnimeResponse` (`toResponse`, com o `franchiseRootId` da resolução de franquias) e o `AnimeBindingSummary` (`toBindingSummary`) usados por `AnimeService`, `AnimeRelationsService` e `AnimeFranchiseService`, que o injetam diretamente — o `AnimeRelationsService` também resolve título/thumbnail dos `AnimeRelationNode`; `AnimeTmdbService`/`AnimeTmdbFilePairingService` não precisam dele porque não exibem o anime resolvido, só o estado de binding/pairing cru.
 
 ## Funcionalidades existentes
@@ -54,9 +56,10 @@ Organização em franquias (`AnimeFranchiseService`, portal):
 
 Eixo TMDB:
 - Vincular o anime a uma série/filme do TMDB, validando a existência do id (`bindTmdb`). O bind não preenche os overrides de imagem.
-- Remover o binding TMDB, limpando junto os overrides e os pairings TMDB de todos os arquivos da pasta (`clearTmdbBinding`, via `TmdbFilePairing.deleteByFolderId`) — os pairings apontam pra temporadas/episódios do título desvinculado. Um novo bind volta a pré-preencher backdrop/logo; os pairings precisam ser refeitos.
+- Remover o binding TMDB, limpando junto os overrides e os pairings TMDB de todos os arquivos da pasta (`clearTmdbBinding`, via `TmdbFilePairing.deleteByFolderId`) — os pairings apontam pra temporadas/episódios do título desvinculado. Os pairings precisam ser refeitos depois de um novo bind.
 - Ler o estado TMDB atual (binding + overrides) (`getTmdbState`). O estado devolvido por `getTmdbState`, `bindTmdb` e `updateTmdbOverrides` traz sempre `details`, a ficha resumida da série/filme vinculado como está no TMDB (título, título original, data, temporadas/episódios, pôster e backdrop principais, sem overrides), pra conferir se o binding aponta pro título certo. A ficha é lida cache-first, sem `language` (textos no idioma padrão do TMDB, `en-US`); se o TMDB falhar, a operação falha com o erro do TMDB (`502`/`503`) — no `updateTmdbOverrides`, desfazendo a gravação dos overrides.
 - Substituir o bloco de overrides inteiro (`updateTmdbOverrides`).
+- Preencher título, sinopse, backdrop e logo a partir das traduções e imagens do TMDB (`AnimeTmdbOverridesFillService.fillOverrides`), chamado pelo step `TMDB_OVERRIDES` da ingestão — regras em "Fluxos importantes".
 - Montar o schema de opções concretas por campo overridable: traduções de título/sinopse e galeria de imagens do TMDB (`getTmdbOverridesSchema`).
 
 Proposta de binding TMDB:
@@ -92,6 +95,7 @@ Episódios:
 - `AnimeService`, `AnimeRelationsService` e `AnimeFranchiseService` usam `graph/FranchiseResolver` pra preencher `franchiseRootId` de cada `AnimeResponse`; os dois últimos também usam `graph/FranchiseClassifier`.
 - `AnimeTmdbService` injeta `AnimeService` (busca o anime base, reusa `findOrThrow`).
 - `AnimeTmdbFilePairingService` injeta `AnimeTmdbService` (reusa `findTvBoundAnimeOrThrow`).
+- `AnimeTmdbOverridesFillService` injeta `AnimeTmdbService` (reusa `findBoundAnimeOrThrow`, `fetchTranslations` e `fetchImages`, estes dois package-private).
 - `AnimeTmdbProposalService` injeta `AnimeTmdbService` (reusa `fetchDetails` pra montar a ficha e `findTvBoundAnimeOrThrow`), `EpisodePairingResolutionService` (estratégia anibridge), `EpisodeContinuityResolutionService` (estratégia de continuidade) e `EpisodePairingComparisonService` (pares gravados e comparação) — só escolhe a estratégia e encadeia os três.
 - `AnimeTmdbFilePairingMapper.toPairingRequest` é o único ponto que traduz um episódio do TMDB pros campos do pairing — usado por `EpisodePairingResolutionService` e `EpisodeContinuityResolutionService`.
 - `EpisodePairingResolutionService` injeta `AbsoluteEpisodeOffsetService` (offsets de numeração absoluta).
@@ -101,7 +105,8 @@ Episódios:
 **Externas (outros domínios), por service:**
 - `AnimeService`: `anilist.service.AnilistSearchService` (fetch/sync), `mediafolder.service.MediaFolderService` (resolve a pasta no bind).
 - `AnimeRelationsService`: `anilist.service.AnilistSearchService` (busca vizinhos durante o sync em cascata).
-- `AnimeTmdbService`: `tmdb.service.TmdbService` (detalhes, imagens, traduções), `setting.service.SettingService` (idioma preferido de backdrop/logo).
+- `AnimeTmdbService`: `tmdb.service.TmdbService` (detalhes, imagens, traduções).
+- `AnimeTmdbOverridesFillService`: `setting.service.SettingService` (idiomas do título, da sinopse, do logo e de fallback); traduções e imagens do TMDB vêm pelo `AnimeTmdbService`.
 - `AnimeTmdbFilePairingService`: `tmdb.service.TmdbService` (temporadas/episódios), `videofile.service.VideoFileService` (valida o arquivo).
 - `AnimeTmdbProposalService`: `anilist.service.AnilistSearchService` (`malId` e total de episódios), `anibridge.service.AnibridgeResolutionService` (melhor candidato TMDB).
 - `EpisodePairingResolutionService`: `anibridge.service.AnibridgeResolutionService` (candidato da série vinculada, segments, conversão de episódio), `videofile.service.VideoFileService` (arquivos da pasta), `tmdb.service.TmdbService` (temporadas/episódios), e a classe utilitária `ingestion.extractor.EpisodeNumberExtractor` (número do episódio no nome do arquivo).
@@ -113,19 +118,19 @@ O acoplamento alto do domínio como um todo (7 domínios externos: `anilist`, `t
 
 ## Módulos relacionados
 
-- **`ingestion`** usa `AnimeService` no step `ANILIST_SYNC` (`AnilistSyncStepService`): `findByFolder` pra manter um vínculo já existente, `find` pra recusar um título já sincronizado com outra pasta e `bindAnime` pra vincular; no step `TMDB_BIND` (`TmdbBindStepService`), usa `AnimeTmdbService.fetchDetails` pra conferir se o título escolhido existe no TMDB e `AnimeTmdbService.bindTmdb` pra vincular o anime; o fim de cada task grava o anime da pasta (`findByFolder`) em `IngestionTask.anime` (`anime_id`, com `ON DELETE SET NULL` — remover o anime só limpa o vínculo da task). No sentido contrário, `anime` usa de `ingestion` só o `extractor.EpisodeNumberExtractor` (no `EpisodePairingResolutionService`) — mesma exceção que `videofile` já tem.
+- **`ingestion`** usa `AnimeService` no step `ANILIST_SYNC` (`AnilistSyncStepService`): `findByFolder` pra manter um vínculo já existente, `find` pra recusar um título já sincronizado com outra pasta e `bindAnime` pra vincular; no step `TMDB_BIND` (`TmdbBindStepService`), usa `AnimeTmdbService.fetchDetails` pra conferir se o título escolhido existe no TMDB e `AnimeTmdbService.bindTmdb` pra vincular o anime; no step `TMDB_OVERRIDES` (`TmdbOverridesStepService`), usa `AnimeTmdbOverridesFillService.fillOverrides` pra preencher os overrides; o fim de cada task grava o anime da pasta (`findByFolder`) em `IngestionTask.anime` (`anime_id`, com `ON DELETE SET NULL` — remover o anime só limpa o vínculo da task). No sentido contrário, `anime` usa de `ingestion` só o `extractor.EpisodeNumberExtractor` (no `EpisodePairingResolutionService`) — mesma exceção que `videofile` já tem.
 - **`mediafolder`**: `MediaFolderService.listFolders` embute `AnimeBindingSummary` via `AnimeService.getAnimeBindings`; `Anime.folder` referencia `MediaFolder`.
 - **`videofile`**: `VideoFileService.listVideoFiles`/`listVideoFilesOrderedByNaturalSortKey` embutem `TmdbFilePairingResponse` via `AnimeTmdbFilePairingService.getTmdbFilePairings`; `AnimeEpisodeService` delega a listagem de episódios inteira pro `VideoFileService.listVideoFilesOrderedByNaturalSortKey`.
 - **`anilist`** e **`tmdb`**: fontes de dados externos consumidas via seus `*SearchService`.
 - **`anibridge`**: `AnimeTmdbProposalService` usa `AnibridgeResolutionService.resolveBestCandidate` pra propor o binding TMDB, passando o formato do anime na AniList pro desempate entre filme e série.
-- **`setting`**: `AnimeTmdbService` injeta o `SettingService` e mantém o `selectImage` (escolha da imagem mais votada por idioma), ambos sem uso desde que o bind deixou de pré-preencher as imagens.
+- **`setting`**: `AnimeTmdbOverridesFillService` injeta o `SettingService` pra ler os idiomas do preenchimento dos overrides.
 
 ## Pontos de entrada
 
 HTTP, via os sete `*Resource` (`/v1/metadata/animes/...`, `/v1/metadata/folders/{folderId}/anime`, `/v1/metadata/anime-relations`, `/v1/metadata/files/{fileId}/tmdb-pairing`, `/v1/metadata/animes/{anilistId}/episodes`, `/v1/metadata/tmdb/binding-proposals`, `/v1/metadata/franchises`) — ver `openapi.yaml`, tags `Anime`, `AnimeRelations`, `AnimeFranchise`, `AnimeTmdb`, `AnimeTmdbFilePairing`, `AnimeEpisodes`, `AnimeTmdbProposal`.
 
 Programático, pra outros domínios (sem HTTP):
-- `AnimeService.getAnimeBindings` (usado por `mediafolder`), `.findByFolder`, `.find` e `.bindAnime` (usados por `ingestion`); `AnimeTmdbService.bindTmdb` (usado por `ingestion`, além do resource) e `.fetchDetails` (usado por `ingestion` e pelo `AnimeTmdbProposalService`). `findOrThrow` também é público, mas só usado dentro do domínio `anime`.
+- `AnimeService.getAnimeBindings` (usado por `mediafolder`), `.findByFolder`, `.find` e `.bindAnime` (usados por `ingestion`); `AnimeTmdbService.bindTmdb` (usado por `ingestion`, além do resource) e `.fetchDetails` (usado por `ingestion` e pelo `AnimeTmdbProposalService`); `AnimeTmdbOverridesFillService.fillOverrides` (usado por `ingestion`). `AnimeService.findOrThrow` e `AnimeTmdbService.findBoundAnimeOrThrow` também são públicos, mas só usados dentro do domínio `anime`.
 - `AnimeTmdbFilePairingService.getTmdbFilePairings`.
 - `AnimeTmdbService.findTvBoundAnimeOrThrow` (uso intra-domínio, mas público).
 
@@ -147,6 +152,17 @@ Programático, pra outros domínios (sem HTTP):
 
 **Bind TMDB (`AnimeTmdbService.bindTmdb`):** valida que o anime existe e ainda não tem binding → confirma o `tmdbId` no TMDB pro `mediaType` informado → grava `tmdbId`, `tmdbMediaType` e `tmdbBoundAt`. Não mexe nos overrides de imagem.
 
+**Preenchimento dos overrides (`AnimeTmdbOverridesFillService.fillOverrides`):** lê traduções e imagens do título vinculado (cache-first) e grava, devolvendo num `TmdbOverridesFill` o que gravou e os campos sem opção:
+
+Cada idioma é procurado do mais específico ao mais amplo — idioma e país (`pt-BR`), depois só o idioma (`pt`, de qualquer país, inclusive `pt-PT`) —, primeiro o idioma configurado e depois o de fallback (`tmdb.override.fallback-language`, seed `en`). As settings de idioma aceitam `pt` ou `pt-BR`.
+
+- título e sinopse — setting de idioma (`tmdb.override.title-language`/`tmdb.override.synopsis-language`) vazia grava `null`, mantendo o dado da AniList; preenchida, usa a primeira tradução com texto nessa ordem;
+- logo — usa só `tmdb.image.logo-language`, sem o idioma de fallback: uma lista de idiomas separados por vírgula, em ordem de preferência (ex.: `en-US,ja,none`), com `none` pro logo sem idioma. Fica o mais votado do primeiro idioma da lista que tiver logo, cada um procurado do mais específico ao mais amplo; lista vazia grava `null`. A lista existe porque a maioria dos títulos do TMDB não tem logo no idioma preferido nem sem idioma, mas tem em japonês;
+- backdrop — só se o anime ainda não tem um: o mais votado sem idioma, ou o mais votado na ordem do idioma de fallback. Os demais campos são sobrescritos;
+- campo sem opção nem no idioma configurado nem no de fallback é gravado `null`; fallback vazio desliga o fallback.
+
+Preferência de idioma com valor fora do formato (`pt_BR`, `en US`) é recusada pelo `SettingService` com `BusinessRuleException`, em vez de virar um idioma vazio que não encontra nada. Traduções e imagens são buscadas fora de transação; só a escolha e a gravação rodam numa transação curta (`writeOverrides`).
+
 ## Arquivos críticos
 
 - `model/Anime.java` — entidade central; PK é o próprio `anilistId` (sem id surrogate), concentra dados AniList + binding/overrides TMDB + atribuição de franquia (`franchiseAssignment`, `franchiseRoot`) + revisão.
@@ -158,7 +174,8 @@ Programático, pra outros domínios (sem HTTP):
 - `graph/FranchiseClassifier.java` — divisão dos membros em temporadas/filmes/especiais.
 - `graph/RelationGraph.java` — percursos sobre o grafo de relações: fechamento por BFS (`relations/graph`) e cadeia de `SEQUEL` (temporadas da franquia). Classe estática sem CDI, não `*Service`, porque não orquestra regra de negócio nem tem resource — só lê `AnimeRelation` pelas consultas da entidade, dentro da transação de quem chama.
 - `graph/model/RelationClosure.java` — resultado da BFS (`animeIds` alcançados + `edges` percorridas).
-- `service/AnimeTmdbService.java` — binding TMDB, overrides, schema de opções; maior arquivo do domínio (344 linhas).
+- `service/AnimeTmdbOverridesFillService.java` — escolha por idioma dos overrides preenchidos a partir do TMDB.
+- `service/AnimeTmdbService.java` — binding TMDB, overrides, schema de opções.
 - `service/AnimeTmdbFilePairingService.java` — pairing por arquivo e schema de temporadas/episódios.
 - `model/AnimeRelation.java` + `model/RelationType.java` — grafo de relações; `RelationType` concentra as listas-fonte-única usadas pela franquia (`DERIVED_LINKS`, `AUTO_PARENT_LINKS`, `SERIES_FORMATS`, `MOVIE_FORMATS`).
 - `model/Season.java` — enum da estação de estreia (`WINTER`/`SPRING`/`SUMMER`/`FALL`), usado só pra ordenar `movies`/`specials` da franquia sem uma data de estreia mais precisa persistida localmente.

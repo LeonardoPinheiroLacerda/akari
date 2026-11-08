@@ -28,6 +28,8 @@ Orquestrar chamadas a `storageprovider` (listar a árvore remota e os vídeos de
   nome seja igual ao da pasta.
 - Step `TMDB_BIND` (`TmdbBindStepService`) — vincula o anime da pasta à série ou filme do TMDB
   indicado pelo anibridge.
+- Step `TMDB_OVERRIDES` (`TmdbOverridesStepService`) — preenche título, sinopse, backdrop e logo
+  do anime a partir do TMDB.
 - Extração best-effort do número de episódio a partir do nome do arquivo
   (`extractor/EpisodeNumberExtractor`), consumida por `anime` e `videofile`.
 
@@ -64,7 +66,9 @@ pasta); `ingestion_task.anime_id` com `ON DELETE SET NULL` (remover o anime só 
   pasta (`findByFolder`), se o título escolhido já tem metadata salva (`find`) e vincula
   (`bindAnime`); o step `TMDB_BIND` lê o anime da pasta (`findByFolder`), confere se o título
   escolhido existe no TMDB (`AnimeTmdbService.fetchDetails`) e vincula
-  (`AnimeTmdbService.bindTmdb`); o fim da task grava em `IngestionTask.anime` o anime da pasta
+  (`AnimeTmdbService.bindTmdb`); o step `TMDB_OVERRIDES` lê o anime da pasta (`findByFolder`)
+  e preenche os overrides (`AnimeTmdbOverridesFillService.fillOverrides`); o fim da task grava
+  em `IngestionTask.anime` o anime da pasta
   (`findByFolder`).
 - `domain/anilist` (`AnilistSearchService`) — busca dos candidatos pelo nome da pasta.
 - `domain/anibridge` (`AnibridgeResolutionService.resolveCandidates`) — melhor candidato TMDB do
@@ -206,6 +210,21 @@ Qualquer exceção (AniList fora, bind recusado) vira `ERROR` com a mensagem →
 
 Qualquer outra exceção (TMDB fora, bind recusado) vira `ERROR` com a mensagem → `FAILED`.
 
+**Step `TMDB_OVERRIDES`** (`TmdbOverridesStepService.execute`):
+
+1. `STARTED`. Pasta sem anime vinculado, ou anime sem vínculo com o TMDB: `ERROR` → `FAILED`.
+2. `REQUEST_SENT` → `AnimeTmdbOverridesFillService.fillOverrides` (com retry de rate limit),
+   que escolhe e grava título, sinopse, backdrop e logo pelos idiomas configurados (regras no
+   README de `anime`): título, sinopse e backdrop caem no idioma de
+   `tmdb.override.fallback-language`; o logo segue só a própria lista de idiomas. O backdrop
+   só é preenchido se o anime ainda não tem; os demais campos são sobrescritos. Traduções e
+   imagens são buscadas fora de transação, e só a gravação roda numa transação curta.
+3. Um `WARNING` por campo sem opção no TMDB nos idiomas configurados (o campo fica `null`), sem
+   bloquear → `COMPLETED`, com os overrides gravados nos `details`.
+
+Qualquer exceção (TMDB fora, título inexistente no TMDB, preferência de idioma com valor
+inválido) vira `ERROR` com a mensagem → `FAILED`.
+
 ## Arquivos críticos
 
 - `service/IngestionService.java` — disparo em duas fases; a ordem e a transação por pasta da
@@ -220,6 +239,8 @@ Qualquer outra exceção (TMDB fora, bind recusado) vira `ERROR` com a mensagem 
   comparação de nomes decide o que é vinculado automaticamente.
 - `service/step/TmdbBindStepService.java` — escolha do título do TMDB pelo anibridge e bind; as
   regras de suspeita e empate decidem o que vai pra curadoria.
+- `service/step/TmdbOverridesStepService.java` — preenchimento dos overrides do anime a partir
+  do TMDB.
 - `extractor/EpisodeNumberExtractor.java` — heurística de regex ajustada empiricamente contra ~10
   mil arquivos reais; qualquer alteração de pattern tem risco real de regressão silenciosa no
   pairing e na ordem da listagem de episódios.
