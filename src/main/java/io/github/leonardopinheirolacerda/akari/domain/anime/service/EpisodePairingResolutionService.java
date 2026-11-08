@@ -29,7 +29,8 @@ import java.util.OptionalInt;
 
 /**
  * Resolve o pairing TMDB dos arquivos de vídeo de um anime vinculado a uma série do TMDB, sem
- * gravar nada — usado pela proposta de pairing do portal ({@link AnimeTmdbProposalService}).
+ * gravar nada — usado pela proposta de pairing do portal ({@link AnimeTmdbProposalService}) e
+ * pelo pairing automático da ingestão ({@link AnimeTmdbFilePairingFillService}).
  *
  * <p>O número do episódio sai do nome do arquivo ({@link EpisodeNumberExtractor}), e o anibridge
  * converte pra temporada/episódio do TMDB — só pelos segments que apontam pra série vinculada,

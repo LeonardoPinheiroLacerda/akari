@@ -30,6 +30,8 @@ Orquestrar chamadas a `storageprovider` (listar a árvore remota e os vídeos de
   indicado pelo anibridge.
 - Step `TMDB_OVERRIDES` (`TmdbOverridesStepService`) — preenche título, sinopse, backdrop e logo
   do anime a partir do TMDB.
+- Step `TMDB_FILEPAIR` (`TmdbFilePairStepService`) — pareia os arquivos de vídeo da pasta com os
+  episódios da série do TMDB, pelo anibridge.
 - Extração best-effort do número de episódio a partir do nome do arquivo
   (`extractor/EpisodeNumberExtractor`), consumida por `anime` e `videofile`.
 
@@ -67,7 +69,9 @@ pasta); `ingestion_task.anime_id` com `ON DELETE SET NULL` (remover o anime só 
   (`bindAnime`); o step `TMDB_BIND` lê o anime da pasta (`findByFolder`), confere se o título
   escolhido existe no TMDB (`AnimeTmdbService.fetchDetails`) e vincula
   (`AnimeTmdbService.bindTmdb`); o step `TMDB_OVERRIDES` lê o anime da pasta (`findByFolder`)
-  e preenche os overrides (`AnimeTmdbOverridesFillService.fillOverrides`); o fim da task grava
+  e preenche os overrides (`AnimeTmdbOverridesFillService.fillOverrides`); o step
+  `TMDB_FILEPAIR` lê o anime da pasta (`findByFolder`) e pareia os arquivos
+  (`AnimeTmdbFilePairingFillService.fillPairings`); o fim da task grava
   em `IngestionTask.anime` o anime da pasta
   (`findByFolder`).
 - `domain/anilist` (`AnilistSearchService`) — busca dos candidatos pelo nome da pasta.
@@ -225,6 +229,29 @@ Qualquer outra exceção (TMDB fora, bind recusado) vira `ERROR` com a mensagem 
 Qualquer exceção (TMDB fora, título inexistente no TMDB, preferência de idioma com valor
 inválido) vira `ERROR` com a mensagem → `FAILED`.
 
+**Step `TMDB_FILEPAIR`** (`TmdbFilePairStepService.execute`):
+
+1. `STARTED`. Pasta sem anime vinculado, ou anime sem vínculo com o TMDB: `ERROR` → `FAILED`.
+   Vínculo de filme: `COMPLETED` (evento) → `SKIPPED`, já que filme não tem episódios.
+2. `REQUEST_SENT` → `AnimeTmdbFilePairingFillService.fillPairings` (com retry de rate limit),
+   que resolve cada arquivo pelo anibridge (`EpisodePairingResolutionService`, a mesma
+   resolução da proposta de pairing do portal) e grava só o que não precisa de decisão:
+   - arquivo que já tem pairing gravado é mantido como está, mesmo que a resolução aponte
+     outro episódio — uma nova ingestão não desfaz o pairing curado à mão;
+   - episódio resolvido pra mais de um arquivo, ou já gravado em outro arquivo da pasta, não é
+     gravado em nenhum dos envolvidos (`EPISODE_CONFLICT`).
+
+   A resolução roda fora de transação; só a gravação roda numa transação curta.
+3. `RESULTS_FOUND` com pareados agora, já pareados e sem par → um `WARNING` por arquivo sem
+   par, com o motivo (status da resolução ou `EPISODE_CONFLICT`).
+4. Nenhum arquivo pareado, nem por pairing que já existia (inclui `NO_MAPPING` e
+   `CONFLICTING_MAPPING`, que valem pra pasta inteira): `MATCH_NOT_FOUND` → `UNRESOLVED`.
+   Pareamento parcial: `COMPLETED`.
+
+Qualquer exceção (anibridge fora, TMDB fora) vira `ERROR` com a mensagem → `FAILED`. A busca
+de uma temporada que falha no TMDB não derruba o step: a resolução marca os arquivos daquela
+temporada como `NOT_FOUND_IN_TMDB`.
+
 ## Arquivos críticos
 
 - `service/IngestionService.java` — disparo em duas fases; a ordem e a transação por pasta da
@@ -240,6 +267,8 @@ inválido) vira `ERROR` com a mensagem → `FAILED`.
 - `service/step/TmdbBindStepService.java` — escolha do título do TMDB pelo anibridge e bind; as
   regras de suspeita e empate decidem o que vai pra curadoria.
 - `service/step/TmdbOverridesStepService.java` — preenchimento dos overrides do anime a partir
+  do TMDB.
+- `service/step/TmdbFilePairStepService.java` — pairing dos arquivos da pasta com os episódios
   do TMDB.
 - `extractor/EpisodeNumberExtractor.java` — heurística de regex ajustada empiricamente contra ~10
   mil arquivos reais; qualquer alteração de pattern tem risco real de regressão silenciosa no
@@ -273,6 +302,13 @@ inválido) vira `ERROR` com a mensagem → `FAILED`.
 - O retry de rate limit (`RetryUtils.withRateLimitRetry`) não tem limite de tentativas: sob rate
   limit prolongado da AniList, a task fica parada e os ciclos seguintes são pulados até ela
   terminar.
+- O `EpisodeNumberExtractor` não reconhece alguns padrões de nome, que deixam o arquivo sem
+  pairing no step `TMDB_FILEPAIR`: `Season 01 Episode 01` (extrai a temporada como episódio),
+  número de temporada colado ao título (`Love_Live!_School_Idol_Project_2_01` extrai o `2`) e
+  número entre underscores ou após prefixo (`_Sunshine!!_01[`, `_S2_01_v2_`, `_Season2_01_`,
+  `_E02 -`), que saem sem número. Mexer nos patterns exige comparar a extração antes e depois
+  sobre os nomes reais do catálogo, pelo risco de regressão descrito em "Arquivos críticos".
+  **Backlog real** (confirmado pelo mantenedor).
 - `IngestionResource` não tem `@ApplicationScoped` explícito na classe (diferente de
   `CacheResource`); sem anotação de escopo, o CDI trata a classe como `@Dependent` — o JAX-RS
   resource funciona normalmente, só sem o pooling de `@ApplicationScoped`. **Backlog real**

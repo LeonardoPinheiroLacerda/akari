@@ -224,7 +224,7 @@ itens abaixo são backlog real (a corrigir aos poucos), exceto onde indicado "Ac
    sessão MEGA cacheada stale no rclone; só reiniciar o `rcd` resolve (`fscache/clear` não é
    suficiente). Afeta diretamente `GET /v1/storage/providers/{id}/health` para providers MEGA.
 4. **Retry de rate-limit ad hoc, não centralizado**: `RetryUtils.withRateLimitRetry` é aplicado em
-   alguns call sites específicos (os steps `ANILIST_SYNC`, `TMDB_BIND` e `TMDB_OVERRIDES` da ingestão,
+   alguns call sites específicos (os steps `ANILIST_SYNC`, `TMDB_BIND`, `TMDB_OVERRIDES` e `TMDB_FILEPAIR` da ingestão,
    `anibridge.AnibridgeResolutionService`) e, dentro dos services de integração, só em
    `TmdbService.getSeasonEpisodes` — no resto dos services `anilist`/`tmdb`, quem chama e esquece de
    envolver a chamada corre risco de falha dura sob rate limit do upstream.

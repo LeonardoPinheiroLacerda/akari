@@ -9,7 +9,8 @@ import io.github.leonardopinheirolacerda.akari.domain.videofile.model.VideoFile;
  * Resultado da resolução de pairing TMDB de um arquivo de vídeo, calculado pelo
  * {@code EpisodePairingResolutionService} (estratégia anibridge) ou pelo
  * {@code EpisodeContinuityResolutionService} (estratégia de continuidade), ambos pra proposta de
- * pairing do portal.
+ * pairing do portal — o anibridge também pro pairing automático da ingestão
+ * ({@code AnimeTmdbFilePairingFillService}).
  * Na proposta, o {@code EpisodePairingComparisonService} compara cada resultado com o par gravado
  * do arquivo.
  *

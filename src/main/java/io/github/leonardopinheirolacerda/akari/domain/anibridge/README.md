@@ -68,7 +68,8 @@ Resolve também ambiguidade quando o dataset aponta mais de um candidato TMDB pr
   binding TMDB no portal (`POST /v1/metadata/tmdb/binding-proposals`);
   `EpisodePairingResolutionService` usa `resolveCandidateFor`, `resolveSafeSegments`,
   `restrictToFullSeasonCoverage` e `resolveEpisode` pra resolver o pairing de episódios na
-  proposta de pairing do portal.
+  proposta de pairing do portal e no pairing automático do step `TMDB_FILEPAIR` da ingestão
+  (`AnimeTmdbFilePairingFillService`).
 - **`domain.tmdb`** — dependência de saída do `AnibridgeResolutionService` (confirmação de
   temporadas existentes).
 - **`domain.anilist`** — não é dependência direta de código, mas semanticamente adjacente: o
