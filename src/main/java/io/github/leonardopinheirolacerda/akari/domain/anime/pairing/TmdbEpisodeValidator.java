@@ -8,19 +8,11 @@ import io.github.leonardopinheirolacerda.akari.domain.anime.model.Anime;
 import io.github.leonardopinheirolacerda.akari.domain.anime.model.FilePairingResolution;
 import io.github.leonardopinheirolacerda.akari.domain.anime.model.FuzzyDate;
 import io.github.leonardopinheirolacerda.akari.domain.tmdb.client.dtos.TmdbEpisodeResponse;
-import io.github.leonardopinheirolacerda.akari.domain.tmdb.service.TmdbService;
 import io.github.leonardopinheirolacerda.akari.domain.videofile.model.VideoFile;
-import io.github.leonardopinheirolacerda.akari.exceptions.IntegrationException;
-import io.github.leonardopinheirolacerda.akari.utils.RetryUtils;
-import io.quarkus.logging.Log;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
 import java.time.LocalDate;
-import java.time.YearMonth;
-import java.time.format.DateTimeParseException;
-import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -38,9 +30,6 @@ public class TmdbEpisodeValidator {
     private static final int AIR_WINDOW_TOLERANCE_DAYS = 365;
 
     @Inject
-    TmdbService tmdbService;
-
-    @Inject
     AnimeTmdbFilePairingMapper animeTmdbFilePairingMapper;
 
     /**
@@ -49,10 +38,7 @@ public class TmdbEpisodeValidator {
      * @param anime anime com binding TMDB de série
      * @param videoFile arquivo resolvido
      * @param resolved temporada/episódio a que a conversão chegou
-     * @param episodesBySeason episódios já buscados no TMDB, por temporada — um mapa por pasta,
-     *                         preenchido aqui, pra não buscar a mesma temporada a cada arquivo
-     * @param folderId pasta do anime, só pra log
-     * @param folderName nome da pasta, só pra log
+     * @param seasonEpisodes temporadas da série, buscadas uma vez por pasta
      * @return {@code PAIRED} com o pairing; {@code NOT_FOUND_IN_TMDB} se o episódio não existe
      *         no TMDB; ou {@code OUT_OF_AIR_WINDOW} se ele foi ao ar a mais de
      *         {@link #AIR_WINDOW_TOLERANCE_DAYS} dias antes da estreia ou depois do fim do anime
@@ -60,17 +46,9 @@ public class TmdbEpisodeValidator {
     public FilePairingResolution validate(Anime anime,
                                           VideoFile videoFile,
                                           ResolvedEpisode resolved,
-                                          Map<Integer, List<TmdbEpisodeResponse>> episodesBySeason,
-                                          Integer folderId,
-                                          String folderName) {
+                                          TmdbSeasonEpisodes seasonEpisodes) {
 
-        final Optional<TmdbEpisodeResponse> episode = findEpisode(
-                anime.tmdbId,
-                resolved,
-                episodesBySeason,
-                folderId,
-                folderName
-        );
+        final Optional<TmdbEpisodeResponse> episode = findEpisode(resolved, seasonEpisodes);
 
         if (episode.isEmpty()) {
             return new FilePairingResolution(
@@ -106,53 +84,23 @@ public class TmdbEpisodeValidator {
     }
 
     /**
-     * Busca no TMDB o episódio resolvido, de onde sai a metadata do pairing (thumbnail, nome,
-     * sinopse etc.). Cacheia a temporada inteira por pasta — evita uma chamada por arquivo quando
-     * vários episódios caem na mesma temporada. Vazio se a temporada não existir no TMDB (o
-     * anibridge pode estar dessincronizado dele), se a busca falhar ou se o episódio não estiver
-     * na temporada — nesses casos o arquivo sai como {@code NOT_FOUND_IN_TMDB}, sem pairing, pra
-     * aparecer como pendente em vez de pareado sem metadata.
+     * Episódio resolvido no TMDB, de onde sai a metadata do pairing (thumbnail, nome, sinopse
+     * etc.). Vazio se a temporada não existir no TMDB (o anibridge pode estar dessincronizado
+     * dele), se a busca falhar ou se o episódio não estiver na temporada — nesses casos o arquivo
+     * sai como {@code NOT_FOUND_IN_TMDB}, sem pairing, pra aparecer como pendente em vez de
+     * pareado sem metadata.
      */
-    private Optional<TmdbEpisodeResponse> findEpisode(
-            Integer tmdbId,
-            ResolvedEpisode resolved,
-            Map<Integer, List<TmdbEpisodeResponse>> episodesBySeason,
-            Integer folderId,
-            String folderName) {
+    private Optional<TmdbEpisodeResponse> findEpisode(ResolvedEpisode resolved,
+                                                      TmdbSeasonEpisodes seasonEpisodes) {
 
         if (resolved.seasonNumber() == null) {
             return Optional.empty();
         }
 
-        final List<TmdbEpisodeResponse> episodes = episodesBySeason.computeIfAbsent(
-                resolved.seasonNumber(),
-                seasonNumber -> fetchSeasonEpisodes(tmdbId, seasonNumber, folderId, folderName)
-        );
-
-        return episodes.stream()
+        return seasonEpisodes.of(resolved.seasonNumber())
+                .stream()
                 .filter(episode -> episode.episodeNumber().equals(resolved.tmdbEpisode()))
                 .findFirst();
-    }
-
-    private List<TmdbEpisodeResponse> fetchSeasonEpisodes(Integer tmdbId,
-                                                          Integer seasonNumber,
-                                                          Integer folderId,
-                                                          String folderName) {
-
-        try {
-            return RetryUtils.withRateLimitRetry(
-                    () -> tmdbService.getSeasonEpisodes(tmdbId, seasonNumber)
-            );
-        } catch (IntegrationException e) {
-            Log.warnf(
-                    e,
-                    "Busca da temporada %d no TMDB falhou pra pasta %d (%s)",
-                    seasonNumber,
-                    folderId,
-                    folderName
-            );
-            return List.of();
-        }
     }
 
     /**
@@ -163,7 +111,7 @@ public class TmdbEpisodeValidator {
      * anime sem ano, não há o que comparar e o episódio é aceito.
      */
     private boolean isWithinAirWindow(Anime anime, TmdbEpisodeResponse episode) {
-        final Optional<LocalDate> airDate = parseAirDate(episode.airDate());
+        final Optional<LocalDate> airDate = AirDates.parse(episode.airDate());
 
         if (airDate.isEmpty()) {
             return true;
@@ -172,7 +120,7 @@ public class TmdbEpisodeValidator {
         final FuzzyDate startDate = anime.startDate;
 
         if (startDate != null && startDate.year != null) {
-            final LocalDate windowStart = firstDayOf(startDate)
+            final LocalDate windowStart = AirDates.firstDayOf(startDate)
                     .minusDays(AIR_WINDOW_TOLERANCE_DAYS);
 
             if (airDate.get().isBefore(windowStart)) {
@@ -186,47 +134,9 @@ public class TmdbEpisodeValidator {
             return true;
         }
 
-        final LocalDate windowEnd = lastDayOf(endDate).plusDays(AIR_WINDOW_TOLERANCE_DAYS);
+        final LocalDate windowEnd = AirDates.lastDayOf(endDate).plusDays(AIR_WINDOW_TOLERANCE_DAYS);
 
         return !airDate.get().isAfter(windowEnd);
-    }
-
-    private static Optional<LocalDate> parseAirDate(String airDate) {
-        if (airDate == null || airDate.isBlank()) {
-            return Optional.empty();
-        }
-
-        try {
-            return Optional.of(LocalDate.parse(airDate));
-        } catch (DateTimeParseException e) {
-            Log.warnf("Data de exibição do TMDB fora do formato ISO: %s", airDate);
-            return Optional.empty();
-        }
-    }
-
-    private static LocalDate firstDayOf(FuzzyDate date) {
-        if (date.month == null) {
-            return LocalDate.of(date.year, 1, 1);
-        }
-
-        if (date.day == null) {
-            return LocalDate.of(date.year, date.month, 1);
-        }
-
-        return LocalDate.of(date.year, date.month, date.day);
-    }
-
-    private static LocalDate lastDayOf(FuzzyDate date) {
-        if (date.month == null) {
-            return LocalDate.of(date.year, 12, 31);
-        }
-
-        if (date.day == null) {
-            return YearMonth.of(date.year, date.month)
-                    .atEndOfMonth();
-        }
-
-        return LocalDate.of(date.year, date.month, date.day);
     }
 
 }

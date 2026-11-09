@@ -74,10 +74,11 @@ Externa:
   `TmdbEpisodeResponse` para os DTOs de contrato do pareamento.
 - `domain.anibridge.service.AnibridgeResolutionService` — usa `TmdbSeasonSummaryResponse`
   (dentro de `TmdbMappingCandidate`) para resolver o melhor candidato de binding anime↔TMDB.
-- `domain.anime.pairing.TmdbEpisodeValidator` — usa `getSeasonEpisodes` e
-  `TmdbEpisodeResponse` diretamente pra confirmar no TMDB o episódio resolvido pelo anibridge e
-  montar a metadata do pairing, na proposta de pairing do portal e no pairing automático da
-  ingestão.
+- `domain.anime.pairing.TmdbSeasonEpisodes` — usa `getTvDetails` e `getSeasonEpisodes` pra
+  buscar as temporadas da série vinculada na resolução do pairing (proposta do portal e pairing
+  automático da ingestão): o `TmdbEpisodeValidator` confirma o episódio resolvido e monta a
+  metadata do pairing, e o `AirDateEpisodeMapper` lista os episódios exibidos no período do
+  anime.
 - `domain.anime.service.EpisodeContinuityResolutionService` — usa `getTvDetails` (temporadas
   regulares) e `getSeasonEpisodes` pra achar o episódio seguinte ao da âncora na proposta por
   continuidade.
