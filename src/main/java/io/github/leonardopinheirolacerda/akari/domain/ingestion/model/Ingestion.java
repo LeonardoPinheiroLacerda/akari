@@ -22,7 +22,10 @@ public class Ingestion extends PanacheEntityBase {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     public Integer id;
 
-    /** Situação agregada da ingestão; gravada como {@code PENDING} na criação. */
+    /**
+     * Situação agregada da ingestão: {@code PENDING} na criação, {@code RUNNING} quando a primeira
+     * task começa, e {@code COMPLETED} ou {@code COMPLETED_WITH_ERRORS} quando a última termina.
+     */
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     public IngestionStatus status;

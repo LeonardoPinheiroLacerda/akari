@@ -4,7 +4,10 @@ package io.github.leonardopinheirolacerda.akari.domain.ingestion.model.enums;
  * Situação de uma {@code Ingestion} como um todo — o agregado das tasks de todas as pastas do
  * subtree.
  *
- * <p>Hoje só {@link #PENDING} é gravado, na criação; nenhum fluxo avança o status ainda.
+ * <p>Gravados: {@link #PENDING} na criação, {@link #RUNNING} quando a primeira task começa, e
+ * {@link #COMPLETED} ou {@link #COMPLETED_WITH_ERRORS} quando a última termina (ver
+ * {@code IngestionTaskExecutionService}). {@link #FAILED} e {@link #CANCELLED} não são gravados
+ * por nenhum fluxo.
  */
 public enum IngestionStatus {
 
@@ -14,7 +17,7 @@ public enum IngestionStatus {
     /** Pelo menos uma task em processamento. */
     RUNNING,
 
-    /** Todas as tasks terminaram sem falha. */
+    /** Todas as tasks terminaram sem falha — inclusive as que pararam à espera de curadoria. */
     COMPLETED,
 
     /** Todas as tasks terminaram, mas alguma falhou. */

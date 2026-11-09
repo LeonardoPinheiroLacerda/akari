@@ -1,7 +1,9 @@
 package io.github.leonardopinheirolacerda.akari.domain.ingestion.service;
 
 import io.github.leonardopinheirolacerda.akari.domain.anime.service.AnimeService;
+import io.github.leonardopinheirolacerda.akari.domain.ingestion.model.Ingestion;
 import io.github.leonardopinheirolacerda.akari.domain.ingestion.model.IngestionTask;
+import io.github.leonardopinheirolacerda.akari.domain.ingestion.model.enums.IngestionStatus;
 import io.github.leonardopinheirolacerda.akari.domain.ingestion.model.enums.IngestionStepStatus;
 import io.github.leonardopinheirolacerda.akari.domain.ingestion.model.enums.IngestionTaskStatus;
 import io.github.leonardopinheirolacerda.akari.domain.ingestion.service.step.AnilistSyncStepService;
@@ -96,7 +98,7 @@ public class IngestionTaskExecutionService {
     /**
      * Marca como {@code RUNNING} a próxima task a executar — uma {@code RUNNING} no início de um
      * ciclo só pode ter sobrado de uma queda do serviço, já que a task anterior sempre termina
-     * antes.
+     * antes. A primeira task de uma ingestão também marca a ingestão como {@code RUNNING}.
      *
      * @return a task, com a pasta carregada; vazio se não houver task a executar
      */
@@ -110,6 +112,13 @@ public class IngestionTaskExecutionService {
             if (claimed.startedAt == null) {
                 claimed.startedAt = OffsetDateTime.now();
             }
+
+            final Ingestion ingestion = claimed.ingestion;
+
+            if (ingestion.status == IngestionStatus.PENDING) {
+                ingestion.status = IngestionStatus.RUNNING;
+                ingestion.startedAt = OffsetDateTime.now();
+            }
         });
 
         return task;
@@ -117,7 +126,7 @@ public class IngestionTaskExecutionService {
 
     /**
      * Grava a situação final da task, quando ela parou de ser processada e o anime vinculado à
-     * pasta, se houver.
+     * pasta, se houver — e fecha a ingestão, se essa era a última task dela a terminar.
      *
      * @param taskId id da task
      * @param status {@code COMPLETED}, {@code WAITING_CURATION} ou {@code FAILED}
@@ -132,5 +141,26 @@ public class IngestionTaskExecutionService {
                 .orElse(null);
 
         Log.infof("Tarefa de ingestão %d terminou como %s", taskId, status);
+
+        finishIngestionIfDone(task.ingestion);
+    }
+
+    /**
+     * Fecha a ingestão quando a task que acabou de terminar era a última dela: {@code COMPLETED},
+     * ou {@code COMPLETED_WITH_ERRORS} se alguma task terminou {@code FAILED}. Task em
+     * {@code WAITING_CURATION} conta como terminada — a curadoria é um resultado esperado da
+     * ingestão, não uma falha.
+     */
+    private void finishIngestionIfDone(Ingestion ingestion) {
+        if (IngestionTask.existsUnfinished(ingestion.id)) {
+            return;
+        }
+
+        ingestion.status = IngestionTask.existsFailed(ingestion.id)
+                ? IngestionStatus.COMPLETED_WITH_ERRORS
+                : IngestionStatus.COMPLETED;
+        ingestion.completedAt = OffsetDateTime.now();
+
+        Log.infof("Ingestão %d terminou como %s", ingestion.id, ingestion.status);
     }
 }

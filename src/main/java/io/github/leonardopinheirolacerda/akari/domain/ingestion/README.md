@@ -39,7 +39,8 @@ Orquestrar chamadas a `storageprovider` (listar a árvore remota e os vídeos de
 
 ## Modelo
 
-- `Ingestion` — um disparo. `status` (`IngestionStatus`) gravado como `PENDING`.
+- `Ingestion` — um disparo. `status` (`IngestionStatus`), `startedAt` (primeira task iniciada) e
+  `completedAt` (última task terminada).
 - `IngestionTask` — o processamento de uma pasta com vídeo dentro da ingestão. `status`
   (`IngestionTaskStatus`), `currentStep` (último step iniciado) e `anime` (anime vinculado à
   pasta ao fim da task).
@@ -50,8 +51,12 @@ Orquestrar chamadas a `storageprovider` (listar a árvore remota e os vídeos de
 
 A task passa por `PENDING` → `RUNNING` → `COMPLETED`/`WAITING_CURATION`/`FAILED`; a execução de
 um step nasce `RUNNING` e termina `COMPLETED`, `SKIPPED`, `UNRESOLVED` ou `FAILED`. A
-`Ingestion` continua `PENDING` (o status agregado não é atualizado), e `CANCELLED` (task) e
-`PENDING` (execução) não são gravados por nenhum fluxo.
+`Ingestion` nasce `PENDING`, passa a `RUNNING` quando a primeira task começa e termina
+`COMPLETED` — ou `COMPLETED_WITH_ERRORS`, se alguma task terminou `FAILED` — quando a última
+task termina; task em `WAITING_CURATION` conta como terminada, já que a curadoria é um
+resultado esperado, não uma falha. Ingestão sem nenhuma task (nenhuma pasta com vídeo) fica
+`PENDING`. `FAILED` e `CANCELLED` (ingestão e task) e `PENDING` (execução) não são gravados por
+nenhum fluxo.
 
 FKs (`V20__create-ingestion-tables.sql`): task → ingestão, execução → task e evento → execução
 com `ON DELETE CASCADE`; `ingestion_task.folder_id` com `ON DELETE CASCADE` (a task some com a
@@ -132,12 +137,13 @@ demais.
 
 **Execução das tasks** (`IngestionTaskExecutionService.executeNextTask`, a cada 1s): toma a task
 `PENDING` ou `RUNNING` mais antiga (`IngestionTask.findNextExecutable`, com a pasta já
-carregada) e a marca `RUNNING` → chama os steps em sequência, pulando os que `isExecuted` diz já
-terem terminado → um step que termina `UNRESOLVED` (rodou sem erro, mas não conseguiu decidir
-sozinho) para a task em `WAITING_CURATION`, e um que termina `FAILED`, em `FAILED`; se todos
-passarem, a task fica `COMPLETED` → `finishTask` grava o status, o `completedAt` e o anime
-vinculado à pasta. Exceção inesperada termina a task `FAILED`, só com
-log.
+carregada) e a marca `RUNNING` (e a ingestão dela, se ainda `PENDING`) → chama os steps em
+sequência, pulando os que `isExecuted` diz já terem terminado → um step que termina
+`UNRESOLVED` (rodou sem erro, mas não conseguiu decidir sozinho) para a task em
+`WAITING_CURATION`, e um que termina `FAILED`, em `FAILED`; se todos passarem, a task fica
+`COMPLETED` → `finishTask` grava o status, o `completedAt` e o anime vinculado à pasta e, se era
+a última task da ingestão a terminar, fecha a ingestão, na mesma transação. Exceção inesperada
+termina a task `FAILED`, só com log.
 
 - **Uma task por vez:** tasks da mesma franquia rodando juntas disputam as arestas de
   `anime_relation` no `syncRelations` do bind (chave duplicada, deadlock), e uma transação não vê

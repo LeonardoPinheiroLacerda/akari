@@ -82,4 +82,32 @@ public class IngestionTask extends PanacheEntityBase {
                 )
                 .firstResultOptional();
     }
+
+    /**
+     * Confere se a ingestão ainda tem task a executar ({@code PENDING} ou {@code RUNNING}).
+     *
+     * @param ingestionId id da ingestão
+     * @return {@code true} se alguma task da ingestão ainda não terminou
+     */
+    public static boolean existsUnfinished(Integer ingestionId) {
+        return count(
+                "ingestion.id = ?1 and status in ?2",
+                ingestionId,
+                List.of(IngestionTaskStatus.PENDING, IngestionTaskStatus.RUNNING)
+        ) > 0;
+    }
+
+    /**
+     * Confere se alguma task da ingestão terminou {@code FAILED}.
+     *
+     * @param ingestionId id da ingestão
+     * @return {@code true} se alguma task da ingestão falhou
+     */
+    public static boolean existsFailed(Integer ingestionId) {
+        return count(
+                "ingestion.id = ?1 and status = ?2",
+                ingestionId,
+                IngestionTaskStatus.FAILED
+        ) > 0;
+    }
 }
