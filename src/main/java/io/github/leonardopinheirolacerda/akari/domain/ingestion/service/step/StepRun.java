@@ -119,6 +119,16 @@ public final class StepRun {
         service.record(execution, IngestionEventType.COMPLETED, message, details);
     }
 
+    /** Grava um evento {@code SKIPPED}, sem dados estruturados. */
+    public void skipped(String message) {
+        skipped(message, null);
+    }
+
+    /** Grava um evento {@code SKIPPED} com dados estruturados. */
+    public void skipped(String message, Map<String, Object> details) {
+        service.record(execution, IngestionEventType.SKIPPED, message, details);
+    }
+
     /**
      * Fecha a execução com o status final do step.
      *

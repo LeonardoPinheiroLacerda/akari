@@ -167,12 +167,16 @@ chamada. É um objeto por execução, não um campo do step service, porque o se
 transação curta: a linha do tempo fica visível enquanto o step roda e nenhuma transação fica
 aberta durante as chamadas de rede dele.
 
+A `message` do evento aparece no portal: é uma frase pra quem acompanha a ingestão (o que o step
+está fazendo, o que encontrou e, quando para à espera de curadoria, o que fazer); códigos, ids e
+dados técnicos ficam nos `details`.
+
 **Step `ANILIST_SYNC`** (`AnilistSyncStepService.execute`):
 
 1. `STARTED`. Pasta já vinculada a um anime: `MATCH_SELECTED` + `COMPLETED`, mantém o vínculo.
 2. `REQUEST_SENT` → busca o nome da pasta na AniList (5 resultados, com
-   `RetryUtils.withRateLimitRetry`) → `RESPONSE_RECEIVED` → `RESULTS_FOUND` com os resultados da
-   busca, como vieram da AniList.
+   `RetryUtils.withRateLimitRetry`) → `RESULTS_FOUND` com um resumo de cada resultado (id,
+   títulos, sinônimos, formato, episódios e ano), não a ficha inteira da AniList.
 3. Procura um nome igual ao da pasta, sem diferenciar maiúsculas de minúsculas, nesta
    prioridade — cada nível olha todos os resultados antes de passar ao próximo:
    1. título (romaji, inglês, nativo, preferido) exato;
@@ -240,7 +244,7 @@ inválido) vira `ERROR` com a mensagem → `FAILED`.
 **Step `TMDB_FILEPAIR`** (`TmdbFilePairStepService.execute`):
 
 1. `STARTED`. Pasta sem anime vinculado, ou anime sem vínculo com o TMDB: `ERROR` → `FAILED`.
-   Vínculo de filme: `COMPLETED` (evento) → `SKIPPED`, já que filme não tem episódios.
+   Vínculo de filme: `SKIPPED` (evento) → `SKIPPED`, já que filme não tem episódios.
 2. `REQUEST_SENT` → `AnimeTmdbFilePairingFillService.fillPairings` (com retry de rate limit),
    que resolve cada arquivo pelo anibridge (`EpisodePairingResolutionService`, a mesma
    resolução da proposta de pairing do portal) e grava só o que não precisa de decisão:
@@ -251,7 +255,9 @@ inválido) vira `ERROR` com a mensagem → `FAILED`.
 
    A resolução roda fora de transação; só a gravação roda numa transação curta.
 3. `RESULTS_FOUND` com pareados agora, já pareados e sem par → um `WARNING` por arquivo sem
-   par, com o motivo (status da resolução ou `EPISODE_CONFLICT`).
+   par, com o motivo (status da resolução ou `EPISODE_CONFLICT`) explicado na mensagem e o
+   código nos `details`; em `OUT_OF_AIR_WINDOW`, os `details` trazem também o período do anime
+   (`animeStartDate`/`animeEndDate`).
 4. Nenhum arquivo pareado, nem por pairing que já existia (inclui `NO_MAPPING` e
    `CONFLICTING_MAPPING`, que valem pra pasta inteira): `MATCH_NOT_FOUND` → `UNRESOLVED`.
    Pareamento parcial: `COMPLETED`.

@@ -28,6 +28,14 @@ import java.util.Optional;
 @ApplicationScoped
 public class TmdbOverridesStepService extends IngestionStepService {
 
+    // Nome amigável de cada campo dos overrides, pra mensagem do campo sem opção no TMDB.
+    private static final Map<String, String> FIELD_NAMES = Map.of(
+            "title", "título",
+            "synopsis", "sinopse",
+            "backdropPath", "imagem de fundo",
+            "logoPath", "logo"
+    );
+
     @Inject
     AnimeService animeService;
 
@@ -78,12 +86,12 @@ public class TmdbOverridesStepService extends IngestionStepService {
     }
 
     private IngestionStepStatus fillOverrides(StepRun run, MediaFolder folder) {
-        run.started("Preenchimento dos overrides do TMDB iniciado");
+        run.started("Buscando no TMDB o título, a sinopse e as imagens do anime");
 
         final Optional<Anime> boundAnime = animeService.findByFolder(folder.id);
 
         if (boundAnime.isEmpty()) {
-            run.error("Pasta sem anime vinculado na AniList");
+            run.error("A pasta ainda não tem um anime da AniList vinculado");
 
             return IngestionStepStatus.FAILED;
         }
@@ -91,13 +99,16 @@ public class TmdbOverridesStepService extends IngestionStepService {
         final Anime anime = boundAnime.get();
 
         if (anime.tmdbId == null) {
-            run.error("Anime sem vínculo com o TMDB", Map.of("anilistId", anime.anilistId));
+            run.error(
+                    "O anime ainda não está vinculado ao TMDB",
+                    Map.of("anilistId", anime.anilistId)
+            );
 
             return IngestionStepStatus.FAILED;
         }
 
         run.requestSent(
-                "Traduções e imagens solicitadas ao TMDB",
+                "Buscando as traduções e as imagens no TMDB",
                 Map.of("tmdbId", anime.tmdbId, "mediaType", anime.tmdbMediaType)
         );
 
@@ -107,12 +118,17 @@ public class TmdbOverridesStepService extends IngestionStepService {
 
         for (String field : fill.notFound()) {
             run.warning(
-                    "Nenhuma opção no TMDB nos idiomas configurados",
+                    "O TMDB não tem %s nos idiomas configurados".formatted(
+                            FIELD_NAMES.getOrDefault(field, field)
+                    ),
                     Map.of("field", field)
             );
         }
 
-        run.completed("Overrides do TMDB preenchidos", Map.of("overrides", fill));
+        run.completed(
+                "Título, sinopse e imagens atualizados a partir do TMDB",
+                Map.of("overrides", fill)
+        );
 
         return IngestionStepStatus.COMPLETED;
     }

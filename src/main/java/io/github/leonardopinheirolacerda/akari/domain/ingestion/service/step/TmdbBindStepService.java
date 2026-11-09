@@ -1,5 +1,6 @@
 package io.github.leonardopinheirolacerda.akari.domain.ingestion.service.step;
 
+import io.github.leonardopinheirolacerda.akari.api.dto.TmdbBindingDetails;
 import io.github.leonardopinheirolacerda.akari.api.dto.TmdbBindingRequest;
 import io.github.leonardopinheirolacerda.akari.api.dto.TmdbMediaType;
 import io.github.leonardopinheirolacerda.akari.domain.anibridge.model.CandidateResolution;
@@ -92,12 +93,12 @@ public class TmdbBindStepService extends IngestionStepService {
     }
 
     private IngestionStepStatus bindTmdb(StepRun run, MediaFolder folder) {
-        run.started("Vínculo do anime com o TMDB iniciado");
+        run.started("Procurando no TMDB a série ou o filme deste anime");
 
         final Optional<Anime> boundAnime = animeService.findByFolder(folder.id);
 
         if (boundAnime.isEmpty()) {
-            run.error("Pasta sem anime vinculado na AniList");
+            run.error("A pasta ainda não tem um anime da AniList vinculado");
 
             return IngestionStepStatus.FAILED;
         }
@@ -106,10 +107,10 @@ public class TmdbBindStepService extends IngestionStepService {
 
         if (anime.tmdbId != null) {
             run.matchSelected(
-                    "Anime já vinculado ao TMDB",
+                    "O anime já estava vinculado ao TMDB",
                     Map.of("tmdbId", anime.tmdbId, "mediaType", anime.tmdbMediaType)
             );
-            run.completed("Vínculo com o TMDB mantido");
+            run.completed("O vínculo com o TMDB foi mantido");
 
             return IngestionStepStatus.COMPLETED;
         }
@@ -123,7 +124,7 @@ public class TmdbBindStepService extends IngestionStepService {
 
         if (resolution.best() == null) {
             run.matchNotFound(
-                    "Nenhum mapeamento TMDB no anibridge pra esse anime",
+                    "O anibridge não tem este anime mapeado no TMDB. Escolha o título manualmente",
                     Map.of("anilistId", anime.anilistId)
             );
 
@@ -135,8 +136,13 @@ public class TmdbBindStepService extends IngestionStepService {
 
         if (resolution.candidateCount() > 1 && resolution.bestSuspicious()) {
             run.matchNotFound(
-                    "Melhor candidato do anibridge é suspeito: sobreposição ou cobertura maior que o anime",
-                    Map.of("tmdbId", tmdbId, "mediaType", mediaType, "candidates", resolution.candidateCount())
+                    "O título mais provável no anibridge cobre mais episódios que o anime ou se "
+                            + "sobrepõe a outro. Escolha o título manualmente",
+                    Map.of(
+                            "tmdbId", tmdbId,
+                            "mediaType", mediaType,
+                            "candidates", resolution.candidateCount()
+                    )
             );
 
             return IngestionStepStatus.UNRESOLVED;
@@ -144,23 +150,37 @@ public class TmdbBindStepService extends IngestionStepService {
 
         if (resolution.tied()) {
             run.matchNotFound(
-                    "Mais de um candidato do anibridge empata, sem como desempatar",
-                    Map.of("tmdbId", tmdbId, "mediaType", mediaType, "candidates", resolution.candidateCount())
+                    "O anibridge indica mais de um título do TMDB igualmente provável. "
+                            + "Escolha o título manualmente",
+                    Map.of(
+                            "tmdbId", tmdbId,
+                            "mediaType", mediaType,
+                            "candidates", resolution.candidateCount()
+                    )
             );
 
             return IngestionStepStatus.UNRESOLVED;
         }
 
         run.matchSelected(
-                "Candidato TMDB do anibridge escolhido",
-                Map.of("tmdbId", tmdbId, "mediaType", mediaType)
+                "Título do TMDB escolhido pelo mapeamento do anibridge",
+                Map.of(
+                        "tmdbId", tmdbId,
+                        "mediaType", mediaType,
+                        "candidates", resolution.candidateCount()
+                )
         );
 
+        final TmdbBindingDetails details;
+
         try {
-            RetryUtils.withRateLimitRetry(() -> animeTmdbService.fetchDetails(tmdbId, mediaType));
+            details = RetryUtils.withRateLimitRetry(
+                    () -> animeTmdbService.fetchDetails(tmdbId, mediaType)
+            );
         } catch (ResourceNotFoundException e) {
             run.matchNotFound(
-                    "Título do anibridge não existe no TMDB: " + e.getMessage(),
+                    "O título indicado pelo anibridge não existe mais no TMDB. "
+                            + "Escolha o título manualmente",
                     Map.of("tmdbId", tmdbId, "mediaType", mediaType)
             );
 
@@ -177,7 +197,10 @@ public class TmdbBindStepService extends IngestionStepService {
                 }
         );
 
-        run.completed("Anime vinculado ao TMDB", Map.of("tmdbId", tmdbId));
+        run.completed(
+                "Anime vinculado a \"%s\" no TMDB".formatted(details.getTitle()),
+                Map.of("tmdbId", tmdbId, "mediaType", mediaType)
+        );
 
         return IngestionStepStatus.COMPLETED;
     }

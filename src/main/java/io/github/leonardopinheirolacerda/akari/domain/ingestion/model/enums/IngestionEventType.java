@@ -31,5 +31,8 @@ public enum IngestionEventType {
     ERROR,
 
     /** A execução da etapa terminou. */
-    COMPLETED
+    COMPLETED,
+
+    /** A etapa não se aplica à pasta e terminou sem fazer nada. */
+    SKIPPED
 }

@@ -16,6 +16,7 @@ import io.quarkus.logging.Log;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -111,16 +112,16 @@ public class AnilistSyncStepService extends IngestionStepService {
         final Integer folderId = folder.id;
         final String folderName = folder.name;
 
-        run.started("Vínculo da pasta com a AniList iniciado");
+        run.started("Procurando na AniList o anime desta pasta");
 
         final Optional<Anime> boundAnime = animeService.findByFolder(folderId);
 
         if (boundAnime.isPresent()) {
             run.matchSelected(
-                    "Pasta já vinculada a um anime",
+                    "A pasta já estava vinculada a um anime",
                     Map.of("anilistId", boundAnime.get().anilistId)
             );
-            run.completed("Vínculo com a AniList mantido");
+            run.completed("O vínculo com a AniList foi mantido");
 
             return IngestionStepStatus.COMPLETED;
         }
@@ -128,7 +129,7 @@ public class AnilistSyncStepService extends IngestionStepService {
         final long fileCount = videoFileService.countByFolder(folderId);
 
         run.requestSent(
-                "Busca enviada à AniList",
+                "Buscando \"%s\" na AniList".formatted(folderName),
                 Map.of("query", folderName, "page", 0, "size", SEARCH_PAGE_SIZE)
         );
 
@@ -136,12 +137,10 @@ public class AnilistSyncStepService extends IngestionStepService {
                 () -> anilistSearchService.search(folderName, 0, SEARCH_PAGE_SIZE, false)
         ).getData();
 
-        run.responseReceived("Resposta da AniList recebida", Map.of("results", results.size()));
-
         if (!results.isEmpty()) {
             run.resultsFound(
-                    "%d candidatos encontrados na AniList".formatted(results.size()),
-                    Map.of("candidates", results)
+                    resultsMessage(results.size()),
+                    Map.of("candidates", summarize(results))
             );
         }
 
@@ -157,7 +156,10 @@ public class AnilistSyncStepService extends IngestionStepService {
                 .orElse(List.of());
 
         if (matches.isEmpty()) {
-            run.matchNotFound("Nenhum título da AniList tem nome igual ao da pasta");
+            run.matchNotFound(
+                    "Nenhum resultado da AniList tem o mesmo nome da pasta. "
+                            + "Escolha o anime manualmente"
+            );
 
             return IngestionStepStatus.UNRESOLVED;
         }
@@ -166,8 +168,9 @@ public class AnilistSyncStepService extends IngestionStepService {
 
         if (match.isEmpty()) {
             run.matchNotFound(
-                    "Mais de um título da AniList tem nome igual ao da pasta, sem como desempatar",
-                    Map.of("candidates", matches, "files", fileCount)
+                    "Mais de um anime da AniList tem o mesmo nome da pasta. "
+                            + "Escolha o anime manualmente",
+                    Map.of("candidates", summarize(matches), "files", fileCount)
             );
 
             return IngestionStepStatus.UNRESOLVED;
@@ -176,13 +179,13 @@ public class AnilistSyncStepService extends IngestionStepService {
         final Integer anilistId = match.get().getAnilistId();
 
         run.matchSelected(
-                "Título da AniList com nome igual ao da pasta encontrado",
-                Map.of("candidate", match.get())
+                "Anime encontrado: \"%s\"".formatted(nameOf(match.get())),
+                Map.of("candidate", summarize(match.get()))
         );
 
         if (animeService.find(anilistId).isPresent()) {
             run.error(
-                    "O anime encontrado já está sincronizado com outra pasta",
+                    "O anime encontrado já está vinculado a outra pasta",
                     Map.of("anilistId", anilistId)
             );
 
@@ -193,7 +196,10 @@ public class AnilistSyncStepService extends IngestionStepService {
 
         if (episodes != null && episodes != fileCount) {
             run.warning(
-                    "Quantidade de arquivos da pasta diferente do número de episódios do anime",
+                    "A pasta tem %d arquivos, mas o anime tem %d episódios".formatted(
+                            fileCount,
+                            episodes
+                    ),
                     Map.of("anilistId", anilistId, "episodes", episodes, "files", fileCount)
             );
         }
@@ -207,7 +213,10 @@ public class AnilistSyncStepService extends IngestionStepService {
                 }
         );
 
-        run.completed("Pasta vinculada ao anime da AniList", Map.of("anilistId", anilistId));
+        run.completed(
+                "Pasta vinculada a \"%s\"".formatted(nameOf(match.get())),
+                Map.of("anilistId", anilistId)
+        );
 
         return IngestionStepStatus.COMPLETED;
     }
@@ -248,6 +257,49 @@ public class AnilistSyncStepService extends IngestionStepService {
         }
 
         return Optional.empty();
+    }
+
+    /** Quantos resultados a AniList devolveu, no singular ou no plural. */
+    private static String resultsMessage(Integer count) {
+        if (count == 1) {
+            return "A AniList encontrou 1 resultado";
+        }
+
+        return "A AniList encontrou %d resultados".formatted(count);
+    }
+
+    /**
+     * Resumo dos resultados da AniList pros detalhes do evento: só o que serve pra conferir a
+     * escolha, sem a ficha inteira.
+     */
+    private List<Map<String, Object>> summarize(List<AnilistMediaSummary> summaries) {
+        return summaries.stream()
+                .map(this::summarize)
+                .toList();
+    }
+
+    private Map<String, Object> summarize(AnilistMediaSummary summary) {
+        final Map<String, Object> candidate = new LinkedHashMap<>();
+
+        final List<String> titles = titlesOf(summary)
+                .distinct()
+                .toList();
+
+        candidate.put("anilistId", summary.getAnilistId());
+        candidate.put("titles", titles);
+        candidate.put("synonyms", summary.getSynonyms());
+        candidate.put("format", summary.getFormat());
+        candidate.put("episodes", summary.getEpisodes());
+        candidate.put("seasonYear", summary.getSeasonYear());
+
+        return candidate;
+    }
+
+    /** Nome do anime pra mensagem: o primeiro título conhecido (romaji, inglês, nativo), ou o id. */
+    private String nameOf(AnilistMediaSummary summary) {
+        return titlesOf(summary)
+                .findFirst()
+                .orElse("AniList " + summary.getAnilistId());
     }
 
     private Stream<String> titlesOf(AnilistMediaSummary summary) {
