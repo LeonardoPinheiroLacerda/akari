@@ -10,8 +10,8 @@ import java.util.OptionalInt;
 /**
  * Conversão pelo período de exibição do número de episódio dos arquivos de uma pasta pra
  * temporada/episódio do TMDB — preparada uma vez por pasta pelo {@link AirDateEpisodeMapper}:
- * os episódios do TMDB exibidos no período do anime, em ordem de exibição, onde o arquivo de
- * número {@code N} fica com o {@code N}-ésimo.
+ * os episódios do TMDB exibidos no período do anime, em ordem de temporada e episódio, onde o
+ * arquivo de número {@code N} fica com o {@code N}-ésimo.
  */
 public final class AirDateFolderMapping {
 
@@ -34,7 +34,8 @@ public final class AirDateFolderMapping {
     /**
      * Conversão pelos episódios exibidos no período do anime.
      *
-     * @param airedEpisodes episódios do TMDB exibidos no período, em ordem de exibição
+     * @param airedEpisodes episódios do TMDB exibidos no período, em ordem de temporada e
+     *                      episódio
      * @return a conversão da pasta
      */
     static AirDateFolderMapping of(List<ResolvedEpisode> airedEpisodes) {

@@ -9,6 +9,7 @@ import io.github.leonardopinheirolacerda.akari.domain.anime.service.AbsoluteEpis
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
@@ -79,9 +80,13 @@ public class AnibridgeEpisodeMapper {
                 && anime.episodes != null
                 && anime.episodes == 1;
 
-        final List<Integer> offsetCandidates = absoluteEpisodeOffsetService.computeOffsetCandidates(
-                anime.anilistId
+        final List<Integer> offsetCandidates = new ArrayList<>(
+                absoluteEpisodeOffsetService.computeOffsetCandidates(anime.anilistId)
         );
+
+        folderOffsetCandidate(episodeNumbers, anime.episodes)
+                .filter(offset -> !offsetCandidates.contains(offset))
+                .ifPresent(offsetCandidates::add);
 
         final Optional<List<MappingSegment>> offsetSegments = offsetCandidates.isEmpty()
                 ? Optional.empty()
@@ -107,6 +112,43 @@ public class AnibridgeEpisodeMapper {
                 folderOffset,
                 singleEpisodeFolder
         );
+    }
+
+    /**
+     * Offset que a própria pasta indica, quando ela tem a temporada inteira em numeração contínua:
+     * todos os arquivos com número, tantos quanto os episódios do anime, sem número repetido nem
+     * buraco, e o primeiro maior que 1 — o primeiro arquivo é o episódio 1, então o offset é o
+     * número dele menos 1. Entra como mais um candidato, depois dos da cadeia de prequels, pra
+     * quando a soma dos prequels não bate com a numeração do lançamento (um episódio {@code 00},
+     * um especial ou um filme contados na numeração absoluta). A escolha entre os candidatos
+     * continua sendo pela cobertura ({@link #findFolderOffset}).
+     *
+     * @return o offset; vazio se a pasta não tem a temporada inteira em numeração contínua
+     */
+    private static Optional<Integer> folderOffsetCandidate(List<OptionalInt> episodeNumbers,
+                                                           Integer animeEpisodes) {
+
+        if (animeEpisodes == null
+                || episodeNumbers.size() != animeEpisodes
+                || episodeNumbers.stream().anyMatch(OptionalInt::isEmpty)) {
+
+            return Optional.empty();
+        }
+
+        final List<Integer> numbers = episodeNumbers.stream()
+                .map(OptionalInt::getAsInt)
+                .distinct()
+                .sorted()
+                .toList();
+
+        final int first = numbers.getFirst();
+        final int last = numbers.getLast();
+
+        if (numbers.size() != animeEpisodes || last - first + 1 != animeEpisodes || first <= 1) {
+            return Optional.empty();
+        }
+
+        return Optional.of(first - 1);
     }
 
     /**

@@ -12,15 +12,20 @@ import java.util.List;
 /**
  * Segunda conversão da resolução do pairing, usada só no arquivo que a conversão pelo anibridge
  * ({@link AnibridgeEpisodeMapper}) não pareou: prepara, por pasta, os episódios do TMDB exibidos
- * no período do anime na AniList, em ordem de exibição ({@link AirDateFolderMapping}). Não depende
- * do anibridge — cobre a série longa que ele só mapeia no começo (ex.: Gintama, mapeado só na
- * primeira temporada do TMDB) e o mapeamento que aponta pra temporada errada.
+ * no período do anime na AniList, em ordem de temporada e episódio
+ * ({@link AirDateFolderMapping}). Não depende do anibridge — cobre a série longa que ele só mapeia
+ * no começo (ex.: Gintama, mapeado só na primeira temporada do TMDB) e o mapeamento que aponta
+ * pra temporada errada.
  *
  * <p>O período vai da estreia ao fim do anime, com {@link #AIR_DATE_MARGIN_DAYS} dias de folga em
  * cada ponta; em anime em exibição ({@code RELEASING}), da estreia até hoje. Precisa das datas
  * completas, com dia: uma data parcial (só ano ou mês) cobriria episódios de outra temporada.
  * Anime terminado só é convertido se a quantidade de episódios exibidos no período for igual ao
  * total do anime na AniList — a trava que impede casar episódios por coincidência.
+ *
+ * <p>A data só decide quais episódios entram no período; a ordem é a da numeração do TMDB, porque
+ * a data de exibição nem sempre acompanha o número do episódio (episódio exibido fora de
+ * sequência, vários no mesmo dia) e inverteria episódios vizinhos.
  */
 @ApplicationScoped
 public class AirDateEpisodeMapper {
@@ -63,8 +68,7 @@ public class AirDateEpisodeMapper {
                 .flatMap(seasonNumber -> seasonEpisodes.of(seasonNumber).stream())
                 .filter(episode -> isAiredWithin(episode, windowStart, windowEnd))
                 .sorted(Comparator
-                        .comparing(TmdbEpisodeResponse::airDate)
-                        .thenComparing(TmdbEpisodeResponse::seasonNumber)
+                        .comparing(TmdbEpisodeResponse::seasonNumber)
                         .thenComparing(TmdbEpisodeResponse::episodeNumber))
                 .map(episode -> new ResolvedEpisode(
                         episode.seasonNumber(),
