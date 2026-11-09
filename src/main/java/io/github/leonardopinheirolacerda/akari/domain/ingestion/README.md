@@ -33,13 +33,9 @@ Orquestrar chamadas a `storageprovider` (listar a árvore remota e os vídeos de
 - Step `TMDB_FILEPAIR` (`TmdbFilePairStepService`) — pareia os arquivos de vídeo da pasta com os
   episódios da série do TMDB, pelo anibridge.
 - Extração best-effort do número de episódio a partir do nome do arquivo
-  (`extractor/EpisodeNumberExtractor`), consumida por `anime` e `videofile`. O `extract` olha um
-  arquivo por vez; o `extractForFolder`, usado só pela resolução do pairing, olha a pasta
-  inteira quando o `extract` devolve o mesmo número em mais de um arquivo (temporada ou número
-  do título lido como episódio): troca o número desses arquivos pelo da posição, entre os
-  números isolados do nome, que tem um valor diferente em cada um; sem essa posição, numera
-  pela ordem dos nomes, só se a pasta tem exatamente o total de episódios do anime e todos os
-  nomes têm a mesma quantidade de números.
+  (`extractor/EpisodeNumberExtractor`), consumida por `anime` e `videofile`, um arquivo por vez
+  (`extract`). Também lista os números isolados de um nome (`extractSeparatedNumbers`), que o
+  `anime` usa pra numerar a pasta inteira na resolução do pairing (`FolderEpisodeNumbering`).
 
 ## Modelo
 
@@ -93,7 +89,7 @@ pasta); `ingestion_task.anime_id` com `ON DELETE SET NULL` (remover o anime só 
 ## Módulos relacionados
 
 `domain/videofile` (`VideoFileService`, pra calcular `naturalSortKey`) e `domain/anime`
-(`EpisodePairingResolutionService`, na resolução do pairing) importam
+(`FolderEpisodeNumbering`, na resolução do pairing) importam
 `extractor/EpisodeNumberExtractor` — as únicas classes fora de `domain/ingestion` que importam
 algo daqui. Fora essa exceção, o módulo é um orquestrador de ponta: consome vários domínios, não
 é consumido por nenhum outro.
@@ -310,8 +306,9 @@ temporada como `NOT_FOUND_IN_TMDB`.
   terminar.
 - O `EpisodeNumberExtractor` não extrai número de alguns padrões de nome — número entre
   underscores ou após prefixo (`_Sunshine!!_01[`, `_S2_01_v2_`, `_Season2_01_`, `_E02 -`) —, e
-  esses arquivos ficam sem pairing no step `TMDB_FILEPAIR`. O `extractForFolder` não cobre o
-  caso, porque só age sobre número repetido, não sobre arquivo sem número. Mexer nos patterns
+  esses arquivos ficam sem pairing no step `TMDB_FILEPAIR`. A numeração da pasta inteira
+  (`FolderEpisodeNumbering`, no `anime`) não cobre o caso, porque só age sobre número repetido,
+  não sobre arquivo sem número. Mexer nos patterns
   exige comparar a extração antes e depois sobre os nomes reais do catálogo, pelo risco de
   regressão descrito em "Arquivos críticos". **Backlog real** (confirmado pelo mantenedor).
 - `IngestionResource` não tem `@ApplicationScoped` explícito na classe (diferente de

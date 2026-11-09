@@ -21,7 +21,7 @@ import java.util.Set;
  * prequels da AniList — quando uma temporada continua a contagem de episódios da anterior em
  * vez de reiniciar em 1 (ex.: arquivos "14-38" de uma 2ª temporada cujo mapeamento do anibridge
  * é relativo, "1-25"). É regra de consumo específica do pairing TMDB, não do domínio de relações
- * em si — por isso o único consumidor é o {@link EpisodePairingResolutionService}.
+ * em si — por isso o único consumidor é o {@code AnibridgeEpisodeMapper} ({@code anime/pairing}).
  *
  * <p>Lê a cadeia do banco primeiro e cai pra AniList (cache-first) quando o prequel, ou a
  * aresta dele, ainda não está salvo — senão o resultado dependeria da ordem em que a ingestão

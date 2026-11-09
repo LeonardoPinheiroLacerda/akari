@@ -161,7 +161,7 @@ de `videofile` (lista e cria os arquivos de vídeo das pastas) e de `anime` (o s
 dependem de `ingestion` só por `extractor.EpisodeNumberExtractor` — uma classe utilitária
 estática, sem service: `videofile` reaproveita a heurística de extração de episódio pra calcular
 a chave de ordenação natural (`VideoFileService.naturalSortKeyOf`), e `anime` pra resolver o
-pairing de episódios (`EpisodePairingResolutionService`), em vez de duplicá-la. São os únicos
+pairing de episódios (`anime/pairing/FolderEpisodeNumbering`), em vez de duplicá-la. São os únicos
 ciclos do grafo, ambos só por esse extractor; Java não impede (não há dependência circular de
 build, maven é um módulo só), mas é uma exceção notável à topologia acíclica do restante.
 
