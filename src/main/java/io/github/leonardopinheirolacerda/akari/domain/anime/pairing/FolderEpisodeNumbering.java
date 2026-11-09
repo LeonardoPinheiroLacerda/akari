@@ -31,10 +31,11 @@ public final class FolderEpisodeNumbering {
     /**
      * Número de episódio de cada arquivo de uma pasta, olhando a pasta inteira.
      *
-     * <p>Usa o {@link EpisodeNumberExtractor#extract} de cada arquivo, a não ser que ele devolva
-     * o mesmo número em mais
-     * de um arquivo (ex.: {@code "Season 1 Episode 01"} e {@code "Season 1 Episode 02"} saem
-     * ambos 1, a temporada). Nesse caso, tenta, nesta ordem:
+     * <p>Usa o {@link EpisodeNumberExtractor#extract} de cada arquivo, a não ser que ele não
+     * ache número em nenhum arquivo da pasta, ou devolva o mesmo número em mais de um arquivo
+     * (ex.: {@code "Season 1 Episode 01"} e {@code "Season 1 Episode 02"} saem ambos 1, a
+     * temporada). Pasta sem nenhum número vai direto pra ordem dos nomes (item 2, com a trava
+     * do total de episódios). Com número repetido, tenta, nesta ordem:
      * <ol>
      *   <li>o número que varia entre os arquivos com número repetido: todos esses nomes têm a
      *       mesma quantidade de números isolados por separador, e exatamente uma posição tem um
@@ -62,6 +63,15 @@ public final class FolderEpisodeNumbering {
                 .map(EpisodeNumberExtractor::extract)
                 .toList();
 
+        final boolean hasNoNumber = perFile.stream()
+                .noneMatch(OptionalInt::isPresent);
+
+        if (hasNoNumber) {
+            return isFullSeason(fileNames, expectedEpisodes)
+                    ? numberByNameOrder(fileNames)
+                    : perFile;
+        }
+
         final List<Integer> repeatedIndexes = repeatedIndexes(perFile);
 
         if (repeatedIndexes.isEmpty()) {
@@ -82,14 +92,16 @@ public final class FolderEpisodeNumbering {
                 .map(EpisodeNumberExtractor::extractSeparatedNumbers)
                 .toList();
 
-        if (expectedEpisodes != null
-                && fileNames.size() == expectedEpisodes
-                && haveSameNumberCount(numbersByFile)) {
-
+        if (isFullSeason(fileNames, expectedEpisodes) && haveSameNumberCount(numbersByFile)) {
             return numberByNameOrder(fileNames);
         }
 
         return perFile;
+    }
+
+    /** A pasta tem exatamente o total de episódios do anime. */
+    private static boolean isFullSeason(List<String> fileNames, Integer expectedEpisodes) {
+        return expectedEpisodes != null && fileNames.size() == expectedEpisodes;
     }
 
     /** Posições dos arquivos cujo número extraído aparece em mais de um arquivo. */

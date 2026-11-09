@@ -306,9 +306,9 @@ temporada como `NOT_FOUND_IN_TMDB`.
   terminar.
 - O `EpisodeNumberExtractor` não extrai número de alguns padrões de nome — número entre
   underscores ou após prefixo (`_Sunshine!!_01[`, `_S2_01_v2_`, `_Season2_01_`, `_E02 -`) —, e
-  esses arquivos ficam sem pairing no step `TMDB_FILEPAIR`. A numeração da pasta inteira
-  (`FolderEpisodeNumbering`, no `anime`) não cobre o caso, porque só age sobre número repetido,
-  não sobre arquivo sem número. Mexer nos patterns
+  esses arquivos ficam sem pairing no step `TMDB_FILEPAIR`, a não ser que a pasta inteira saia
+  sem número e tenha exatamente o total de episódios do anime — aí a numeração da pasta
+  (`FolderEpisodeNumbering`, no `anime`) usa a ordem dos nomes. Mexer nos patterns
   exige comparar a extração antes e depois sobre os nomes reais do catálogo, pelo risco de
   regressão descrito em "Arquivos críticos". **Backlog real** (confirmado pelo mantenedor).
 - `IngestionResource` não tem `@ApplicationScoped` explícito na classe (diferente de
