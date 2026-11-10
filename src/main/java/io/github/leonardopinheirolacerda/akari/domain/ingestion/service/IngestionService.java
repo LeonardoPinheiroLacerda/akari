@@ -292,6 +292,38 @@ public class IngestionService {
     }
 
     /**
+     * Marca como resolvida manualmente uma task que espera curadoria, sem executar os steps que
+     * não rodaram, e publica a mudança no stream.
+     *
+     * @param taskId id da task
+     * @return a task, já {@code RESOLVED}, com a linha do tempo
+     * @throws ResourceNotFoundException se o {@code taskId} não existir
+     * @throws BusinessRuleException se a task não estiver em {@code WAITING_CURATION}
+     */
+    @Transactional
+    public IngestionTaskDetail resolveIngestionTask(Integer taskId) {
+        final IngestionTask task = IngestionTask.find(taskId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Não foi possível localizar uma tarefa de ingestão com o id informado"
+                ));
+
+        if (task.status != IngestionTaskStatus.WAITING_CURATION) {
+            throw new BusinessRuleException(
+                    "Só uma tarefa aguardando curadoria pode ser marcada como resolvida"
+            );
+        }
+
+        task.status = IngestionTaskStatus.RESOLVED;
+
+        Log.infof("Tarefa de ingestão %d marcada como resolvida manualmente", taskId);
+
+        publishTaskUpdated(taskId);
+        publishIngestionUpdated(task.ingestion.id);
+
+        return getIngestionTask(taskId);
+    }
+
+    /**
      * Evento {@code SNAPSHOT} pra quem se inscreve no stream: a ingestão em andamento, ou a
      * última, com todas as tasks.
      *
@@ -429,6 +461,7 @@ public class IngestionService {
                 .pending(counts.getOrDefault(IngestionTaskStatus.PENDING, 0))
                 .running(counts.getOrDefault(IngestionTaskStatus.RUNNING, 0))
                 .waitingCuration(counts.getOrDefault(IngestionTaskStatus.WAITING_CURATION, 0))
+                .resolved(counts.getOrDefault(IngestionTaskStatus.RESOLVED, 0))
                 .completed(counts.getOrDefault(IngestionTaskStatus.COMPLETED, 0))
                 .failed(counts.getOrDefault(IngestionTaskStatus.FAILED, 0));
     }

@@ -417,6 +417,29 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /v1/ingestion/tasks/{taskId}/resolve:
+    parameters:
+      - $ref: '#/components/parameters/IngestionTaskIdPathParam'
+    put:
+      tags: [Ingestion]
+      operationId: resolveIngestionTask
+      summary: Marca como resolvida manualmente uma tarefa que espera curadoria
+      description: |
+        Confirma que a curadoria de uma tarefa em `WAITING_CURATION` foi feita à mão no portal e
+        passa a tarefa para `RESOLVED`. Os steps que não rodaram não são executados. Publica a
+        mudança no stream SSE (`TASK_UPDATED` e `INGESTION_UPDATED`).
+
+        Responde `400` se a tarefa não está em `WAITING_CURATION` e `404` se não existe.
+      responses:
+        '200':
+          $ref: '#/components/responses/IngestionTaskDetailOk'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /v1/ingestion/tasks/{taskId}:
     parameters:
       - $ref: '#/components/parameters/IngestionTaskIdPathParam'
@@ -2853,6 +2876,8 @@ components:
         - `RUNNING` — rodando os steps.
         - `WAITING_CURATION` — algum step não conseguiu decidir sozinho e espera curadoria no
           portal; é um resultado esperado, não uma falha.
+        - `RESOLVED` — esperava curadoria e foi marcada como resolvida manualmente
+          (`PUT /v1/ingestion/tasks/{taskId}/resolve`).
         - `COMPLETED` — todos os steps terminaram.
         - `FAILED` — algum step falhou.
         - `CANCELLED` — reservado; nenhum fluxo grava hoje.
@@ -2860,6 +2885,7 @@ components:
         - PENDING
         - RUNNING
         - WAITING_CURATION
+        - RESOLVED
         - COMPLETED
         - FAILED
         - CANCELLED
@@ -2929,8 +2955,8 @@ components:
       type: object
       description: |
         Quantidade de tarefas da ingestão por status. `total` conta todas as tarefas; uma tarefa
-        está terminada quando está em `waitingCuration`, `completed` ou `failed`.
-      required: [total, pending, running, waitingCuration, completed, failed]
+        está terminada quando está em `waitingCuration`, `resolved`, `completed` ou `failed`.
+      required: [total, pending, running, waitingCuration, resolved, completed, failed]
       properties:
         total:
           type: integer
@@ -2942,6 +2968,9 @@ components:
           type: integer
           format: int32
         waitingCuration:
+          type: integer
+          format: int32
+        resolved:
           type: integer
           format: int32
         completed:

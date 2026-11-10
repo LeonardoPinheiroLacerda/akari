@@ -29,6 +29,9 @@ Orquestrar chamadas a `storageprovider` (listar a árvore remota e os vídeos de
   formato de `/current` (`IngestionService.listIngestions`).
 - `GET /v1/ingestion/tasks/{taskId}` — a task com todas as execuções dos steps e os eventos de
   cada uma (`IngestionService.getIngestionTask`).
+- `PUT /v1/ingestion/tasks/{taskId}/resolve` — marca como `RESOLVED` uma task em
+  `WAITING_CURATION`, depois da curadoria feita à mão no portal; os steps que não rodaram não
+  são executados. `400` se a task não espera curadoria (`IngestionService.resolveIngestionTask`).
 - `GET /v1/ingestion/events` — stream SSE, endpoint code-first (fora de `paths` no contrato,
   mesmo molde de `/v1/cache/events`), payload `IngestionStreamEvent`: `SNAPSHOT` na inscrição
   (a ingestão de `/current`), `INGESTION_UPDATED` (status e contagens, sem as tasks),
@@ -62,7 +65,8 @@ Orquestrar chamadas a `storageprovider` (listar a árvore remota e os vídeos de
 - `IngestionStepEvent` — evento da linha do tempo de uma tentativa (`IngestionEventType`), com
   `message` e `details` em `JSONB`.
 
-A task passa por `PENDING` → `RUNNING` → `COMPLETED`/`WAITING_CURATION`/`FAILED`; a execução de
+A task passa por `PENDING` → `RUNNING` → `COMPLETED`/`WAITING_CURATION`/`FAILED`, e de
+`WAITING_CURATION` pra `RESOLVED` quando marcada como resolvida no portal; a execução de
 um step nasce `RUNNING` e termina `COMPLETED`, `SKIPPED`, `UNRESOLVED` ou `FAILED`. A
 `Ingestion` nasce `PENDING`, passa a `RUNNING` quando a primeira task começa e termina
 `COMPLETED` — ou `COMPLETED_WITH_ERRORS`, se alguma task terminou `FAILED` — quando a última

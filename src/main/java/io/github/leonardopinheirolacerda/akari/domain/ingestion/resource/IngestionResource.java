@@ -102,4 +102,19 @@ public class IngestionResource implements IngestionApi {
     public IngestionTaskDetail getIngestionTask(Integer taskId) {
         return ingestionService.getIngestionTask(taskId);
     }
+
+    /**
+     * {@code PUT /v1/ingestion/tasks/{taskId}/resolve} — marca como resolvida manualmente uma
+     * task que espera curadoria.
+     *
+     * @param taskId id da task
+     * @return a task, já {@code RESOLVED}, com a linha do tempo
+     * @throws ResourceNotFoundException (traduzida em 404) se o {@code taskId} não existir
+     * @throws BusinessRuleException (traduzida em 400) se a task não estiver em
+     *         {@code WAITING_CURATION}
+     */
+    @Override
+    public IngestionTaskDetail resolveIngestionTask(Integer taskId) {
+        return ingestionService.resolveIngestionTask(taskId);
+    }
 }

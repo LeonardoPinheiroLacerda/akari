@@ -16,6 +16,9 @@ public enum IngestionTaskStatus {
     /** Processamento parado à espera de curadoria manual. */
     WAITING_CURATION,
 
+    /** Esperava curadoria e foi marcada como resolvida manualmente no portal. */
+    RESOLVED,
+
     /** Todas as etapas da pasta terminaram. */
     COMPLETED,
 
