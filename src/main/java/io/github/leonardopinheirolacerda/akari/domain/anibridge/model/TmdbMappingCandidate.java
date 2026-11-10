@@ -8,7 +8,8 @@ import java.util.List;
  * esse {@code tmdbId}/{@code mediaType}. Quando um anime bate em mais de um candidato (filme e
  * série simultaneamente, por exemplo), o {@code AnibridgeResolutionService} escolhe o que não é
  * suspeito (sem sobreposição interna, sem cobrir mais episódios do que o anime tem de verdade) —
- * cobertura de episódios só desempata entre candidatos do mesmo nível.
+ * cobertura de episódios desempata entre candidatos do mesmo nível, e o tipo que combina com o
+ * formato do anime desempata por último.
  *
  * @param tmdbId id do recurso no TMDB
  * @param mediaType tipo do recurso

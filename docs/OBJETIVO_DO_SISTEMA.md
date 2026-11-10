@@ -50,10 +50,10 @@ anibridge, franquias/relações entre animes).
 
 1. **Cadastro de storage provider** (`StorageProvider`) → admin registra um provider `LOCAL` ou
    `MEGA` com configuração tipada; campos sensíveis são obscurecidos antes de persistir.
-2. **Ingestão/reconciliação** (`Ingestion`) → o sistema varre o subtree do provider e reconcilia
-   com o catálogo: cria pastas/arquivos novos, preserva os existentes, remove os que
-   desapareceram do provider. Não há passo manual de "importar" além de disparar essa
-   reconciliação.
+2. **Ingestão** (`Ingestion`) → o sistema varre o subtree do provider e registra no catálogo as
+   pastas e os arquivos de vídeo novos, preservando os existentes, e cria uma tarefa por pasta
+   (`IngestionTask`). O que sumiu do provider não é removido. Não há passo manual de "importar"
+   além de disparar a ingestão.
 3. **Navegação do catálogo** (`MediaFolder`/`VideoFile`) → cliente lista pastas e arquivos
    ingeridos; o catálogo em si é agnóstico a metadata de anime.
 4. **Busca e binding de metadata** (`AnilistSearch`, `TmdbSearch`, `Anime`, `AnimeTmdb`) → admin
@@ -66,7 +66,7 @@ anibridge, franquias/relações entre animes).
    numeração absoluta↔temporada, quando aplicável), permitindo gerar thumbnail por episódio.
 6. **Listagem de episódios pronta pra tela** (`AnimeEpisodes`) → resolve a pasta vinculada ao
    anime e pagina os arquivos de vídeo dela em ordem natural pelo nome do arquivo (número de
-   episódio extraído pela mesma heurística do pairing automático), já com o pareamento TMDB
+   episódio extraído pela mesma heurística da resolução do pairing), já com o pareamento TMDB
    embutido só como enriquecimento (título, thumbnail, sinopse) — não define a posição. Existe
    pra que o cliente (app de TV) não precise descobrir o `folderId`, paginar `VideoFile`
    separadamente nem reordenar nada: o backend é a fonte única da ordem.
@@ -83,11 +83,7 @@ anibridge, franquias/relações entre animes).
    delas responderem `503` (`INTEGRATION_NOT_CONFIGURED`).
 9. **Observabilidade** (`Notification`) → eventos relevantes do sistema ficam disponíveis como
    lista paginada (0-based, pensada para um botão "ver mais" no cliente) e contador de não lidas.
-   Hoje, todas as notificações são emitidas pelo domínio `ingestion` (`IngestionService` e
-   `FolderAutoBindService`): falha ao listar o storage provider, falha de integração com
-   AniList/TMDB durante o auto-bind, ausência de candidato AniList/mapeamento TMDB utilizável,
-   segmentos de numeração ambíguos (`anibridge`) e pareamento incompleto de arquivos↔episódio;
-   nenhum outro domínio emite notificação ainda. O push em tempo real via SSE em
+   Hoje nenhum domínio emite notificação. O push em tempo real via SSE em
    `/v1/notifications/events` emite um evento a cada notificação nova, no mesmo molde do SSE de
    `cache` (`/v1/cache/events`): endpoint code-first, payload (`NotificationEvent`) no contrato.
 
@@ -115,7 +111,7 @@ anibridge, franquias/relações entre animes).
 ## Funcionalidades centrais
 
 - Cadastro e health-check de storage providers (`LOCAL`, `MEGA`).
-- Reconciliação de catálogo (pastas/arquivos) com o storage provider.
+- Ingestão de catálogo (pastas/arquivos) a partir do storage provider.
 - Cache local de arquivos remotos com fila serial e eviction LRU.
 - Probe de metadados técnicos de vídeo (container/streams) via ffprobe.
 - Transcode sob demanda para HLS com seleção de perfil, seek e heartbeat de sessão.

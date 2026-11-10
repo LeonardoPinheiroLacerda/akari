@@ -9,8 +9,8 @@ import io.github.leonardopinheirolacerda.akari.exceptions.ResourceNotFoundExcept
 import jakarta.inject.Inject;
 
 /**
- * Implementa {@link AnimeApi} — binding anime↔pasta, fetch/sync na AniList e revisão da
- * ingestão, em {@code /v1/metadata/animes}.
+ * Implementa {@link AnimeApi} — binding anime↔pasta, fetch/sync na AniList e status de
+ * revisão do anime, em {@code /v1/metadata/animes}.
  *
  * <p>Só traduz HTTP ↔ service, sem lógica própria: toda regra de negócio e mapeamento ficam no
  * {@link AnimeService}.
@@ -77,7 +77,7 @@ public class AnimeResource implements AnimeApi {
 
     /**
      * {@code PUT /v1/metadata/animes/{anilistId}/review} — confirma manualmente que a ingestão
-     * desse anime está correta, travando o campo contra alterações futuras do auto-bind.
+     * desse anime está correta, travando o campo contra recálculos automáticos.
      *
      * @param anilistId id do anime na AniList
      * @return a metadata atualizada, com {@code 200 OK}

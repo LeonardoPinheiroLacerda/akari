@@ -1,0 +1,186 @@
+package io.github.leonardopinheirolacerda.akari.domain.ingestion.service;
+
+import io.github.leonardopinheirolacerda.akari.domain.anime.service.AnimeService;
+import io.github.leonardopinheirolacerda.akari.domain.ingestion.model.Ingestion;
+import io.github.leonardopinheirolacerda.akari.domain.ingestion.model.IngestionTask;
+import io.github.leonardopinheirolacerda.akari.domain.ingestion.model.enums.IngestionStatus;
+import io.github.leonardopinheirolacerda.akari.domain.ingestion.model.enums.IngestionStepStatus;
+import io.github.leonardopinheirolacerda.akari.domain.ingestion.model.enums.IngestionTaskStatus;
+import io.github.leonardopinheirolacerda.akari.domain.ingestion.service.step.AnilistSyncStepService;
+import io.github.leonardopinheirolacerda.akari.domain.ingestion.service.step.IngestionStepService;
+import io.github.leonardopinheirolacerda.akari.domain.ingestion.service.step.TmdbBindStepService;
+import io.github.leonardopinheirolacerda.akari.domain.ingestion.service.step.TmdbFilePairStepService;
+import io.github.leonardopinheirolacerda.akari.domain.ingestion.service.step.TmdbOverridesStepService;
+import io.quarkus.logging.Log;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import jakarta.transaction.Transactional;
+
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.util.List;
+import java.util.Optional;
+
+/**
+ * Execução das {@link IngestionTask}s, uma por vez: roda a task inteira, chamando os steps
+ * ({@link IngestionStepService}) em sequência — cada um só se ainda não tiver sido executado, o
+ * que faz uma task interrompida retomar de onde parou.
+ *
+ * <p>Uma por vez, não em paralelo: tasks da mesma franquia rodando juntas disputam as arestas de
+ * {@code anime_relation} no {@code syncRelations} do bind (chave duplicada, deadlock).
+ */
+@ApplicationScoped
+public class IngestionTaskExecutionService {
+
+    @Inject
+    AnilistSyncStepService anilistSyncStepService;
+
+    @Inject
+    TmdbBindStepService tmdbBindStepService;
+
+    @Inject
+    TmdbOverridesStepService tmdbOverridesStepService;
+
+    @Inject
+    TmdbFilePairStepService tmdbFilePairStepService;
+
+    @Inject
+    AnimeService animeService;
+
+    @Inject
+    IngestionService ingestionService;
+
+    /**
+     * Pega a próxima task a executar e roda os steps dela em sequência, pulando os já executados.
+     * Um step que termina {@code UNRESOLVED} para a task em {@code WAITING_CURATION}, e um que
+     * termina {@code FAILED}, em {@code FAILED}; se todos passarem, a task termina
+     * {@code COMPLETED}. Chamado pelo
+     * {@code IngestionTaskScheduler}, que pula os ciclos seguintes enquanto a task não acaba.
+     */
+    public void executeNextTask() {
+        final Optional<IngestionTask> next = claimNextTask();
+
+        if (next.isEmpty()) {
+            return;
+        }
+
+        final IngestionTask task = next.get();
+
+        try {
+            final List<IngestionStepService> steps = List.of(
+                    anilistSyncStepService,
+                    tmdbBindStepService,
+                    tmdbOverridesStepService,
+                    tmdbFilePairStepService
+            );
+
+            for (IngestionStepService step : steps) {
+                if (step.isExecuted(task)) {
+                    continue;
+                }
+
+                final IngestionStepStatus status = step.execute(task);
+
+                if (status == IngestionStepStatus.UNRESOLVED) {
+                    finishTask(task.id, IngestionTaskStatus.WAITING_CURATION);
+                    return;
+                }
+
+                if (status == IngestionStepStatus.FAILED) {
+                    finishTask(task.id, IngestionTaskStatus.FAILED);
+                    return;
+                }
+            }
+
+            finishTask(task.id, IngestionTaskStatus.COMPLETED);
+        } catch (RuntimeException e) {
+            Log.errorf(e, "Tarefa de ingestão %d falhou de forma inesperada", task.id);
+            finishTask(task.id, IngestionTaskStatus.FAILED);
+        }
+    }
+
+    /**
+     * Marca como {@code RUNNING} a próxima task a executar — uma {@code RUNNING} no início de um
+     * ciclo só pode ter sobrado de uma queda do serviço, já que a task anterior sempre termina
+     * antes. A primeira task de uma ingestão também marca a ingestão como {@code RUNNING}.
+     * Publica a mudança da task e da ingestão no stream SSE.
+     *
+     * @return a task, com a pasta carregada; vazio se não houver task a executar
+     */
+    @Transactional
+    Optional<IngestionTask> claimNextTask() {
+        final Optional<IngestionTask> task = IngestionTask.findNextExecutable();
+
+        task.ifPresent(claimed -> {
+            claimed.status = IngestionTaskStatus.RUNNING;
+
+            if (claimed.startedAt == null) {
+                claimed.startedAt = OffsetDateTime.now(ZoneOffset.UTC);
+            }
+
+            final Ingestion ingestion = claimed.ingestion;
+
+            if (ingestion.status == IngestionStatus.PENDING) {
+                ingestion.status = IngestionStatus.RUNNING;
+                ingestion.startedAt = OffsetDateTime.now(ZoneOffset.UTC);
+            }
+
+            ingestionService.publishTaskUpdated(claimed.id);
+            ingestionService.publishIngestionUpdated(ingestion.id);
+        });
+
+        return task;
+    }
+
+    /**
+     * Grava a situação final da task, quando ela parou de ser processada e o anime vinculado à
+     * pasta, se houver, com o status de revisão dele ({@code AnimeService#updateReviewStatus}) —
+     * e fecha a ingestão, se essa era a última task dela a terminar. Publica a mudança da task e
+     * da ingestão no stream SSE.
+     *
+     * @param taskId id da task
+     * @param status {@code COMPLETED}, {@code WAITING_CURATION} ou {@code FAILED}
+     */
+    @Transactional
+    void finishTask(Integer taskId, IngestionTaskStatus status) {
+        final IngestionTask task = IngestionTask.findById(taskId);
+
+        task.status = status;
+        task.completedAt = OffsetDateTime.now(ZoneOffset.UTC);
+        task.anime = animeService.findByFolder(task.folder.id)
+                .orElse(null);
+
+        if (task.anime != null) {
+            animeService.updateReviewStatus(
+                    task.anime.anilistId,
+                    status == IngestionTaskStatus.COMPLETED
+            );
+        }
+
+        Log.infof("Tarefa de ingestão %d terminou como %s", taskId, status);
+
+        finishIngestionIfDone(task.ingestion);
+
+        ingestionService.publishTaskUpdated(taskId);
+        ingestionService.publishIngestionUpdated(task.ingestion.id);
+    }
+
+    /**
+     * Fecha a ingestão quando a task que acabou de terminar era a última dela: {@code COMPLETED},
+     * ou {@code COMPLETED_WITH_ERRORS} se alguma task terminou {@code FAILED}. Task em
+     * {@code WAITING_CURATION} conta como terminada — a curadoria é um resultado esperado da
+     * ingestão, não uma falha.
+     */
+    private void finishIngestionIfDone(Ingestion ingestion) {
+        if (IngestionTask.existsUnfinished(ingestion.id)) {
+            return;
+        }
+
+        ingestion.status = IngestionTask.existsFailed(ingestion.id)
+                ? IngestionStatus.COMPLETED_WITH_ERRORS
+                : IngestionStatus.COMPLETED;
+        ingestion.completedAt = OffsetDateTime.now(ZoneOffset.UTC);
+
+        Log.infof("Ingestão %d terminou como %s", ingestion.id, ingestion.status);
+    }
+}

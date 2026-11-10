@@ -48,9 +48,9 @@ public class VideoFile extends PanacheEntityBase {
     /**
      * Chave de ordenação natural derivada de {@code name} — define a posição do arquivo na
      * listagem de episódios. Número de episódio extraído via {@code EpisodeNumberExtractor}
-     * (mesma heurística do pairing automático), zero-preenchido; nome em minúsculas quando a
-     * extração não casa com nenhum padrão. {@code null} em arquivos ingeridos antes dessa
-     * coluna existir, até a próxima reconciliação da pasta reencontrá-los.
+     * (mesma heurística da resolução do pairing de episódios), zero-preenchido; nome em
+     * minúsculas quando a extração não casa com nenhum padrão. {@code null} em arquivos
+     * ingeridos antes dessa coluna existir — nenhum fluxo preenche a chave desses arquivos.
      */
     @Column(name = "natural_sort_key")
     public String naturalSortKey;
@@ -72,8 +72,31 @@ public class VideoFile extends PanacheEntityBase {
     }
 
     /**
-     * Busca todos os arquivos de uma pasta, sem paginação — usado pela ingestão pra reconciliar
-     * o conjunto inteiro de uma vez.
+     * Busca o arquivo de uma pasta pelo path completo no provider.
+     *
+     * @param folder pasta dona do arquivo
+     * @param path path completo do arquivo (pasta + nome)
+     * @return o arquivo; vazio se a pasta não tiver arquivo com esse path
+     */
+    public static Optional<VideoFile> findByFolderAndPath(MediaFolder folder, String path) {
+        return VideoFile
+                .find("folder = ?1 AND path = ?2", folder, path)
+                .firstResultOptional();
+    }
+
+    /**
+     * Conta os arquivos de uma pasta, sem carregá-los.
+     *
+     * @param folderId id da pasta no catalog
+     * @return quantos arquivos a pasta tem; {@code 0} se nenhum
+     */
+    public static long countByFolderId(Integer folderId) {
+        return VideoFile.count("folder.id = ?1", folderId);
+    }
+
+    /**
+     * Busca todos os arquivos de uma pasta, sem paginação — usado pela ingestão pra saber quais
+     * arquivos da pasta já estão cadastrados.
      *
      * @param folderId id da pasta no catalog
      * @return os arquivos da pasta
@@ -123,8 +146,7 @@ public class VideoFile extends PanacheEntityBase {
     /**
      * Pagina os arquivos de uma pasta em ordem natural de {@code name} — base da listagem de
      * episódios, onde a posição vem do nome do arquivo, não do pareamento TMDB. Arquivos sem
-     * {@code naturalSortKey} (ainda não reencontrados numa reconciliação desde que a coluna
-     * passou a existir) vão para o fim.
+     * {@code naturalSortKey} (ingeridos antes de a coluna existir) vão para o fim.
      *
      * @param folderId id da pasta no catalog
      * @param page página desejada, 0-based

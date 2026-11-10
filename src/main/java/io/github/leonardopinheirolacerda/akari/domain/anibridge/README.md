@@ -30,7 +30,9 @@ Resolve também ambiguidade quando o dataset aponta mais de um candidato TMDB pr
   (`AnibridgeMappingService`).
 - Resolução do "melhor candidato" TMDB pra um anime, com critério de desempate que penaliza
   candidatos suspeitos (sobreposição interna de range, ou cobertura maior que o total de episódios
-  real do anime) antes de comparar cobertura (`AnibridgeResolutionService.resolveBestCandidate`).
+  real do anime) antes de comparar cobertura, e desempata pelo tipo que combina com o formato do
+  anime (`AnibridgeResolutionService.resolveBestCandidate`); `resolveCandidates` devolve, na
+  mesma busca, a contagem de candidatos, se o melhor é suspeito e se ele empata com o segundo.
 - Conversão de episódio do anime pra temporada/episódio do TMDB, incluindo razão de conversão
   (`ratio`, para casos como 2 episódios de anime = 1 de TMDB) (`resolveEpisode`).
 - Detecção de sobreposição entre segments de um mesmo candidato (`hasOverlap`) e resolução de
@@ -60,19 +62,21 @@ Resolve também ambiguidade quando o dataset aponta mais de um candidato TMDB pr
 
 ## Módulos relacionados
 
-- **`domain.ingestion`** (`FolderAutoBindService`) — usa
-  `AnibridgeResolutionService.resolveBestCandidate` pra escolher o binding TMDB de um anime
-  recém-vinculado.
+- **`domain.ingestion`** — o step `TMDB_BIND` (`TmdbBindStepService`) usa `resolveCandidates`
+  pra escolher o binding TMDB ou mandar o anime pra curadoria.
 - **`domain.anime`** — `AnimeTmdbProposalService` usa `resolveBestCandidate` pra propor o
   binding TMDB no portal (`POST /v1/metadata/tmdb/binding-proposals`);
-  `EpisodePairingResolutionService` usa `resolveCandidateFor`, `resolveSafeSegments`,
-  `restrictToFullSeasonCoverage` e `resolveEpisode` pra resolver o pairing de episódios, tanto
-  no pairing automático da ingestão quanto na proposta de pairing do portal.
+  `AnibridgeEpisodeMapper`/`AnibridgeFolderMapping` (`anime/pairing`) usam `resolveCandidateFor`,
+  `resolveSafeSegments`, `restrictToFullSeasonCoverage` e `resolveEpisode` pra resolver o pairing
+  de episódios na
+  proposta de pairing do portal e no pairing automático do step `TMDB_FILEPAIR` da ingestão
+  (`AnimeTmdbFilePairingFillService`).
 - **`domain.tmdb`** — dependência de saída do `AnibridgeResolutionService` (confirmação de
   temporadas existentes).
 - **`domain.anilist`** — não é dependência direta de código, mas semanticamente adjacente: o
-  `anilistId` é a chave primária usada nas consultas (`findByAnilistId`), e é `FolderAutoBindService`
-  quem faz a ponte entre os dois domínios (busca na AniList, depois resolve no anibridge).
+  `anilistId` é a chave primária usada nas consultas (`findByAnilistId`), e é
+  `AnimeTmdbProposalService` quem faz a ponte entre os dois domínios (lê `idMal`/`episodes` na
+  AniList, depois resolve no anibridge).
 
 ## Pontos de entrada
 
@@ -81,8 +85,8 @@ Os pontos de entrada são:
 - `AnibridgeScheduler` — boot (`@Observes StartupEvent`) e `@Scheduled(every = "1h")`, aciona
   `AnibridgeService.refresh()`.
 - `AnibridgeResolutionService` (API pública do domínio pra quem precisa resolver mapeamento) —
-  injetado por `FolderAutoBindService` (domínio `ingestion`) e por `AnimeTmdbProposalService`/
-  `EpisodePairingResolutionService` (domínio `anime`), que expõem as propostas por HTTP — o
+  injetado por `AnimeTmdbProposalService` e `AnibridgeEpisodeMapper` (domínio `anime`), que
+  sustentam as propostas por HTTP, e pelo `TmdbBindStepService` (domínio `ingestion`) — o
   próprio `anibridge` continua sem `resource/`. `AnibridgeMappingService` (busca crua) é usado
   só internamente pelo `AnibridgeResolutionService`.
 
@@ -100,10 +104,17 @@ Os pontos de entrada são:
    não enfileirada nem paralelizada.
 
 **Resolução de candidato e pareamento** (orquestrado fora deste domínio: o candidato pelo
-`FolderAutoBindService`/`AnimeTmdbProposalService`, o pareamento pelo
-`EpisodePairingResolutionService`):
-1. `resolveBestCandidate(anilistId, malId, totalEpisodes)` — tenta por AniList, cai pra MAL se
-   vazio; agrupa segments por `tmdbId:mediaType`; escolhe o não-suspeito com maior cobertura.
+`AnimeTmdbProposalService` e pelo step `TMDB_BIND` da ingestão, o pareamento pelo
+`AnibridgeEpisodeMapper`, em `anime/pairing`):
+1. `resolveBestCandidate(anilistId, malId, totalEpisodes, format)` — tenta por AniList, cai pra
+   MAL se vazio; agrupa segments por `tmdbId:mediaType`; ordena por: não-suspeito antes de
+   suspeito, maior cobertura, e tipo que combina com o formato do anime (`MOVIE` → filme; `TV`,
+   `TV_SHORT` e `ONA` → série; OVA/especial sem preferência) — um filme que também aparece como
+   especial da série empata em cobertura com ela, e sem o formato a escolha ficava arbitrária.
+   Empate que sobra fica com o primeiro, sem ordem definida. `resolveCandidates` faz a mesma
+   escolha e devolve um `CandidateResolution` com o melhor candidato, quantos existem, se o
+   melhor é suspeito e se ele empata com o segundo — calculando a cobertura de cada candidato
+   uma vez só.
    Pra quem já tem o binding (pareamento), `resolveCandidateFor(anilistId, malId, tmdbId,
    mediaType)` monta o candidato só com os segments que apontam pra esse título (AniList, depois
    MAL), sem escolher entre candidatos — nunca aplica a numeração de um título sobre outro.

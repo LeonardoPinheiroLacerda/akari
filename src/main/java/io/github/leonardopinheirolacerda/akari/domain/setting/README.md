@@ -19,8 +19,9 @@ AniList, cache, playback).
 - Mascaramento: preferências com `secret = true` nunca ecoam o `value` em claro — é
   substituído por `"***"` tanto em `listSettings` quanto em `updateSetting`.
 - Getters tipados usados por outros domínios: `getAnilistCacheTtl`, `getTmdbCacheTtl`,
-  `getTmdbApiKey`, `isTmdbConfigured`, `getTmdbDefaultLanguage`, `getTmdbImageLogoLanguage`,
-  `getTmdbImageBackdropLanguage`, `isTmdbIncludeAdult`, `getCacheMaxSizeBytes`, `getCacheDir`,
+  `getTmdbApiKey`, `isTmdbConfigured`, `getTmdbDefaultLanguage`, `getTmdbImageLogoLanguages`,
+  `getTmdbOverrideTitleLanguage`, `getTmdbOverrideSynopsisLanguage`,
+  `getTmdbOverrideFallbackLanguage`, `isTmdbIncludeAdult`, `getCacheMaxSizeBytes`, `getCacheDir`,
   `getPlaybackTranscodeHardwareAcceleration`, `getPlaybackSessionHeartbeatTtl`,
   `getPlaybackWorkBaseDir`, `getPlaybackDefaultAudioLanguage`,
   `getPlaybackDefaultSubtitleLanguage`, `isPlaybackDefaultSubtitleForced`.
@@ -43,7 +44,7 @@ AniList, cache, playback).
 - `mediaprobe` (`MediaProbeService`) — lê `getCacheDir()` para resolver o cache local de vídeo.
 - `ingestion` (`IngestionService`) — lê `isTmdbConfigured()` como precheck antes de etapas que
   dependem do TMDB.
-- `anime` (`AnimeTmdbService`) — leitura de preferência TMDB.
+- `anime` (`AnimeTmdbOverridesFillService`) — idiomas do preenchimento dos overrides TMDB.
 
 ## Pontos de entrada
 
@@ -68,6 +69,11 @@ AniList, cache, playback).
   preencher) têm linha existente com `value` nulo, e cabe a quem chama o getter decidir se isso
   é um erro de negócio (citado no javadoc da classe como responsabilidade de quem chama, ex.
   uma eventual `IntegrationNotConfiguredException` fora deste domínio).
+- Getters de idioma dos overrides TMDB: `getTmdbOverrideTitleLanguage`,
+  `getTmdbOverrideSynopsisLanguage` e `getTmdbOverrideFallbackLanguage` devolvem `Locale`
+  (`null` com valor vazio); `getTmdbImageLogoLanguages` separa a lista por vírgula. Valor fora
+  do formato de idioma (`pt_BR`, `en US`) lança `BusinessRuleException`, em vez de virar um
+  idioma vazio que não encontra nada.
 
 ## Arquivos críticos
 

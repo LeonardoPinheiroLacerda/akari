@@ -24,8 +24,7 @@ public class AnimeTmdbResource implements AnimeTmdbApi {
 
     /**
      * {@code POST /v1/metadata/animes/{anilistId}/tmdb/binding} — vincula o anime a uma
-     * série/filme do TMDB e pré-preenche os overrides de imagem (melhor esforço, nunca falha o
-     * bind).
+     * série/filme do TMDB, sem mexer nos overrides de imagem.
      *
      * @param anilistId id do anime na AniList
      * @param tmdbBindingRequest payload com {@code tmdbId} e {@code mediaType}

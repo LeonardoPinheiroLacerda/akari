@@ -148,19 +148,20 @@ anime           → anilist, tmdb, anibridge, mediafolder, videofile, setting, i
                   (extractor.EpisodeNumberExtractor)
 playback        → videofile, mediaprobe, storageprovider, setting, cache (direto via
                   CacheService.findCacheItemByFileId, e indireto via utils pro path do arquivo)
-ingestion       → storageprovider, mediafolder, videofile, anime, anibridge, tmdb, notification
+ingestion       → storageprovider, mediafolder, videofile, anime, anilist, anibridge, setting
 ```
 
 Nenhum domínio depende de `playback`, `mediaprobe`, `cache` ou `notification` — são "topo" do
-grafo, consumidos só pela camada HTTP (ou, no caso de `notification`, só escritos por `ingestion`
-e nunca lidos de volta por outro domínio).
+grafo, consumidos só pela camada HTTP (ou, no caso de `notification`, sem nenhum produtor hoje e
+nunca lido de volta por outro domínio).
 
 **Ciclos deliberados `videofile` ↔ `ingestion` e `anime` ↔ `ingestion`:** `ingestion` depende
-de `videofile` (cria/lista arquivos na reconciliação) e de `anime` (auto-bind), e os dois
+de `videofile` (lista e cria os arquivos de vídeo das pastas) e de `anime` (o step
+`ANILIST_SYNC` vincula a pasta ao anime; `IngestionTask` referencia `Anime`), e os dois
 dependem de `ingestion` só por `extractor.EpisodeNumberExtractor` — uma classe utilitária
 estática, sem service: `videofile` reaproveita a heurística de extração de episódio pra calcular
 a chave de ordenação natural (`VideoFileService.naturalSortKeyOf`), e `anime` pra resolver o
-pairing de episódios (`EpisodePairingResolutionService`), em vez de duplicá-la. São os únicos
+pairing de episódios (`anime/pairing/FolderEpisodeNumbering`), em vez de duplicá-la. São os únicos
 ciclos do grafo, ambos só por esse extractor; Java não impede (não há dependência circular de
 build, maven é um módulo só), mas é uma exceção notável à topologia acíclica do restante.
 
@@ -168,9 +169,9 @@ build, maven é um módulo só), mas é uma exceção notável à topologia ací
 TmdbService`) expõe só 2 operações via `resource/` (`/v1/tmdb/search/movies` e
 `/tv-shows`), mas implementa internamente toda a "ficha completa" (detalhes de filme/série,
 imagens, traduções, temporada) — e essas operações internas são chamadas diretamente, **service a
-service**, por `anime`, `anibridge` e `ingestion`. Ou seja, o domínio `tmdb` funciona como o
-client TMDB de fato para todo o sistema, não só para a busca — qualquer mudança de assinatura
-nesse service tem raio de impacto em 3 domínios além do seu próprio resource.
+service**, por `anime` e `anibridge`. Ou seja, o domínio `tmdb` funciona como o client TMDB de
+fato para todo o sistema, não só para a busca — qualquer mudança de assinatura nesse service tem
+raio de impacto em 2 domínios além do seu próprio resource.
 
 ## Dependências críticas
 
@@ -223,7 +224,7 @@ itens abaixo são backlog real (a corrigir aos poucos), exceto onde indicado "Ac
    sessão MEGA cacheada stale no rclone; só reiniciar o `rcd` resolve (`fscache/clear` não é
    suficiente). Afeta diretamente `GET /v1/storage/providers/{id}/health` para providers MEGA.
 4. **Retry de rate-limit ad hoc, não centralizado**: `RetryUtils.withRateLimitRetry` é aplicado em
-   alguns call sites específicos (`anime.prefillImageOverrides`, `ingestion.FolderAutoBindService`,
+   alguns call sites específicos (os steps `ANILIST_SYNC`, `TMDB_BIND`, `TMDB_OVERRIDES` e `TMDB_FILEPAIR` da ingestão,
    `anibridge.AnibridgeResolutionService`) e, dentro dos services de integração, só em
    `TmdbService.getSeasonEpisodes` — no resto dos services `anilist`/`tmdb`, quem chama e esquece de
    envolver a chamada corre risco de falha dura sob rate limit do upstream.
@@ -235,14 +236,12 @@ itens abaixo são backlog real (a corrigir aos poucos), exceto onde indicado "Ac
 6. **`ingestion`**: `EpisodeNumberExtractor` usa regex calibrada empiricamente — risco de regressão
    silenciosa se alterada sem reteste, agora com raio de impacto maior porque `videofile` também
    depende dela (ver ciclo `videofile` ↔ `ingestion` acima): uma regressão aqui erra tanto o
-   pairing TMDB quanto a ordem da listagem de episódios; throttle de 1500ms entre pastas no
-   auto-bind é hardcoded, não configurável via `setting`; `IngestionResource` não tem
+   pairing TMDB quanto a ordem da listagem de episódios; `IngestionResource` não tem
    `@ApplicationScoped` (inconsistência pontual com o padrão dos demais resources).
-7. **`mediafolder`/`videofile`**: `MediaFolderService.create()` e `VideoFileService` não validam
-   duplicidade de path/nome na escrita (assumem que o chamador — tipicamente `ingestion` — já
-   garantiu); `deleteRoots()` de `mediafolder` é documentado no próprio código como workaround para
-   um falso positivo do Hibernate (`TransientPropertyValueException`) e só funciona corretamente se
-   todas as pastas do subtree vierem da mesma consulta `findSubtree`; `listVideoFiles` devolve
+7. **`mediafolder`/`videofile`**: `MediaFolderService.findOrCreate()` e
+   `VideoFileService.createVideoFile()` checam duplicidade de path antes de inserir, mas não há
+   constraint de unicidade no banco (chamadas concorrentes passam as duas) e
+   `VideoFileService.updateVideoFile()` não checa; `listVideoFiles` devolve
    página vazia (não 404) para `folderId` inexistente, podendo mascarar um id inválido do chamador.
 8. **`setting`**: escrita (`PUT /v1/settings/{key}`) não valida formato/tipo — falha só no próximo
    uso do getter tipado, em runtime; preferência nova sem seed/migração só quebra no primeiro uso,
@@ -284,14 +283,12 @@ itens abaixo são backlog real (a corrigir aos poucos), exceto onde indicado "Ac
   de download de vídeo (`VideoFileCache`) da responsabilidade de cache de resposta de integração
   (`IntegrationCache`) — hoje convivem no mesmo pacote sem relação funcional.
 - Ao alterar a assinatura de qualquer método de `TmdbService` (consumido service-a-service bem além
-  da busca) usado fora do seu próprio `resource/`, avaliar o impacto em `anime`, `anibridge` e
-  `ingestion`.
+  da busca) usado fora do seu próprio `resource/`, avaliar o impacto em `anime` e `anibridge`.
 - Ao alterar `EpisodeNumberExtractor` (regex calibrada empiricamente) ou
   `AnibridgeResolutionService` (critério de candidato "suspeito"), tratar como código de alto risco
   de regressão silenciosa — testar manualmente contra casos reais antes de assumir correção.
-  `EpisodeNumberExtractor` tem dois consumidores (`anime` na resolução do pairing — automático
-  da ingestão e proposta do portal —, `videofile` na ordenação natural da listagem de
-  episódios): qualquer mudança de comportamento afeta os dois ao mesmo tempo.
+  `EpisodeNumberExtractor` tem dois consumidores (`anime` na resolução do pairing da proposta
+  do portal, `videofile` na ordenação natural da listagem de episódios): qualquer mudança de comportamento afeta os dois ao mesmo tempo.
 - Manter o contrato (`openapi.yaml`) como fonte da verdade das descrições de tag — ao mudar um
   comportamento, atualizar a descrição da tag junto, pra este documento e o contrato não divergirem
   da implementação real.

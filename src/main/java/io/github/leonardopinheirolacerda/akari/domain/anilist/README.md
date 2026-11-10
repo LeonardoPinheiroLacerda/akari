@@ -60,8 +60,8 @@ Traduzir a GraphQL da AniList (query `Page(page, perPage).media(search, type: AN
   recursivamente pra seguir o grafo de relações (`relations.edges`) da AniList e montar
   `AnimeRelation`. `AnimeTmdbProposalService` usa `findById` pra ler `idMal` e `episodes` ao propor
   o binding TMDB pelo anibridge.
-- **`domain.ingestion`** (`FolderAutoBindService`) — usa `AnilistSearchService.search` pra achar
-  candidato de anime a partir do nome da pasta durante o auto-bind.
+- **`domain.ingestion`** (`AnilistSyncStepService`) — usa `AnilistSearchService.search` pra achar
+  o título da AniList com nome igual ao da pasta no step `ANILIST_SYNC`.
 - **`domain.cache`** — infraestrutura de cache consumida pelo service (não o contrário).
 - **`domain.setting`** — fonte do TTL de cache.
 
@@ -71,8 +71,8 @@ Traduzir a GraphQL da AniList (query `Page(page, perPage).media(search, type: AN
   único endpoint público do domínio, `GET /v1/anilist/search`. Camada burra, só delega pro
   service.
 - **Interno:** `AnilistSearchService.findById(Integer anilistId, Boolean forceRefresh)` — não
-  tem resource correspondente; é consumido diretamente por `domain.anime` e `domain.ingestion`
-  (via `domain.anime`, indiretamente) como ponto de entrada de código, não de API.
+  tem resource correspondente; é consumido diretamente por `domain.anime` como ponto de entrada
+  de código, não de API.
 
 ## Fluxos importantes
 
@@ -124,8 +124,7 @@ Traduzir a GraphQL da AniList (query `Page(page, perPage).media(search, type: AN
   da AniList é rico (campos como `relations`) e um DTO intermediário duplicaria praticamente
   o mesmo shape sem ganho real.
 - **Nenhuma validação de rate limit própria neste domínio:** chamadas à AniList não passam por
-  `RetryUtils` dentro do próprio `anilist` — quem usa `RetryUtils.withRateLimitRetry` em torno de
-  `AnilistSearchService` é o chamador (`FolderAutoBindService`), não o service em si. Consistente
-  internamente, mas significa que um consumidor que esqueça de envolver a chamada fica sem retry
-  de rate limit. **Backlog real** (confirmado pelo mantenedor, mesmo item do risco geral de retry
+  `RetryUtils` dentro do próprio `anilist`; quem usa `RetryUtils.withRateLimitRetry` em torno de
+  `AnilistSearchService` é o chamador, e só o step `ANILIST_SYNC` da ingestão faz isso — as
+  chamadas de `domain.anime` falham direto sob rate limit da AniList. **Backlog real** (confirmado pelo mantenedor, mesmo item do risco geral de retry
   ad hoc documentado em `ARQUITETURA_DO_SISTEMA.md`).

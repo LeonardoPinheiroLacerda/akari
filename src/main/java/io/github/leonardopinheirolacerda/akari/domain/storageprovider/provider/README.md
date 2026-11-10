@@ -32,7 +32,7 @@ precisa saber desses detalhes.
 - **Schemas de config tipados** — `config/LocalConfig` (`rootPath`), `config/MegaConfig`
   (`email`, `password` com `@Obscure`); resolvidos por `StorageProviderConfigs`.
 - **Modelo de item listado** — `model/StorageItem`, com helpers de árvore (`withSyntheticRoot`,
-  `sortedByDepth`, `directChildrenOf`) usados por quem consome listagens (ex.: ingestion).
+  `sortedByDepth`) usados por quem consome listagens (ex.: ingestion).
 
 ## Dependências internas e externas
 

@@ -26,8 +26,7 @@ public interface AnimeTmdbFilePairingMapper {
 
     /**
      * Pairing de um arquivo com a metadata de um episódio do TMDB — único ponto que traduz o
-     * episódio pros campos do pairing, usado pela proposta (anibridge e continuidade) e pelo
-     * pairing automático da ingestão.
+     * episódio pros campos do pairing, usado pela proposta (anibridge e continuidade).
      *
      * @param episode episódio do TMDB, como vem de {@code GET /3/tv/{id}/season/{n}}
      * @return o pairing com temporada/episódio, still como thumbnail e o resto da metadata

@@ -2,6 +2,7 @@ package io.github.leonardopinheirolacerda.akari.domain.setting.service;
 
 import io.github.leonardopinheirolacerda.akari.api.dto.SettingResponse;
 import io.github.leonardopinheirolacerda.akari.api.dto.UpdateSettingRequest;
+import io.github.leonardopinheirolacerda.akari.exceptions.BusinessRuleException;
 import io.github.leonardopinheirolacerda.akari.exceptions.ResourceNotFoundException;
 import io.github.leonardopinheirolacerda.akari.domain.setting.mapper.SettingMapper;
 import io.github.leonardopinheirolacerda.akari.domain.setting.model.Setting;
@@ -12,7 +13,9 @@ import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
 
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Preferências administráveis do akari: um conjunto de chave/valor seedado por migração, lido
@@ -130,23 +133,70 @@ public class SettingService {
     }
 
     /**
-     * Lê a preferência {@code tmdb.image.logo-language}.
+     * Lê a preferência {@code tmdb.image.logo-language}, uma lista de idiomas separados por
+     * vírgula ({@code en-US,ja,none}).
      *
-     * @return o idioma preferido pro logo do título no TMDB
+     * @return os idiomas do logo do título no TMDB em ordem de preferência, sem espaços nem
+     *         itens vazios ({@code none} pro logo sem idioma); vazia se a preferência estiver
+     *         vazia
      * @throws ResourceNotFoundException se a preferência não existir
+     * @throws BusinessRuleException se algum item da lista não for um idioma válido
      */
-    public String getTmdbImageLogoLanguage() {
-        return findOrThrow("tmdb.image.logo-language").value;
+    public List<String> getTmdbImageLogoLanguages() {
+        final String key = "tmdb.image.logo-language";
+        final String value = findOrThrow(key).value;
+
+        if (value == null) {
+            return List.of();
+        }
+
+        final List<String> languages = Arrays.stream(value.split(","))
+                .map(String::strip)
+                .filter(language -> !language.isEmpty())
+                .toList();
+
+        for (String language : languages) {
+            toLocale(key, language);
+        }
+
+        return languages;
     }
 
     /**
-     * Lê a preferência {@code tmdb.image.backdrop-language}.
+     * Lê a preferência {@code tmdb.override.title-language}.
      *
-     * @return o idioma preferido pro backdrop no TMDB
+     * @return o idioma ({@code pt} ou {@code pt-BR}) do título preenchido a partir do TMDB;
+     *         {@code null} se a preferência estiver vazia, pra manter o título da AniList
      * @throws ResourceNotFoundException se a preferência não existir
+     * @throws BusinessRuleException se o valor não for um idioma válido
      */
-    public String getTmdbImageBackdropLanguage() {
-        return findOrThrow("tmdb.image.backdrop-language").value;
+    public Locale getTmdbOverrideTitleLanguage() {
+        return findLanguageOrThrow("tmdb.override.title-language");
+    }
+
+    /**
+     * Lê a preferência {@code tmdb.override.synopsis-language}.
+     *
+     * @return o idioma ({@code pt} ou {@code pt-BR}) da sinopse preenchida a partir do TMDB;
+     *         {@code null} se a preferência estiver vazia, pra manter a sinopse da AniList
+     * @throws ResourceNotFoundException se a preferência não existir
+     * @throws BusinessRuleException se o valor não for um idioma válido
+     */
+    public Locale getTmdbOverrideSynopsisLanguage() {
+        return findLanguageOrThrow("tmdb.override.synopsis-language");
+    }
+
+    /**
+     * Lê a preferência {@code tmdb.override.fallback-language}.
+     *
+     * @return o idioma ({@code en} ou {@code en-US}) usado no preenchimento dos overrides a
+     *         partir do TMDB quando não há opção no idioma configurado; {@code null} se a
+     *         preferência estiver vazia, sem fallback
+     * @throws ResourceNotFoundException se a preferência não existir
+     * @throws BusinessRuleException se o valor não for um idioma válido
+     */
+    public Locale getTmdbOverrideFallbackLanguage() {
+        return findLanguageOrThrow("tmdb.override.fallback-language");
     }
 
     /**
@@ -241,6 +291,37 @@ public class SettingService {
      */
     public boolean isPlaybackDefaultSubtitleForced() {
         return Boolean.parseBoolean(findOrThrow("playback.default.subtitle-forced").value);
+    }
+
+    private Locale findLanguageOrThrow(String key) {
+        return toLocale(key, findOrThrow(key).value);
+    }
+
+    /**
+     * Converte o valor de uma preferência de idioma ({@code pt-BR}, {@code pt}) em {@link Locale}.
+     * Valor fora do formato de idioma ({@code pt_BR}, {@code en US}) é recusado, em vez de virar
+     * um idioma vazio que não encontra nada.
+     *
+     * @param key chave da preferência, pra mensagem de erro
+     * @param value valor da preferência
+     * @return o idioma, ou {@code null} se o valor estiver vazio
+     * @throws BusinessRuleException se o valor não for um idioma válido
+     */
+    private static Locale toLocale(String key, String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+
+        final Locale locale = Locale.forLanguageTag(value.strip());
+
+        if (locale.getLanguage().isEmpty()) {
+            Log.warnf("Preferência %s com idioma inválido: %s", key, value);
+            throw new BusinessRuleException(
+                    "A preferência %s tem um idioma inválido: %s".formatted(key, value)
+            );
+        }
+
+        return locale;
     }
 
     private Setting findOrThrow(String key) {

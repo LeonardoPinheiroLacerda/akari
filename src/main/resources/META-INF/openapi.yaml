@@ -41,16 +41,20 @@ tags:
       obscurecidas para clientes da API.
   - name: Ingestion
     description: |
-      Reconciliação subtree ↔ catalog por storage provider.
+      Ingestão de subtrees de storage provider no catalog.
 
-      Reconcilia o subtree de um storage provider com o catalog e permite consultar/desingerir
-      subtrees. Não persiste estado próprio — só orquestra chamadas ao provider (via port) e ao
-      catalog (via port).
+      Registra no catalog as pastas e os arquivos de vídeo de um subtree do provider e permite
+      consultar quais pastas do provider já foram ingeridas. Cada disparo grava uma ingestão com
+      uma tarefa por pasta.
 
-      Ingestão é uma reconciliação do subtree com o catalog: pastas/arquivos já registrados são
-      preservados, novos são criados e os que não existem mais no provider são removidos do
-      catalog. O `rootPath` limita o subtree a processar; ausente ou vazio opera sobre a raiz
-      inteira do provider.
+      Pastas/arquivos já registrados são preservados e os novos são criados; o que não existe
+      mais no provider não é removido do catalog. O `rootPath` limita o subtree a processar;
+      ausente ou vazio opera sobre a raiz inteira do provider.
+
+      O andamento fica consultável pelo portal: a ingestão em andamento (ou a última) e a lista
+      de ingestões, ambas com todas as tarefas, e a linha do tempo dos steps de cada tarefa. O tempo real é um stream SSE em `GET /v1/ingestion/events`, fora de `paths` (o
+      gerador `jaxrs-spec` não descreve Server-Sent Events); o payload de cada mensagem é o
+      `IngestionStreamEvent`.
   - name: MediaFolder
     description: |
       Pastas ingeridas do storage provider.
@@ -173,7 +177,7 @@ tags:
         `mediaType` propostos.
       - `POST /v1/metadata/tmdb/file-pairing-proposals` — dado o `anilistId` de um anime já
         vinculado à pasta e a uma série do TMDB, propõe a temporada/episódio de cada arquivo da
-        pasta: pelo anibridge, exatamente como o pairing automático faria (`ANIBRIDGE`), ou pelo
+        pasta: pelo anibridge (`ANIBRIDGE`), ou pelo
         episódio seguinte ao do arquivo pareado anterior (`CONTINUITY`), comparando com o par
         gravado de cada arquivo. Pra efetivar, o portal manda o `pairing` de cada arquivo em
         `PUT /v1/metadata/files/{fileId}/tmdb-pairing`.
@@ -189,9 +193,7 @@ tags:
       Notificações de observabilidade.
 
       Lista paginada de notificações de observabilidade, conta as não-lidas (badge) e marca como
-      lidas (individual/todas). Hoje, todas as notificações são emitidas pelo domínio `ingestion`
-      (falhas de integração com storage provider/AniList/TMDB e problemas de qualidade do
-      auto-bind/pairing); nenhum outro domínio emite notificação ainda.
+      lidas (individual/todas). Hoje nenhum domínio emite notificação.
 
       O push em tempo real é um stream SSE em `GET /v1/notifications/events`, no mesmo molde do
       `/v1/cache/events`: o endpoint **não é descrito em `paths`** (o gerador `jaxrs-spec` não
@@ -316,33 +318,28 @@ paths:
       - $ref: '#/components/parameters/StorageProviderIdPathParam'
     post:
       tags: [Ingestion]
-      operationId: ingestProviderSubtree
+      operationId: createIngestionTasks
       summary: Ingere um subtree do provider no catalog
       description: |
-        Dispara a reconciliação do subtree indicado por `rootPath` (ou a raiz, se omitido)
-        com o catalog **em background** e retorna `202` imediatamente, sem aguardar o resultado.
+        Ingere o subtree indicado por `rootPath` (ou a raiz, se omitido) no catalog e retorna
+        `202` sem aguardar o cadastro dos arquivos.
 
-        Só são síncronos a validação do payload (`400`), o precheck de que o TMDB está
-        configurado — `400` se a preferência `tmdb.api-key` estiver vazia, já que sem TMDB
-        nenhum anime completaria o binding automático — e o precheck de existência do
-        provider (`404`). Todo o resto roda depois da resposta — inclusive a verificação de
-        que o `rootPath` existe no provider. O resultado é reportado pelo módulo
-        `notification`: uma notificação `INFO` ao concluir, ou `ERROR` se a ingestão falhar.
+        Síncronos, antes da resposta: a validação do payload (`400`), o precheck de que o TMDB
+        está configurado (`400` se a preferência `tmdb.api-key` estiver vazia), o precheck de
+        existência do provider (`404`), a listagem da árvore do subtree no provider e a criação
+        das pastas. Uma falha na listagem do provider responde `500`. A existência do `rootPath`
+        no provider não é validada.
 
         Etapas, em ordem:
 
-        1. Lista a árvore do subtree no provider.
-        2. Remove do catalog as pastas/arquivos do subtree que não existem mais no provider.
-        3. Cria as pastas novas (pai antes do filho) com o `mediaType` recebido — pastas já
-           registradas mantêm o `mediaType` que tinham — e os arquivos de vídeo novos.
-        4. Cada pasta com vídeos diretos é vinculada automaticamente, antes de a próxima ser
-           processada: busca na AniList → binding AniList → binding TMDB → pairing de episódios
-           (este só quando o TMDB mapeado é série). Uma falha numa dessas etapas vira notificação
-           `WARNING`/`ERROR` sem interromper a ingestão. O binding automático roda
-           independentemente do `mediaType`.
+        1. Lista a árvore do subtree no provider, incluindo a própria pasta do `rootPath`.
+        2. Cria as pastas novas (pai antes do filho) com o `mediaType` recebido — pastas já
+           registradas mantêm o `mediaType` que tinham.
+        3. Grava a ingestão e, em background, uma tarefa por pasta — inclusive as sem vídeos —,
+           cadastrando os arquivos de vídeo novos diretos da pasta.
 
-        Um disparo para o mesmo `(providerId, rootPath)` enquanto outro está em andamento é
-        ignorado — a resposta é a mesma `202`, sem iniciar uma segunda ingestão.
+        Disparos repetidos para o mesmo subtree não são deduplicados: cada um grava sua própria
+        ingestão.
       requestBody:
         $ref: '#/components/requestBodies/IngestSubtreeRequestBody'
       responses:
@@ -352,23 +349,6 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
-    delete:
-      tags: [Ingestion]
-      operationId: removeIngestedSubtree
-      summary: Remove um subtree ingerido do catalog
-      description: |
-        Remove do catalog as pastas/arquivos correspondentes ao subtree indicado por
-        `rootPath` (ou tudo do provider, se omitido), junto com os bindings de metadata
-        (`animemetadata`) dessas pastas. **Não** toca no provider upstream. Operação
-        idempotente — devolve `204` mesmo quando nada casa, inclusive se o `providerId` não
-        existir (não há precheck).
-      parameters:
-        - $ref: '#/components/parameters/RootPathParam'
-      responses:
-        '204':
-          $ref: '#/components/responses/IngestionRemoved'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -396,6 +376,86 @@ paths:
           $ref: '#/components/responses/NotFound'
         '502':
           $ref: '#/components/responses/BadGateway'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/ingestion/current:
+    get:
+      tags: [Ingestion]
+      operationId: getCurrentIngestion
+      summary: Resumo da ingestão em andamento, ou da última
+      description: |
+        A ingestão em andamento (`RUNNING`) ou, sem nenhuma em andamento, a mais recente, com
+        todas as tarefas. Responde `204` quando nenhuma ingestão foi disparada ainda.
+
+        Pra acompanhar em tempo real, use o stream SSE `GET /v1/ingestion/events` (ver
+        `IngestionStreamEvent`).
+      responses:
+        '200':
+          $ref: '#/components/responses/IngestionSummaryOk'
+        '204':
+          $ref: '#/components/responses/NoIngestion'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/ingestion:
+    get:
+      tags: [Ingestion]
+      operationId: listIngestions
+      summary: Lista as ingestões, da mais nova pra mais antiga
+      description: |
+        Página de ingestões, cada uma no mesmo formato de `GET /v1/ingestion/current` (com todas
+        as tarefas), da mais nova para a mais antiga, 0-based (`page`/`size`).
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/SizeParam'
+      responses:
+        '200':
+          $ref: '#/components/responses/IngestionPageOk'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/ingestion/tasks/{taskId}/resolve:
+    parameters:
+      - $ref: '#/components/parameters/IngestionTaskIdPathParam'
+    put:
+      tags: [Ingestion]
+      operationId: resolveIngestionTask
+      summary: Marca como resolvida manualmente uma tarefa que espera curadoria
+      description: |
+        Confirma que a curadoria de uma tarefa em `WAITING_CURATION` foi feita à mão no portal e
+        passa a tarefa para `RESOLVED`. Os steps que não rodaram não são executados. Publica a
+        mudança no stream SSE (`TASK_UPDATED` e `INGESTION_UPDATED`).
+
+        Responde `400` se a tarefa não está em `WAITING_CURATION` e `404` se não existe.
+      responses:
+        '200':
+          $ref: '#/components/responses/IngestionTaskDetailOk'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/ingestion/tasks/{taskId}:
+    parameters:
+      - $ref: '#/components/parameters/IngestionTaskIdPathParam'
+    get:
+      tags: [Ingestion]
+      operationId: getIngestionTask
+      summary: Detalhe de uma tarefa, com a linha do tempo de cada step
+      description: |
+        A tarefa com todas as execuções dos steps — cada tentativa é uma execução própria —, na
+        ordem em que rodaram, cada uma com os seus eventos na ordem em que foram gravados.
+        Responde `404` se a tarefa não existe.
+      responses:
+        '200':
+          $ref: '#/components/responses/IngestionTaskDetailOk'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -1045,8 +1105,8 @@ paths:
       operationId: markAnimeAsReviewed
       summary: Confirma manualmente que a ingestão desse anime está correta
       description: |
-        Marca `reviewStatus` como `REVIEWED`. A partir daqui, o auto-bind da ingestão nunca
-        mais altera esse campo, mesmo reprocessando a pasta numa reconciliação futura.
+        Marca `reviewStatus` como `REVIEWED`. A partir daqui, nenhum recálculo automático
+        altera esse campo.
       responses:
         '200':
           $ref: '#/components/responses/AnimeOk'
@@ -1379,9 +1439,8 @@ paths:
         Remove o binding TMDB do anime e limpa junto tudo que dependia dele: os overrides
         (título, sinopse, pôster, backdrop e logo) e os pairings TMDB de todos os arquivos da
         pasta do anime — eles apontam pra temporadas/episódios do título desvinculado e ficariam
-        errados num novo binding. Um novo `POST .../tmdb/binding` volta a pré-preencher backdrop e
-        logo; os pairings precisam ser refeitos (manualmente, pela proposta de pairing ou numa
-        nova ingestão).
+        errados num novo binding. Os pairings precisam ser refeitos (manualmente ou pela
+        proposta de pairing).
       responses:
         '204':
           $ref: '#/components/responses/TmdbBindingDeleted'
@@ -1401,10 +1460,10 @@ paths:
         da AniList no portal).
 
         A proposta é o melhor candidato do dataset do anibridge (snapshot local, atualizado de
-        hora em hora) pro `anilistId` — com fallback pelo id do MyAnimeList, lido da AniList —, o
-        mesmo critério do bind automático da ingestão: entre vários candidatos, prefere o que não
-        tem sobreposição de episódios nem cobre mais episódios do que o anime tem, e desempata
-        pela cobertura. O candidato é confirmado no TMDB, e a resposta traz a ficha do título
+        hora em hora) pro `anilistId` — com fallback pelo id do MyAnimeList, lido da AniList.
+        Entre vários candidatos, prefere o que não tem sobreposição de episódios nem cobre mais
+        episódios do que o anime tem, desempata pela cobertura e, por fim, pelo tipo que combina
+        com o formato do anime na AniList (`MOVIE` → filme; `TV`, `TV_SHORT` e `ONA` → série). O candidato é confirmado no TMDB, e a resposta traz a ficha do título
         (`details`) pra o admin conferir antes de vincular.
 
         O anibridge pode estar dessincronizado do TMDB (ex.: apontar uma temporada que o título
@@ -1438,8 +1497,7 @@ paths:
         gravar nada. O anime precisa estar vinculado à pasta e a uma série do TMDB. A
         `strategy` escolhe como a proposta é calculada (`ANIBRIDGE` quando ausente):
 
-        - `ANIBRIDGE` — a mesma resolução do pairing automático da ingestão: o número do
-          episódio sai do nome do arquivo, e o anibridge (snapshot local) converte pra
+        - `ANIBRIDGE` — o número do episódio sai do nome do arquivo, e o anibridge (snapshot local) converte pra
           temporada/episódio do TMDB — com fallback de numeração absoluta (offset calculado pela
           cadeia de prequels) e de pasta com um único episódio. Só valem os mapeamentos do
           anibridge que apontam pra série vinculada: se o binding foi feito pra outra série,
@@ -1936,6 +1994,13 @@ components:
         $ref: '#/components/schemas/SettingKey'
 
     # ---------- notification ----------
+    IngestionTaskIdPathParam:
+      name: taskId
+      in: path
+      required: true
+      description: Id da tarefa de ingestão
+      schema:
+        $ref: '#/components/schemas/IngestionTaskId'
     NotificationIdPathParam:
       name: notificationId
       in: path
@@ -2180,13 +2245,31 @@ components:
             $ref: '#/components/schemas/AvailableFolderNode'
     IngestionStarted:
       description: >-
-        Ingestão aceita e iniciada em background (ou já em andamento para o mesmo subtree)
+        Ingestão aceita: pastas criadas e tarefas disparadas em background
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/IngestionStartedResponse'
-    IngestionRemoved:
-      description: Subtree removido (inclusive quando nada casa — idempotente)
+    IngestionSummaryOk:
+      description: Resumo da ingestão
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/IngestionSummary'
+    NoIngestion:
+      description: Nenhuma ingestão foi disparada ainda
+    IngestionPageOk:
+      description: Página (possivelmente vazia) de ingestões
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/IngestionPage'
+    IngestionTaskDetailOk:
+      description: Tarefa com a linha do tempo dos steps
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/IngestionTaskDetail'
 
     # ---------- catalog ----------
     MediaFolderPageOk:
@@ -2755,6 +2838,389 @@ components:
           description: Filhos diretos
           items:
             $ref: '#/components/schemas/AvailableFolderNode'
+
+    IngestionId:
+      type: integer
+      format: int32
+      description: Id da ingestão
+
+    IngestionTaskId:
+      type: integer
+      format: int32
+      description: Id da tarefa de ingestão
+
+    IngestionStatus:
+      type: string
+      description: |
+        Status de uma ingestão.
+
+        - `PENDING` — criada, nenhuma tarefa começou ainda.
+        - `RUNNING` — alguma tarefa já começou e ainda há tarefa por terminar.
+        - `COMPLETED` — todas as tarefas terminaram, nenhuma com `FAILED`.
+        - `COMPLETED_WITH_ERRORS` — todas as tarefas terminaram, alguma com `FAILED`.
+        - `FAILED` / `CANCELLED` — reservados; nenhum fluxo grava hoje.
+      enum:
+        - PENDING
+        - RUNNING
+        - COMPLETED
+        - COMPLETED_WITH_ERRORS
+        - FAILED
+        - CANCELLED
+
+    IngestionTaskStatus:
+      type: string
+      description: |
+        Status de uma tarefa (uma pasta) da ingestão.
+
+        - `PENDING` — na fila, ainda não rodou.
+        - `RUNNING` — rodando os steps.
+        - `WAITING_CURATION` — algum step não conseguiu decidir sozinho e espera curadoria no
+          portal; é um resultado esperado, não uma falha.
+        - `RESOLVED` — esperava curadoria e foi marcada como resolvida manualmente
+          (`PUT /v1/ingestion/tasks/{taskId}/resolve`).
+        - `COMPLETED` — todos os steps terminaram.
+        - `FAILED` — algum step falhou.
+        - `CANCELLED` — reservado; nenhum fluxo grava hoje.
+      enum:
+        - PENDING
+        - RUNNING
+        - WAITING_CURATION
+        - RESOLVED
+        - COMPLETED
+        - FAILED
+        - CANCELLED
+
+    IngestionStep:
+      type: string
+      description: |
+        Step de uma tarefa, na ordem em que rodam.
+
+        - `ANILIST_SYNC` — vincula a pasta a um anime da AniList.
+        - `TMDB_BIND` — vincula o anime à série ou ao filme do TMDB.
+        - `TMDB_OVERRIDES` — preenche título, sinopse e imagens a partir do TMDB.
+        - `TMDB_FILEPAIR` — pareia os arquivos da pasta com os episódios do TMDB.
+      enum:
+        - ANILIST_SYNC
+        - TMDB_BIND
+        - TMDB_OVERRIDES
+        - TMDB_FILEPAIR
+
+    IngestionStepStatus:
+      type: string
+      description: |
+        Status de uma execução de step.
+
+        - `RUNNING` — rodando.
+        - `COMPLETED` — terminou.
+        - `SKIPPED` — não se aplica à pasta (ex.: pareamento de episódios de um filme).
+        - `UNRESOLVED` — não conseguiu decidir sozinho; espera curadoria.
+        - `FAILED` — falhou; o motivo está no evento `ERROR`.
+        - `PENDING` — reservado; nenhum fluxo grava hoje.
+      enum:
+        - PENDING
+        - RUNNING
+        - COMPLETED
+        - UNRESOLVED
+        - FAILED
+        - SKIPPED
+
+    IngestionEventType:
+      type: string
+      description: |
+        Tipo de um evento da linha do tempo de uma execução de step.
+
+        - `STARTED` — a execução começou.
+        - `REQUEST_SENT` — uma consulta foi feita a um serviço externo.
+        - `RESPONSE_RECEIVED` — a resposta de um serviço externo chegou (só em execuções antigas).
+        - `RESULTS_FOUND` — resultados encontrados.
+        - `MATCH_SELECTED` — um resultado foi escolhido.
+        - `MATCH_NOT_FOUND` — nenhum resultado pôde ser escolhido; espera curadoria.
+        - `WARNING` — algo merece atenção, sem impedir o step.
+        - `ERROR` — o step falhou.
+        - `COMPLETED` — a execução terminou.
+        - `SKIPPED` — o step não se aplica à pasta.
+      enum:
+        - STARTED
+        - REQUEST_SENT
+        - RESPONSE_RECEIVED
+        - RESULTS_FOUND
+        - MATCH_SELECTED
+        - MATCH_NOT_FOUND
+        - WARNING
+        - ERROR
+        - COMPLETED
+        - SKIPPED
+
+    IngestionTaskCounts:
+      type: object
+      description: |
+        Quantidade de tarefas da ingestão por status. `total` conta todas as tarefas; uma tarefa
+        está terminada quando está em `waitingCuration`, `resolved`, `completed` ou `failed`.
+      required: [total, pending, running, waitingCuration, resolved, completed, failed]
+      properties:
+        total:
+          type: integer
+          format: int32
+        pending:
+          type: integer
+          format: int32
+        running:
+          type: integer
+          format: int32
+        waitingCuration:
+          type: integer
+          format: int32
+        resolved:
+          type: integer
+          format: int32
+        completed:
+          type: integer
+          format: int32
+        failed:
+          type: integer
+          format: int32
+
+    IngestionSummary:
+      type: object
+      description: |
+        Uma ingestão: status, datas, quantidade de tarefas por status, a tarefa em execução —
+        as tarefas rodam uma de cada vez — e todas as tarefas.
+      required: [id, status, createdAt, taskCounts, tasks]
+      properties:
+        id:
+          $ref: '#/components/schemas/IngestionId'
+        status:
+          $ref: '#/components/schemas/IngestionStatus'
+        createdAt:
+          type: string
+          format: date-time
+          description: Momento em que a ingestão foi disparada
+        startedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Momento em que a primeira tarefa começou; `null` enquanto `PENDING`
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Momento em que a última tarefa terminou; `null` até terminar
+        taskCounts:
+          $ref: '#/components/schemas/IngestionTaskCounts'
+        currentTask:
+          allOf: [{ $ref: '#/components/schemas/IngestionTaskSummary' }]
+          nullable: true
+          description: Tarefa em execução; `null` quando nenhuma está rodando
+        tasks:
+          type: array
+          description: |
+            Todas as tarefas da ingestão, na ordem em que foram criadas (a mesma em que rodam).
+            A linha do tempo de cada uma fica em `GET /v1/ingestion/tasks/{taskId}`.
+          items:
+            $ref: '#/components/schemas/IngestionTaskSummary'
+
+    IngestionPage:
+      description: Envelope paginado de ingestões
+      allOf:
+        - $ref: '#/components/schemas/Page'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/IngestionSummary'
+
+    IngestionTaskSummary:
+      type: object
+      description: |
+        Resumo de uma tarefa (uma pasta) da ingestão: a pasta, o anime vinculado, o status e o
+        status mais recente de cada step que já rodou.
+      required: [id, ingestionId, folderId, folderName, status, steps, createdAt]
+      properties:
+        id:
+          $ref: '#/components/schemas/IngestionTaskId'
+        ingestionId:
+          $ref: '#/components/schemas/IngestionId'
+        folderId:
+          $ref: '#/components/schemas/FolderId'
+        folderName:
+          type: string
+          description: Nome da pasta no provider
+        anilistId:
+          allOf: [{ $ref: '#/components/schemas/AnilistId' }]
+          nullable: true
+          description: Anime vinculado à pasta; `null` enquanto não há vínculo com a AniList
+        title:
+          type: string
+          nullable: true
+          description: Título do anime vinculado; `null` nas mesmas condições de `anilistId`
+        thumbnail:
+          type: string
+          nullable: true
+          description: URL do poster (resolução média) do anime vinculado
+        status:
+          $ref: '#/components/schemas/IngestionTaskStatus'
+        currentStep:
+          allOf: [{ $ref: '#/components/schemas/IngestionStep' }]
+          nullable: true
+          description: Step em execução ou o último que rodou; `null` antes do primeiro
+        steps:
+          type: array
+          description: |
+            Status da execução mais recente de cada step que já rodou, na ordem dos steps
+          items:
+            $ref: '#/components/schemas/IngestionTaskStepStatus'
+        createdAt:
+          type: string
+          format: date-time
+        startedAt:
+          type: string
+          format: date-time
+          nullable: true
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    IngestionTaskStepStatus:
+      type: object
+      description: Status da execução mais recente de um step da tarefa
+      required: [step, status]
+      properties:
+        step:
+          $ref: '#/components/schemas/IngestionStep'
+        status:
+          $ref: '#/components/schemas/IngestionStepStatus'
+
+    IngestionTaskDetail:
+      description: Tarefa com todas as execuções dos steps e os eventos de cada uma
+      allOf:
+        - $ref: '#/components/schemas/IngestionTaskSummary'
+        - type: object
+          required: [executions]
+          properties:
+            executions:
+              type: array
+              description: Execuções dos steps, na ordem em que rodaram
+              items:
+                $ref: '#/components/schemas/IngestionStepExecutionDetail'
+
+    IngestionStepExecutionDetail:
+      type: object
+      description: |
+        Uma execução (tentativa) de um step, com a linha do tempo dos eventos dela. Um step que
+        roda de novo na mesma tarefa — retomada depois de uma queda do serviço — ganha uma
+        execução nova com o `attempt` seguinte.
+      required: [id, step, status, attempt, createdAt, events]
+      properties:
+        id:
+          type: integer
+          format: int32
+        step:
+          $ref: '#/components/schemas/IngestionStep'
+        status:
+          $ref: '#/components/schemas/IngestionStepStatus'
+        attempt:
+          type: integer
+          format: int32
+          description: Número da tentativa do step nesta tarefa, a partir de 1
+        createdAt:
+          type: string
+          format: date-time
+        startedAt:
+          type: string
+          format: date-time
+          nullable: true
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: '`null` enquanto `RUNNING`'
+        events:
+          type: array
+          description: Eventos da execução, na ordem em que foram gravados
+          items:
+            $ref: '#/components/schemas/IngestionStepEventResponse'
+
+    IngestionStepEventResponse:
+      type: object
+      description: Evento da linha do tempo de uma execução de step
+      required: [id, type, message, createdAt]
+      properties:
+        id:
+          type: integer
+          format: int32
+        type:
+          $ref: '#/components/schemas/IngestionEventType'
+        message:
+          type: string
+          description: Frase pronta pra exibir no portal
+        details:
+          type: object
+          additionalProperties: true
+          nullable: true
+          description: |
+            Dados técnicos do evento (ids, códigos, candidatos); o formato varia com o step e o
+            tipo do evento
+        createdAt:
+          type: string
+          format: date-time
+
+    IngestionStreamEventType:
+      type: string
+      description: |
+        Tipo de um evento do stream SSE `GET /v1/ingestion/events`. É também o `event:` (nome) da
+        mensagem SSE, então o cliente pode tanto registrar um listener por nome
+        (`addEventListener('STEP_FINISHED', ...)`) quanto ler o campo `type` do payload.
+
+        - `SNAPSHOT` — primeiro evento de quem se inscreve: a ingestão em andamento, ou a última,
+          com todas as tarefas; sem nenhuma ingestão, `ingestion` vem `null`.
+        - `INGESTION_UPDATED` — o status ou as contagens de uma ingestão mudaram. Traz o mesmo
+          `IngestionSummary`, mas com `tasks` vazio — as tarefas chegam pelo `TASK_UPDATED`.
+        - `TASK_UPDATED` — uma tarefa mudou de status ou de step.
+        - `STEP_FINISHED` — uma execução de step terminou, com todos os eventos dela.
+      enum:
+        - SNAPSHOT
+        - INGESTION_UPDATED
+        - TASK_UPDATED
+        - STEP_FINISHED
+
+    IngestionStreamEvent:
+      type: object
+      description: |
+        Payload (`data:`, JSON) de cada mensagem do stream SSE `GET /v1/ingestion/events` — o
+        endpoint não é descrito em `paths` (Server-Sent Events não é modelável pelo gerador
+        `jaxrs-spec`), só este payload.
+
+        O stream é aberto com `EventSource` (`GET`, `Accept: text/event-stream`) e fica aberto
+        indefinidamente: a primeira mensagem é um `SNAPSHOT`, e as seguintes chegam conforme as
+        ingestões andam. Cada mensagem tem `event:` igual ao `type` e o `data:` com este objeto.
+        Os campos preenchidos dependem do `type`; os demais vêm `null`:
+
+        | `type` | Campos preenchidos |
+        |---|---|
+        | `SNAPSHOT` | `ingestion` (`null` se nunca houve ingestão) |
+        | `INGESTION_UPDATED` | `ingestion` |
+        | `TASK_UPDATED` | `task` |
+        | `STEP_FINISHED` | `task`, `execution` |
+
+        Um cliente que reconecta depois de uma queda recebe um `SNAPSHOT` novo, com a ingestão
+        em andamento (ou a última) e todas as tarefas dela; outra ingestão ele recarrega por
+        `GET /v1/ingestion`.
+      required: [type]
+      properties:
+        type:
+          $ref: '#/components/schemas/IngestionStreamEventType'
+        ingestion:
+          allOf: [{ $ref: '#/components/schemas/IngestionSummary' }]
+          nullable: true
+        task:
+          allOf: [{ $ref: '#/components/schemas/IngestionTaskSummary' }]
+          nullable: true
+        execution:
+          allOf: [{ $ref: '#/components/schemas/IngestionStepExecutionDetail' }]
+          nullable: true
 
     # ---------- catalog ----------
     HasFilesFilter:
@@ -3674,6 +4140,14 @@ components:
         startDate:
           allOf: [{ $ref: '#/components/schemas/AnilistFuzzyDate' }]
           nullable: true
+        endDate:
+          allOf: [{ $ref: '#/components/schemas/AnilistFuzzyDate' }]
+          nullable: true
+          description: Data de término; `null` enquanto o anime não terminou
+        status:
+          type: string
+          nullable: true
+          description: Status bruto da AniList (`FINISHED`, `RELEASING`, `NOT_YET_RELEASED`, `CANCELLED`, `HIATUS`)
         seasonYear:
           type: integer
           format: int32
@@ -3689,7 +4163,17 @@ components:
           type: integer
           format: int32
           nullable: true
-          description: Nota média em escala 0–100
+          description: Nota média ponderada em escala 0–100
+        meanScore:
+          type: integer
+          format: int32
+          nullable: true
+          description: Média simples das notas em escala 0–100
+        popularity:
+          type: integer
+          format: int32
+          nullable: true
+          description: Quantidade de usuários da AniList com o anime na lista
         isAdult:
           type: boolean
           nullable: true
@@ -3699,6 +4183,12 @@ components:
           description: Nomes de gêneros
           items:
             type: string
+        tags:
+          type: array
+          nullable: true
+          description: Tags da AniList, com relevância e marcação de spoiler
+          items:
+            $ref: '#/components/schemas/AnimeTagResponse'
         studio:
           type: string
           nullable: true
@@ -3914,12 +4404,15 @@ components:
     AnimeReviewStatus:
       type: string
       description: |
-        Estado de revisão da ingestão automática de um anime.
-        - `PENDING_REVIEW`: ingestão completa (AniList + TMDB + todos os arquivos pareados),
-          aguardando confirmação manual.
-        - `PARTIAL`: ingestão incompleta (TMDB não vinculado, temporadas conflitantes, ou nem
-          todo arquivo pareado) — precisa de atenção.
-        - `REVIEWED`: confirmado manualmente; o auto-bind nunca sobrescreve esse estado.
+        Estado de revisão de um anime. `PENDING_REVIEW` e `PARTIAL` são gravados ao fim da tarefa
+        de ingestão da pasta; `REVIEWED`, pela confirmação manual. `null` enquanto a pasta não
+        terminou uma ingestão.
+        - `PENDING_REVIEW`: a tarefa terminou com todos os steps e o vínculo está completo —
+          filme, ou série com todos os arquivos pareados —, aguardando confirmação manual.
+        - `PARTIAL`: vínculo incompleto (tarefa parada em curadoria ou com falha, ou série com
+          algum arquivo sem par) — precisa de atenção.
+        - `REVIEWED`: confirmado manualmente; nenhum recálculo automático sobrescreve esse
+          estado.
       enum:
         - PENDING_REVIEW
         - PARTIAL
@@ -4003,9 +4496,8 @@ components:
     AnimeResponse:
       type: object
       description: |
-        Vista pública de um anime. `banner`/`logo` só são preenchidos quando há binding TMDB —
-        o bind já escolhe a imagem mais votada automaticamente, e um override manual pode
-        trocar essa escolha depois. `synopsis` vem em HTML quando a fonte é AniList (pode
+        Vista pública de um anime. `banner`/`logo` só são preenchidos quando há binding TMDB e
+        um override de imagem gravado — o bind não escolhe imagem. `synopsis` vem em HTML quando a fonte é AniList (pode
         conter `<br>`, `<i>`, `<b>`).
       required: [anilistId, franchiseAssignment]
       properties:
@@ -4072,6 +4564,34 @@ components:
           nullable: true
           items:
             type: string
+        tags:
+          type: array
+          nullable: true
+          description: Tags da AniList, com relevância e marcação de spoiler
+          items:
+            $ref: '#/components/schemas/AnimeTagResponse'
+        startDate:
+          allOf: [{ $ref: '#/components/schemas/AnilistFuzzyDate' }]
+          nullable: true
+          description: Data de estreia segundo a AniList
+        endDate:
+          allOf: [{ $ref: '#/components/schemas/AnilistFuzzyDate' }]
+          nullable: true
+          description: Data de término segundo a AniList; `null` enquanto o anime não terminou
+        status:
+          type: string
+          nullable: true
+          description: Status bruto da AniList (`FINISHED`, `RELEASING`, `NOT_YET_RELEASED`, `CANCELLED`, `HIATUS`)
+        popularity:
+          type: integer
+          format: int32
+          nullable: true
+          description: Quantidade de usuários da AniList com o anime na lista
+        meanScore:
+          type: number
+          format: double
+          nullable: true
+          description: Média simples das notas na AniList, em escala 0–10 (`score` é a média ponderada)
         franchiseAssignment:
           $ref: '#/components/schemas/FranchiseAssignment'
         franchiseRootId:
@@ -4083,7 +4603,24 @@ components:
         reviewStatus:
           allOf: [{ $ref: '#/components/schemas/AnimeReviewStatus' }]
           nullable: true
-          description: '`null` até o auto-bind terminar de processar a pasta pela primeira vez'
+          description: '`null` até o anime ser confirmado manualmente'
+
+    AnimeTagResponse:
+      type: object
+      description: Tag da AniList atribuída ao anime
+      required: [name]
+      properties:
+        name:
+          type: string
+        rank:
+          type: integer
+          format: int32
+          nullable: true
+          description: Quanto a tag se aplica ao anime, de 0 a 100
+        isSpoiler:
+          type: boolean
+          nullable: true
+          description: '`true` se a tag revela parte da história'
 
     AnimePage:
       description: Envelope paginado de animes
@@ -4544,7 +5081,9 @@ components:
         language:
           type: string
           nullable: true
-          description: ISO 639-1; `null` quando o TMDB não informa
+          description: |
+            ISO 639-1, seguido do país ISO 3166-1 quando o TMDB informa (`pt-BR`, `zh-TW`);
+            `null` quando o TMDB não informa.
 
     TmdbImageOption:
       type: object
@@ -4745,8 +5284,7 @@ components:
         Como a proposta de pairing é calculada.
 
         - `ANIBRIDGE` — número do episódio extraído do nome do arquivo, convertido pelo
-          anibridge pra temporada/episódio da série vinculada (o mesmo do pairing automático da
-          ingestão).
+          anibridge pra temporada/episódio da série vinculada.
         - `CONTINUITY` — episódio seguinte ao do arquivo pareado anterior, pela estrutura da
           série no TMDB; não consulta o anibridge.
       enum:
@@ -4795,6 +5333,9 @@ components:
         - `EPISODE_IN_USE` [`CONTINUITY`] — o episódio seguinte já está gravado em outro arquivo
           ou foi proposto antes pra outro arquivo nesta mesma proposta (`usedByFileId`). Não vem
           pré-selecionado; o arquivo continua sendo a âncora do próximo.
+        - `OUT_OF_AIR_WINDOW` [`ANIBRIDGE`] — o anibridge resolveu `seasonNumber`/`episodeNumber`
+          e o episódio existe no TMDB, mas foi ao ar a mais de 365 dias antes da estreia ou depois
+          do fim do anime na AniList — provavelmente outra temporada ou outro anime da franquia.
       enum:
         - PAIRED
         - NO_EPISODE_NUMBER
@@ -4806,6 +5347,7 @@ components:
         - NO_ANCHOR
         - END_OF_SERIES
         - EPISODE_IN_USE
+        - OUT_OF_AIR_WINDOW
 
     TmdbFilePairingProposal:
       type: object
@@ -5003,8 +5545,7 @@ components:
     NotificationResponse:
       type: object
       description: |
-        Notificação de observabilidade — hoje geradas pela ingestão (conclusão, falha geral e
-        falhas parciais do binding automático de cada título).
+        Notificação de observabilidade — hoje nenhum domínio gera notificação.
       required: [id, level, message, read, createdAt]
       properties:
         id:
@@ -5021,8 +5562,7 @@ components:
           nullable: true
           description: |
             Pasta do catalog do título a que a notificação se refere — o portal usa para linkar a
-            revisão. `null` quando a notificação não é sobre um título (ex.: conclusão da
-            ingestão).
+            revisão. `null` quando a notificação não é sobre um título.
         title:
           type: string
           nullable: true

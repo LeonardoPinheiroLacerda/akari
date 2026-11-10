@@ -33,6 +33,10 @@ não há tabela compartilhada entre domínios além das FKs explícitas abaixo.
 | `anibridge_mapping_release` / `anibridge_mapping_segment` | V9 | `anibridge` | `_release` guarda qual release do dataset do GitHub foi ingerida; `_segment` é o mapeamento episódio↔temporada propriamente dito. **Confirmado** em `MappingRelease.java`: `_release` tem PK `id` sem `SERIAL` porque é uma linha singleton fixa (`SINGLETON_ID = 1`, sempre a mesma linha é atualizada) — o id não vem do upstream, só não precisa de autoincremento por existir uma única linha. |
 | `video_file_cache` | V12 | `cache` (`VideoFileCache`) | Fila/status de download remoto→cache local; PK `UUID`, 1:1 com `video_file` (`UNIQUE`). |
 | `playback_session` | V13 | `playback` | Sessão de transcode HLS; PK `UUID` (o `sessionId` da API); sem FK de volta — é limpa por exclusão de linha, não por histórico. |
+| `ingestion` | V20 | `ingestion` | Uma execução de ingestão de um subtree; `status` como `TEXT`. |
+| `ingestion_task` | V20 | `ingestion` (`IngestionTask`) | Uma por pasta da ingestão. FK em `ingestion` e em `media_folder`, ambas `ON DELETE CASCADE` (remover a pasta remove as tasks dela); FK em `anime(anilist_id)` nullable, `ON DELETE SET NULL`. |
+| `ingestion_step_execution` | V20 | `ingestion` (`IngestionStepExecution`) | Uma tentativa de uma etapa de uma task; FK em `ingestion_task`, `ON DELETE CASCADE`; `CHECK (attempt > 0)`. |
+| `ingestion_step_event` | V20 | `ingestion` (`IngestionStepEvent`) | Evento da linha do tempo de uma tentativa; FK em `ingestion_step_execution`, `ON DELETE CASCADE`; `details` em `JSONB`. |
 
 ## Migrations de alteração (não criam tabela nova)
 
@@ -42,10 +46,9 @@ não há tabela compartilhada entre domínios além das FKs explícitas abaixo.
   existentes ficam `NULL`).
 - **V14** — adiciona 7 colunas de metadata de episódio em `tmdb_file_pairing` (todas nullable, sem
   backfill).
-- **V16** — adiciona `natural_sort_key` em `video_file` (nullable) + índice. Diferente de V11/V14:
-  tem backfill, mas não dentro da migration — `ReconciliationService` (domínio `ingestion`)
-  recalcula a chave de qualquer arquivo que a reencontre sem ela numa nova varredura; linha que
-  não passar por reconciliação de novo continua `NULL` indefinidamente.
+- **V16** — adiciona `natural_sort_key` em `video_file` (nullable) + índice, sem backfill na
+  migration. Arquivos criados depois recebem a chave na criação; linhas anteriores ficam `NULL`
+  — nenhum fluxo preenche a chave delas.
 - **V17** — insere três preferências novas em `setting` (`playback.default.audio-language`,
   `playback.default.subtitle-language`, `playback.default.subtitle-forced`) — mesmo padrão de
   seed do V3, incremental.
@@ -54,16 +57,20 @@ não há tabela compartilhada entre domínios além das FKs explícitas abaixo.
   `ON DELETE SET NULL`, com índice parcial nas linhas não nulas — os membros `MANUAL_MEMBER`),
   e remove `franchise_root_curation`. A franquia de cada anime não é materializada: é resolvida
   em memória a cada leitura (`FranchiseResolver`).
+- **V21** — insere `tmdb.override.title-language`, `tmdb.override.synopsis-language` (ambas
+  `NULL`) e `tmdb.override.fallback-language` (`en`) em `setting` e apaga
+  `tmdb.image.backdrop-language`.
 
-## Seed de `setting` (V3 + V10 + V17)
+## Seed de `setting` (V3 + V10 + V17 + V21)
 
 A tabela `setting` nasce com um conjunto fixo de chaves já inseridas (não é só DDL vazio):
 `cache.max-size-bytes`, `anilist.cache.ttl`, `tmdb.cache.ttl`, `tmdb.api-key` (secret, vazio),
 `tmdb.default-language`, `tmdb.include-adult`, `playback.transcode.hardware-acceleration`,
 `playback.session.heartbeat-ttl`, `cache.dir`, `playback.work.base-dir`, depois (V10)
-`tmdb.image.logo-language`, `tmdb.image.backdrop-language` e (V17)
+`tmdb.image.logo-language`, (V17)
 `playback.default.audio-language`, `playback.default.subtitle-language`,
-`playback.default.subtitle-forced`. **Nova preferência que o código passa a
+`playback.default.subtitle-forced` e (V21) `tmdb.override.title-language`,
+`tmdb.override.synopsis-language`, `tmdb.override.fallback-language`. **Nova preferência que o código passa a
 ler via um getter tipado de `SettingService` precisa de uma migration de seed correspondente** —
 sem isso, o valor não existe na tabela e o getter falha em runtime no primeiro uso (não no boot;
 ver observação equivalente no `README.md` de `domain/setting/`).
@@ -80,8 +87,7 @@ ver observação equivalente no `README.md` de `domain/setting/`).
   mesmo domínio Panache (`domain/cache/model/`) mas não têm nenhuma relação de schema entre si.
   **Backlog real** (confirmado pelo mantenedor, mesmo achado já registrado no `README.md` de
   `domain/cache/`).
-- **Alterações sem backfill (V11, V14)** são aditivas e nullable — seguras para dados existentes,
-  mas significam que linhas antigas ficam com a coluna nova vazia até o próximo sync/curadoria, não
-  há migração de dados retroativa. **V16** também não faz backfill na própria migration, mas tem
-  um caminho de preenchimento definido (reconciliação do `ingestion`, ver acima) — não é vazio
-  indefinidamente por decisão, é vazio até a próxima varredura da pasta.
+- **Alterações sem backfill (V11, V14, V16)** são aditivas e nullable — seguras para dados
+  existentes, mas significam que linhas antigas ficam com a coluna nova vazia até o próximo
+  sync/curadoria, não há migração de dados retroativa. No caso do V16, nenhum fluxo preenche a
+  chave das linhas antigas (ver acima).

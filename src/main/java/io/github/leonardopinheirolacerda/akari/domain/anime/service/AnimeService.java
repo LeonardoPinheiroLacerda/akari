@@ -5,13 +5,16 @@ import io.github.leonardopinheirolacerda.akari.api.dto.AnimeBindingSummary;
 import io.github.leonardopinheirolacerda.akari.api.dto.AnimeResponse;
 import io.github.leonardopinheirolacerda.akari.api.dto.AnimeReviewStatus;
 import io.github.leonardopinheirolacerda.akari.api.dto.FranchiseAssignment;
+import io.github.leonardopinheirolacerda.akari.api.dto.TmdbMediaType;
 import io.github.leonardopinheirolacerda.akari.domain.anilist.client.dtos.AnilistMediaResponse;
 import io.github.leonardopinheirolacerda.akari.domain.anilist.service.AnilistSearchService;
 import io.github.leonardopinheirolacerda.akari.domain.anime.graph.FranchiseResolver;
 import io.github.leonardopinheirolacerda.akari.domain.anime.mapper.AnimeMapper;
 import io.github.leonardopinheirolacerda.akari.domain.anime.model.Anime;
+import io.github.leonardopinheirolacerda.akari.domain.anime.model.TmdbFilePairing;
 import io.github.leonardopinheirolacerda.akari.domain.mediafolder.model.MediaFolder;
 import io.github.leonardopinheirolacerda.akari.domain.mediafolder.service.MediaFolderService;
+import io.github.leonardopinheirolacerda.akari.domain.videofile.service.VideoFileService;
 import io.github.leonardopinheirolacerda.akari.exceptions.BusinessRuleException;
 import io.github.leonardopinheirolacerda.akari.exceptions.ResourceNotFoundException;
 import io.quarkus.logging.Log;
@@ -22,7 +25,7 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Binding anime↔pasta, fetch/sync na AniList e revisão da ingestão.
+ * Binding anime↔pasta, fetch/sync na AniList e status de revisão do anime.
  */
 @ApplicationScoped
 public class AnimeService {
@@ -42,6 +45,9 @@ public class AnimeService {
     @Inject
     AnimeOverrideService animeOverrideService;
 
+    @Inject
+    VideoFileService videoFileService;
+
     /**
      * Busca o anime na AniList e cria a metadata vinculada à pasta informada. Também
      * sincroniza as arestas do grafo de relações com os animes já conhecidos localmente.
@@ -58,8 +64,8 @@ public class AnimeService {
     }
 
     /**
-     * Mesmo bind de {@link #bindAnimeToFolder}, devolvendo o model em vez da resposta — usado
-     * pela ingestão, que não exibe o anime e assim não paga a resolução de franquias da resposta.
+     * Mesmo bind de {@link #bindAnimeToFolder}, devolvendo o model em vez da resposta — sem
+     * pagar a resolução de franquias que a resposta exige.
      *
      * @param anilistId id do anime na AniList
      * @param animeBindingRequest payload com o {@code folderId} a vincular
@@ -130,9 +136,9 @@ public class AnimeService {
     }
 
     /**
-     * Busca o model cru do anime vinculado à pasta, sem lançar se não houver. Usado por outros
-     * domínios (ex.: {@code ingestion}) que precisam checar o binding antes de agir, de contextos
-     * sem transação ambiente — por isso é {@code @Transactional} mesmo sendo leitura.
+     * Busca o model cru do anime vinculado à pasta, sem lançar se não houver — usado pela
+     * ingestão pra checar o binding antes de buscar na AniList. Leitura marcada
+     * {@code @Transactional} pra funcionar fora de contexto de request.
      *
      * @param folderId id da pasta no catalog
      * @return o anime vinculado, se houver
@@ -143,21 +149,8 @@ public class AnimeService {
     }
 
     /**
-     * Confirma se já existe metadata salva pro anime. Mesma motivação de {@link #findByFolder}
-     * — leitura marcada {@code @Transactional} pra funcionar fora de contexto de request.
-     *
-     * @param anilistId id do anime na AniList
-     * @return {@code true} se já existe metadata salva
-     */
-    @Transactional
-    public boolean exists(Integer anilistId) {
-        return Anime.find(anilistId).isPresent();
-    }
-
-    /**
-     * Busca o model cru do anime pelo {@code anilistId}, sem lançar se não houver. Mesma
-     * motivação de {@link #findByFolder} — leitura marcada {@code @Transactional} pra funcionar
-     * fora de contexto de request.
+     * Busca o model cru do anime pelo {@code anilistId}, sem lançar se não houver — leitura
+     * marcada {@code @Transactional} pra funcionar fora de contexto de request.
      *
      * @param anilistId id do anime na AniList
      * @return o anime, se houver metadata salva
@@ -227,27 +220,8 @@ public class AnimeService {
     }
 
     /**
-     * Atualiza o status de revisão da ingestão, exceto se já estiver {@code REVIEWED} —
-     * revisão manual tem precedência sobre qualquer recálculo automático do auto-bind, mesmo
-     * que a pasta seja reprocessada numa reconciliação futura.
-     *
-     * @param anilistId id do anime na AniList
-     * @param status novo status calculado pelo auto-bind
-     */
-    @Transactional
-    public void updateReviewStatusIfNotReviewed(Integer anilistId, AnimeReviewStatus status) {
-        final Anime anime = findOrThrow(anilistId);
-
-        if (anime.reviewStatus == AnimeReviewStatus.REVIEWED) {
-            return;
-        }
-
-        anime.reviewStatus = status;
-    }
-
-    /**
-     * Confirma manualmente que a ingestão desse anime está correta — a partir daqui, o
-     * auto-bind nunca mais altera esse campo (ver {@link #updateReviewStatusIfNotReviewed}).
+     * Confirma manualmente que a ingestão desse anime está correta — a partir daqui, nenhum
+     * recálculo automático deve alterar esse campo.
      *
      * @param anilistId id do anime na AniList
      * @return a metadata atualizada
@@ -262,6 +236,32 @@ public class AnimeService {
         anime.reviewStatus = AnimeReviewStatus.REVIEWED;
 
         return toResponse(anime);
+    }
+
+    /**
+     * Grava o status de revisão do anime ao fim da task de ingestão da pasta dele:
+     * {@code PENDING_REVIEW} quando a task terminou com todos os steps e o anime está completo —
+     * filme (os overrides já foram preenchidos) ou série com todo arquivo da pasta pareado;
+     * {@code PARTIAL} nos demais casos. Um anime já {@code REVIEWED} não é alterado.
+     *
+     * @param anilistId id do anime na AniList
+     * @param stepsCompleted {@code true} se a task terminou {@code COMPLETED}
+     * @throws ResourceNotFoundException se não há metadata salva pro id informado
+     */
+    @Transactional
+    public void updateReviewStatus(Integer anilistId, boolean stepsCompleted) {
+        final Anime anime = findOrThrow(anilistId);
+
+        if (anime.reviewStatus == AnimeReviewStatus.REVIEWED) {
+            return;
+        }
+
+        if (stepsCompleted && isComplete(anime)) {
+            anime.reviewStatus = AnimeReviewStatus.PENDING_REVIEW;
+            return;
+        }
+
+        anime.reviewStatus = AnimeReviewStatus.PARTIAL;
     }
 
     /**
@@ -285,4 +285,18 @@ public class AnimeService {
         return animeOverrideService.toResponse(anime, FranchiseResolver.resolve());
     }
 
+    /**
+     * Filme: completo com o TMDB vinculado. Série: completa com todo arquivo da pasta pareado.
+     */
+    private boolean isComplete(Anime anime) {
+        if (anime.tmdbMediaType == TmdbMediaType.MOVIE) {
+            return true;
+        }
+
+        final long files = videoFileService.countByFolder(anime.folder.id);
+        final long paired = TmdbFilePairing.findByFolderId(anime.folder.id)
+                .size();
+
+        return files > 0 && paired == files;
+    }
 }

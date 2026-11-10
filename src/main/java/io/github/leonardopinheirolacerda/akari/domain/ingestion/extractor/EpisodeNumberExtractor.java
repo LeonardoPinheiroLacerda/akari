@@ -1,13 +1,16 @@
 package io.github.leonardopinheirolacerda.akari.domain.ingestion.extractor;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.OptionalInt;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Extrai o número de episódio do nome de um arquivo de vídeo — best-effort, usado pela ingestão
- * pra tentar o pairing TMDB automático. Arquivo sem nenhum padrão reconhecido simplesmente não é
- * pareado (nunca bloqueia a ingestão).
+ * Extrai o número de episódio do nome de um arquivo de vídeo — best-effort, usado pela resolução
+ * do pairing TMDB ({@code FolderEpisodeNumbering}, no domínio {@code anime}) e pela chave de
+ * ordenação natural dos arquivos ({@code VideoFileService}). Arquivo sem nenhum padrão reconhecido
+ * simplesmente fica sem número.
  *
  * <p>Pipeline de 4 padrões, o primeiro que casar ganha: marcador {@code SxxExx} colado sem
  * separador (ex.: {@code "CANAAN.S01E01.mkv"}), número isolado por separador (ex.:
@@ -23,6 +26,7 @@ import java.util.regex.Pattern;
  * nenhum candidato com hífen, cai pro primeiro número isolado encontrado (comportamento de
  * sempre). Validado contra os ~10 mil arquivos reais da biblioteca: zero regressão, ~430
  * extrações corrigidas.
+ *
  */
 public final class EpisodeNumberExtractor {
 
@@ -36,6 +40,7 @@ public final class EpisodeNumberExtractor {
     private static final Pattern EPISODE_MARKER = Pattern.compile("(?i)\\bEP?\\.?\\s?(\\d{1,4})\\b");
 
     private static final Pattern TRAILING_NUMBER = Pattern.compile("(\\d{1,4})$");
+
 
     private EpisodeNumberExtractor() {
     }
@@ -65,6 +70,27 @@ public final class EpisodeNumberExtractor {
         }
 
         return firstMatch(TRAILING_NUMBER, nameWithoutExtension);
+    }
+
+    /**
+     * Todos os números isolados por separador do nome (o mesmo critério do número isolado do
+     * {@link #extract}: sem resolução como {@code 1080p} nem número grudado em letra), na ordem em
+     * que aparecem — usado pela numeração da pasta inteira no pairing
+     * ({@code FolderEpisodeNumbering}).
+     *
+     * @param fileName nome do arquivo, com extensão
+     * @return os números, na ordem do nome; vazia se não houver nenhum
+     */
+    public static List<Integer> extractSeparatedNumbers(String fileName) {
+        final String nameWithoutExtension = EXTENSION.matcher(fileName).replaceFirst("");
+        final Matcher matcher = SEPARATED_NUMBER.matcher(nameWithoutExtension);
+        final List<Integer> numbers = new ArrayList<>();
+
+        while (matcher.find()) {
+            numbers.add(Integer.parseInt(matcher.group(1)));
+        }
+
+        return numbers;
     }
 
     private static OptionalInt firstMatch(Pattern pattern, String text) {

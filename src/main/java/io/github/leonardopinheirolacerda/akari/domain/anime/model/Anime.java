@@ -7,7 +7,11 @@ import io.github.leonardopinheirolacerda.akari.domain.mediafolder.model.MediaFol
 import io.github.leonardopinheirolacerda.akari.model.PageResult;
 import io.quarkus.hibernate.orm.panache.PanacheEntityBase;
 import io.quarkus.hibernate.orm.panache.PanacheQuery;
+import jakarta.persistence.AttributeOverride;
+import jakarta.persistence.CollectionTable;
 import jakarta.persistence.Column;
+import jakarta.persistence.ElementCollection;
+import jakarta.persistence.Embedded;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
@@ -20,6 +24,7 @@ import jakarta.persistence.Table;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
+import org.hibernate.annotations.BatchSize;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
@@ -88,6 +93,38 @@ public class Anime extends PanacheEntityBase {
     public List<String> genres;
 
     public String studio;
+
+    @Embedded
+    @AttributeOverride(name = "year", column = @Column(name = "start_year"))
+    @AttributeOverride(name = "month", column = @Column(name = "start_month"))
+    @AttributeOverride(name = "day", column = @Column(name = "start_day"))
+    public FuzzyDate startDate;
+
+    @Embedded
+    @AttributeOverride(name = "year", column = @Column(name = "end_year"))
+    @AttributeOverride(name = "month", column = @Column(name = "end_month"))
+    @AttributeOverride(name = "day", column = @Column(name = "end_day"))
+    public FuzzyDate endDate;
+
+    /**
+     * Status bruto da AniList ({@code FINISHED}, {@code RELEASING}, {@code NOT_YET_RELEASED},
+     * {@code CANCELLED}, {@code HIATUS}).
+     */
+    public String status;
+
+    public Integer popularity;
+
+    /**
+     * Média simples das notas na AniList, em escala 0–10 (a {@code score} é a média ponderada).
+     */
+    @Column(name = "mean_score")
+    public Double meanScore;
+
+    // Carregadas em lote nas listagens, em vez de uma consulta por anime.
+    @ElementCollection
+    @CollectionTable(name = "anime_tag", joinColumns = @JoinColumn(name = "anilist_id"))
+    @BatchSize(size = 100)
+    public List<AnimeTag> tags;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "franchise_assignment")

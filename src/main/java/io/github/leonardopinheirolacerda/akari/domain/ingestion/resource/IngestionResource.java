@@ -3,7 +3,10 @@ package io.github.leonardopinheirolacerda.akari.domain.ingestion.resource;
 import io.github.leonardopinheirolacerda.akari.api.IngestionApi;
 import io.github.leonardopinheirolacerda.akari.api.dto.AvailableFolderNode;
 import io.github.leonardopinheirolacerda.akari.api.dto.IngestSubtreeRequest;
+import io.github.leonardopinheirolacerda.akari.api.dto.IngestionPage;
 import io.github.leonardopinheirolacerda.akari.api.dto.IngestionStartedResponse;
+import io.github.leonardopinheirolacerda.akari.api.dto.IngestionSummary;
+import io.github.leonardopinheirolacerda.akari.api.dto.IngestionTaskDetail;
 import io.github.leonardopinheirolacerda.akari.domain.ingestion.service.IngestionService;
 import io.github.leonardopinheirolacerda.akari.exceptions.BusinessRuleException;
 import io.github.leonardopinheirolacerda.akari.exceptions.IntegrationException;
@@ -11,10 +14,11 @@ import io.github.leonardopinheirolacerda.akari.exceptions.ResourceNotFoundExcept
 import jakarta.inject.Inject;
 
 /**
- * Implementa {@link IngestionApi} — reconciliação subtree ↔ catalog em {@code /v1/ingestion}.
+ * Implementa {@link IngestionApi} — ingestão de subtrees de storage provider no catalog em
+ * {@code /v1/ingestion}.
  *
- * <p>Só traduz HTTP ↔ service, sem lógica própria: toda a orquestração (validação síncrona,
- * disparo da reconciliação em background) fica no {@code IngestionService}.
+ * <p>Só traduz HTTP ↔ service, sem lógica própria: toda a orquestração (validação, criação das
+ * pastas, disparo das tasks em background) fica no {@code IngestionService}.
  */
 public class IngestionResource implements IngestionApi {
 
@@ -25,12 +29,10 @@ public class IngestionResource implements IngestionApi {
      * {@code POST /v1/ingestion/providers/{providerId}} — dispara a ingestão de um subtree do
      * provider.
      *
-     * <p>Só a validação inicial é síncrona (payload, TMDB configurado, provider existente);
-     * o percurso do provider e a reconciliação em si rodam em background numa thread virtual.
-     * {@code rootPath} inexistente no provider não vira erro síncrono — a reconciliação falha
-     * em background e vira uma notificação {@code ERROR}. Disparo repetido para o mesmo
-     * {@code (providerId, rootPath)} já em andamento devolve o mesmo {@code STARTED} sem
-     * iniciar uma nova reconciliação.
+     * <p>Síncronos: validação (payload, TMDB configurado, provider existente), listagem da
+     * árvore remota e criação das pastas no catalog. Em background, uma thread virtual por
+     * pasta cadastra os arquivos de vídeo e cria a {@code IngestionTask} da pasta. Disparo
+     * repetido sobre o mesmo subtree não é deduplicado.
      *
      * @param providerId id do storage provider a ingerir
      * @param ingestSubtreeRequest subtree (rootPath) e tipo de mídia a ingerir
@@ -40,10 +42,10 @@ public class IngestionResource implements IngestionApi {
      *         (preferência {@code tmdb.api-key})
      */
     @Override
-    public IngestionStartedResponse ingestProviderSubtree(
+    public IngestionStartedResponse createIngestionTasks(
             Integer providerId,
             IngestSubtreeRequest ingestSubtreeRequest) {
-        return ingestionService.ingestProviderSubtree(providerId, ingestSubtreeRequest);
+        return ingestionService.createIngestionTasks(providerId, ingestSubtreeRequest);
     }
 
     /**
@@ -66,18 +68,53 @@ public class IngestionResource implements IngestionApi {
     }
 
     /**
-     * {@code DELETE /v1/ingestion/providers/{providerId}/available-folders} — remove do catalog
-     * tudo que foi ingerido sob um subtree do provider.
+     * {@code GET /v1/ingestion/current} — a ingestão em andamento ou, sem nenhuma em andamento,
+     * a mais recente, com todas as tasks.
      *
-     * <p>Sempre devolve {@code 204}, mesmo com {@code providerId} inexistente (sem checagem
-     * prévia) ou quando nada no catalog corresponde ao subtree.
-     *
-     * @param providerId id do storage provider
-     * @param rootPath subtree a remover; vazio ou {@code null} remove a árvore inteira ingerida
-     *                 do provider
+     * @return a ingestão; {@code null} ({@code 204}) se nenhuma foi disparada ainda
      */
     @Override
-    public void removeIngestedSubtree(Integer providerId, String rootPath) {
-        ingestionService.removeIngestedSubtree(providerId, rootPath);
+    public IngestionSummary getCurrentIngestion() {
+        return ingestionService.getCurrentIngestion();
+    }
+
+    /**
+     * {@code GET /v1/ingestion} — página de ingestões, da mais nova pra mais antiga, cada uma com
+     * todas as tasks.
+     *
+     * @param page número da página, 0-based
+     * @param size tamanho da página
+     * @return a página
+     */
+    @Override
+    public IngestionPage listIngestions(Integer page, Integer size) {
+        return ingestionService.listIngestions(page, size);
+    }
+
+    /**
+     * {@code GET /v1/ingestion/tasks/{taskId}} — a task com a linha do tempo de cada step.
+     *
+     * @param taskId id da task
+     * @return a task com todas as execuções dos steps e os eventos de cada uma
+     * @throws ResourceNotFoundException (traduzida em 404) se o {@code taskId} não existir
+     */
+    @Override
+    public IngestionTaskDetail getIngestionTask(Integer taskId) {
+        return ingestionService.getIngestionTask(taskId);
+    }
+
+    /**
+     * {@code PUT /v1/ingestion/tasks/{taskId}/resolve} — marca como resolvida manualmente uma
+     * task que espera curadoria.
+     *
+     * @param taskId id da task
+     * @return a task, já {@code RESOLVED}, com a linha do tempo
+     * @throws ResourceNotFoundException (traduzida em 404) se o {@code taskId} não existir
+     * @throws BusinessRuleException (traduzida em 400) se a task não estiver em
+     *         {@code WAITING_CURATION}
+     */
+    @Override
+    public IngestionTaskDetail resolveIngestionTask(Integer taskId) {
+        return ingestionService.resolveIngestionTask(taskId);
     }
 }

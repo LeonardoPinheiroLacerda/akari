@@ -1,14 +1,19 @@
 package io.github.leonardopinheirolacerda.akari.domain.ingestion.service;
 
-import io.github.leonardopinheirolacerda.akari.api.dto.AvailableFolderNode;
-import io.github.leonardopinheirolacerda.akari.api.dto.IngestSubtreeRequest;
-import io.github.leonardopinheirolacerda.akari.api.dto.IngestionStartedResponse;
-import io.github.leonardopinheirolacerda.akari.api.dto.MediaType;
-import io.github.leonardopinheirolacerda.akari.api.dto.NotificationLevel;
-import io.github.leonardopinheirolacerda.akari.domain.ingestion.model.FolderReconciliationResult;
-import io.github.leonardopinheirolacerda.akari.domain.ingestion.registry.IngestionRunRegistry;
+import io.github.leonardopinheirolacerda.akari.api.dto.*;
+import io.github.leonardopinheirolacerda.akari.domain.anime.service.AnimeOverrideService;
+import io.github.leonardopinheirolacerda.akari.domain.ingestion.mapper.IngestionMapper;
+import io.github.leonardopinheirolacerda.akari.domain.ingestion.model.Ingestion;
+import io.github.leonardopinheirolacerda.akari.domain.ingestion.model.IngestionStepEvent;
+import io.github.leonardopinheirolacerda.akari.domain.ingestion.model.IngestionStepExecution;
+import io.github.leonardopinheirolacerda.akari.domain.ingestion.model.IngestionTask;
+import io.github.leonardopinheirolacerda.akari.domain.ingestion.model.IngestionTaskStatusCount;
+import io.github.leonardopinheirolacerda.akari.domain.ingestion.model.enums.IngestionStatus;
+import io.github.leonardopinheirolacerda.akari.domain.ingestion.model.enums.IngestionStep;
+import io.github.leonardopinheirolacerda.akari.domain.ingestion.model.enums.IngestionTaskStatus;
+import io.github.leonardopinheirolacerda.akari.domain.ingestion.sse.IngestionEventBroadcaster;
+import io.github.leonardopinheirolacerda.akari.domain.mediafolder.model.MediaFolder;
 import io.github.leonardopinheirolacerda.akari.domain.mediafolder.service.MediaFolderService;
-import io.github.leonardopinheirolacerda.akari.domain.notification.service.NotificationService;
 import io.github.leonardopinheirolacerda.akari.domain.setting.service.SettingService;
 import io.github.leonardopinheirolacerda.akari.domain.storageprovider.model.StorageProvider;
 import io.github.leonardopinheirolacerda.akari.domain.storageprovider.provider.StorageProviderClientFactory;
@@ -18,37 +23,37 @@ import io.github.leonardopinheirolacerda.akari.domain.storageprovider.service.St
 import io.github.leonardopinheirolacerda.akari.exceptions.BusinessRuleException;
 import io.github.leonardopinheirolacerda.akari.exceptions.IntegrationException;
 import io.github.leonardopinheirolacerda.akari.exceptions.ResourceNotFoundException;
+import io.github.leonardopinheirolacerda.akari.model.PageResult;
 import io.github.leonardopinheirolacerda.akari.utils.DirectoryUtils;
-import io.github.leonardopinheirolacerda.akari.utils.FileNameUtils;
-import io.github.leonardopinheirolacerda.akari.utils.ThreadUtils;
 import io.quarkus.logging.Log;
+import io.quarkus.virtual.threads.VirtualThreads;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
+
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
 import java.util.stream.Collectors;
 
 /**
- * Reconciliação subtree ↔ catalog por storage provider — as 3 operações do contrato (ver tag
- * {@code Ingestion} no openapi.yaml), que já documenta o fluxo completo na descrição do
- * {@code POST}.
+ * Ingestão de subtrees de storage provider no catalog: dispara a ingestão, lista as pastas
+ * remotas marcando as já ingeridas, consulta o andamento das ingestões e publica esse andamento
+ * no stream SSE ({@link IngestionEventBroadcaster}).
  *
- * <p>Os Steps 2-3 (sincronizar `MediaFolder`/`VideoFile` com o provider) ficam no
- * {@link ReconciliationService}, não aqui — a thread virtual do Step 1-3 chama cada etapa como
- * uma transação própria, e um bean separado deixa isso explícito na própria estrutura do código
- * (chamada cross-bean, passa pelo proxy do CDI naturalmente), em vez de precisar de um contorno
- * de auto-injeção pra contornar o self-invocation do CDI.
+ * <p>O disparo roda em duas fases. A primeira é sequencial, na thread da requisição: cria as
+ * {@code MediaFolder}s do subtree da mais rasa pra mais funda, cada uma na sua transação, pra
+ * que o pai já esteja no banco quando o filho resolve o {@code parent} pelo path. A segunda é
+ * paralela, numa thread virtual por pasta: o {@link IngestionTaskService} registra os arquivos
+ * de vídeo e a {@code IngestionTask} da pasta, sem criar pasta nenhuma — criar pastas em
+ * paralelo faria o filho não achar o pai ainda não commitado.
  */
 @ApplicationScoped
 public class IngestionService {
-
-    // Throttle proativo entre pastas — complementa o retry reativo do RetryUtils (que só age
-    // depois de um 429), espaçando as chamadas pra AniList/TMDB antes de levar rate limit.
-    private static final int AUTO_BIND_THROTTLE_MILLIS = 1500;
 
     @Inject
     StorageProviderService storageProviderService;
@@ -57,42 +62,52 @@ public class IngestionService {
     StorageProviderClientFactory storageProviderClientFactory;
 
     @Inject
-    ReconciliationService reconciliationService;
-
-    @Inject
-    FolderRemovalService folderRemovalService;
-
-    @Inject
-    FolderAutoBindService folderAutoBindService;
-
-    @Inject
-    NotificationService notificationService;
-
-    @Inject
     SettingService settingService;
-
-    @Inject
-    IngestionRunRegistry ingestionRunRegistry;
 
     @Inject
     MediaFolderService mediaFolderService;
 
+    @Inject
+    IngestionTaskService ingestionTaskService;
+
+    @Inject
+    @VirtualThreads
+    ExecutorService executorService;
+
+    @Inject
+    IngestionMapper ingestionMapper;
+
+    @Inject
+    AnimeOverrideService animeOverrideService;
+
+    @Inject
+    IngestionEventBroadcaster ingestionEventBroadcaster;
+
     /**
-     * Valida as pré-condições síncronas e dispara a reconciliação de um subtree em background.
+     * Registra no catalog as pastas e os arquivos de vídeo de um subtree do provider e cria uma
+     * {@link Ingestion} com uma {@code IngestionTask} por pasta com vídeo.
      *
-     * <p>Se já houver uma ingestão em andamento pro mesmo {@code (providerId, rootPath)}
-     * (controlado via {@link IngestionRunRegistry}), devolve {@code STARTED} sem iniciar uma
-     * nova thread — evita reconciliações concorrentes sobre o mesmo subtree.
+     * <p>Fluxo: valida o TMDB configurado e o provider → lista a árvore remota a partir de
+     * {@code rootPath}, acrescentando o próprio {@code rootPath} como pasta (o {@code listTree}
+     * só devolve descendentes) → persiste a {@link Ingestion} como {@code PENDING} → pra cada
+     * pasta, da mais rasa pra mais funda, cria a {@code MediaFolder} se não existir (transação
+     * própria), lista os vídeos diretos dela e submete a criação da task numa thread virtual.
+     * Só pasta com vídeo ganha task.
+     *
+     * <p>Devolve depois de submeter as tasks, sem esperar por elas. Falha de uma task fica só
+     * no log, sem afetar as demais. Não há deduplicação: dois disparos simultâneos sobre o
+     * mesmo subtree rodam juntos. {@code rootPath} não é validado contra o provider.
      *
      * @param providerId id do storage provider a ingerir
-     * @param ingestSubtreeRequest subtree (rootPath) e tipo de mídia a ingerir
+     * @param ingestSubtreeRequest subtree a ingerir ({@code rootPath}; {@code null} vira a raiz
+     *                             do provider) e tipo de mídia gravado nas pastas novas — pastas
+     *                             já existentes mantêm o tipo que têm
      * @return status {@code STARTED}
-     * @throws ResourceNotFoundException se o {@code providerId} não existir
      * @throws BusinessRuleException se o TMDB não estiver configurado (preferência
      *         {@code tmdb.api-key})
+     * @throws ResourceNotFoundException se o {@code providerId} não existir
      */
-    public IngestionStartedResponse ingestProviderSubtree(Integer providerId, IngestSubtreeRequest ingestSubtreeRequest) {
-        final StorageProvider storageProvider = storageProviderService.findOrThrow(providerId);
+    public IngestionStartedResponse createIngestionTasks(Integer providerId, IngestSubtreeRequest ingestSubtreeRequest) {
 
         if (!settingService.isTmdbConfigured()) {
             Log.warnf("Ingestão do provider %d rejeitada: TMDB não configurado", providerId);
@@ -100,38 +115,65 @@ public class IngestionService {
                     "TMDB não configurado — cadastre o token na preferência 'tmdb.api-key' antes de ingerir");
         }
 
+        final StorageProvider storageProvider = storageProviderService.findOrThrow(providerId);
+        final StorageProviderClient client = storageProviderClientFactory.getClient(storageProvider);
+
         final String rootPath = Objects.requireNonNullElse(ingestSubtreeRequest.getRootPath(), "");
 
-        if (!ingestionRunRegistry.tryStart(providerId, rootPath)) {
-            Log.infof("Ingestão do provider %d (rootPath=%s) já em andamento, ignorando", providerId, rootPath);
-            return new IngestionStartedResponse().status(IngestionStartedResponse.StatusEnum.STARTED);
-        }
+        final List<StorageItem> storageDirs = client.listTree(rootPath)
+                .stream()
+                .filter(StorageItem::isDir)
+                .toList();
 
-        final StorageProviderClient client = storageProviderClientFactory.getClient(storageProvider);
-        final MediaType mediaType = ingestSubtreeRequest.getMediaType();
+        final List<StorageItem> withSyntheticRoot = StorageItem.withSyntheticRoot(rootPath, storageDirs);
 
-        Thread.ofVirtual().start(() -> runReconciliation(providerId, rootPath, client, mediaType));
+        final List<StorageItem> storageItems = StorageItem.sortedByDepth(withSyntheticRoot);
+
+        Ingestion ingestion = new Ingestion();
+        ingestion.status = IngestionStatus.PENDING;
+
+        createIngestion(ingestion);
+        publishIngestionUpdated(ingestion.id);
+
+        storageItems.forEach(storageItem -> {
+            final MediaFolder mediaFolder = mediaFolderService.findOrCreate(
+                    providerId,
+                    storageItem.path(),
+                    storageItem.name(),
+                    ingestSubtreeRequest.getMediaType()
+            );
+
+            final List<StorageItem> storageVideos = client.listChildVideos(storageItem.path());
+
+            executorService.submit(() -> {
+                try {
+                    ingestionTaskService.createIngestionTask(
+                            ingestion,
+                            mediaFolder.id,
+                            storageVideos
+                    );
+                } catch (RuntimeException e) {
+                    Log.errorf(e, "Falha ao criar a tarefa de ingestão da pasta %d", mediaFolder.id);
+                }
+            });
+        });
+
+        Log.info("Criação de tarefas de ingestão concluída");
 
         return new IngestionStartedResponse().status(IngestionStartedResponse.StatusEnum.STARTED);
     }
 
+
     /**
-     * Remove do catalog tudo que foi ingerido sob um subtree do provider.
+     * Persiste a ingestão na sua própria transação, pra que ela já esteja commitada quando as
+     * tasks, em outras threads, a referenciarem.
      *
-     * <p>Não checa se o provider existe nem se o subtree tem algo ingerido — delega direto pro
-     * {@link FolderRemovalService}, que não faz nada se não achar nenhuma pasta correspondente.
-     *
-     * @param providerId id do storage provider
-     * @param rootPath subtree a remover; {@code null} vira string vazia (árvore inteira do
-     *                 provider)
+     * @param ingestion ingestão nova, com {@code status} já preenchido; recebe o {@code id}
+     *                  gerado
      */
     @Transactional
-    public void removeIngestedSubtree(Integer providerId, String rootPath) {
-        final String normalizedRootPath = Objects.requireNonNullElse(rootPath, "");
-
-        Log.infof("Removendo subtree ingerido do provider %d (rootPath=%s)", providerId, normalizedRootPath);
-
-        folderRemovalService.removeSubtree(providerId, normalizedRootPath);
+    public void createIngestion(Ingestion ingestion) {
+        Ingestion.persist(ingestion);
     }
 
     /**
@@ -188,76 +230,305 @@ public class IngestionService {
         );
     }
 
-    // ---------- Step 1-4: reconciliação em background ----------
+    /**
+     * A ingestão em andamento ou, sem nenhuma em andamento, a mais recente, com todas as tasks.
+     *
+     * @return a ingestão; {@code null} (resposta {@code 204}) se nenhuma foi disparada ainda
+     */
+    public IngestionSummary getCurrentIngestion() {
+        return Ingestion.findCurrent()
+                .map(ingestion -> toSummary(ingestion, true))
+                .orElse(null);
+    }
 
-    private void runReconciliation(Integer providerId,
-                                   String rootPath,
-                                   StorageProviderClient client,
-                                   MediaType mediaType) {
+    /**
+     * Página de ingestões, da mais nova pra mais antiga, cada uma com todas as tasks.
+     *
+     * @param page número da página, 0-based
+     * @param size tamanho da página
+     * @return a página
+     */
+    public IngestionPage listIngestions(Integer page, Integer size) {
+        final PageResult<Ingestion> pageResult = Ingestion.findPage(page, size);
 
-        try {
-            final List<StorageItem> remoteItems;
-            try {
-                remoteItems = client.listTree(rootPath);
-            } catch (RuntimeException e) {
-                Log.errorf(e, "Falha ao listar o provider %d (rootPath=%s)", providerId, rootPath);
-                notificationService.notify(
-                        NotificationLevel.ERROR, null, "Falha ao listar o storage provider na ingestão", null, null);
-                return;
-            }
+        final List<IngestionSummary> summaries = pageResult.data()
+                .stream()
+                .map(ingestion -> toSummary(ingestion, true))
+                .toList();
 
-            final List<StorageItem> dirs = remoteItems.stream()
-                    .filter(StorageItem::isDir)
-                    .toList();
+        return ingestionMapper.toPage(new PageResult<>(
+                summaries,
+                pageResult.page(),
+                pageResult.size(),
+                pageResult.totalElements(),
+                pageResult.totalPages()
+        ));
+    }
 
-            final List<StorageItem> remoteDirs = StorageItem.withSyntheticRoot(rootPath, dirs);
+    /**
+     * Uma task com todas as execuções dos steps, cada uma com os seus eventos.
+     *
+     * @param taskId id da task
+     * @return a task com a linha do tempo
+     * @throws ResourceNotFoundException se o {@code taskId} não existir
+     */
+    public IngestionTaskDetail getIngestionTask(Integer taskId) {
+        final IngestionTask task = IngestionTask.find(taskId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Não foi possível localizar uma tarefa de ingestão com o id informado"
+                ));
+        final List<IngestionStepExecution> executions = IngestionStepExecution.findByTask(taskId);
 
-            final List<StorageItem> remoteVideos = remoteItems.stream()
-                    .filter(item -> !item.isDir() && FileNameUtils.isVideoFile(item.name()))
-                    .toList();
+        final IngestionTaskDetail detail = ingestionMapper.toTaskDetail(task)
+                .steps(latestSteps(executions))
+                .executions(toExecutionDetails(executions));
 
-            reconciliationService.reconcileRemovals(providerId, rootPath, remoteDirs, remoteVideos);
+        if (task.anime != null) {
+            detail.title(animeOverrideService.resolveTitle(task.anime))
+                    .thumbnail(animeOverrideService.resolveThumbnailMedium(task.anime));
+        }
 
-            final List<FolderReconciliationResult> foldersWithVideos = new ArrayList<>();
-            int foldersCreated = 0;
+        return detail;
+    }
 
-            for (StorageItem dir : StorageItem.sortedByDepth(remoteDirs)) {
-                final List<StorageItem> directVideos = StorageItem.directChildrenOf(remoteVideos, dir.path());
-                final FolderReconciliationResult result = reconciliationService.reconcileFolder(
-                        providerId,
-                        dir,
-                        mediaType,
-                        directVideos
-                );
+    /**
+     * Marca como resolvida manualmente uma task que espera curadoria, sem executar os steps que
+     * não rodaram, e publica a mudança no stream.
+     *
+     * @param taskId id da task
+     * @return a task, já {@code RESOLVED}, com a linha do tempo
+     * @throws ResourceNotFoundException se o {@code taskId} não existir
+     * @throws BusinessRuleException se a task não estiver em {@code WAITING_CURATION}
+     */
+    @Transactional
+    public IngestionTaskDetail resolveIngestionTask(Integer taskId) {
+        final IngestionTask task = IngestionTask.find(taskId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Não foi possível localizar uma tarefa de ingestão com o id informado"
+                ));
 
-                if (result.created()) {
-                    foldersCreated++;
-                }
+        if (task.status != IngestionTaskStatus.WAITING_CURATION) {
+            throw new BusinessRuleException(
+                    "Só uma tarefa aguardando curadoria pode ser marcada como resolvida"
+            );
+        }
 
-                if (result.hasDirectVideos()) {
-                    foldersWithVideos.add(result);
-                }
-            }
+        task.status = IngestionTaskStatus.RESOLVED;
 
-            for (FolderReconciliationResult result : foldersWithVideos) {
-                folderAutoBindService.autoBindFolder(result.folderId(), result.folderName());
+        Log.infof("Tarefa de ingestão %d marcada como resolvida manualmente", taskId);
 
-                ThreadUtils.sleepUninterruptibly(AUTO_BIND_THROTTLE_MILLIS);
-            }
+        publishTaskUpdated(taskId);
+        publishIngestionUpdated(task.ingestion.id);
 
-            notificationService.notify(
-                    NotificationLevel.INFO,
-                    null,
-                    "Ingestão concluída: %d pastas criadas, %d pastas com auto-bind".formatted(
-                            foldersCreated, foldersWithVideos.size()),
-                    null,
-                    null);
-        } finally {
-            ingestionRunRegistry.finish(providerId, rootPath);
+        return getIngestionTask(taskId);
+    }
+
+    /**
+     * Evento {@code SNAPSHOT} pra quem se inscreve no stream: a ingestão em andamento, ou a
+     * última, com todas as tasks.
+     *
+     * @return o evento; {@code ingestion} é {@code null} se nenhuma foi disparada ainda
+     */
+    public IngestionStreamEvent getSnapshot() {
+        return new IngestionStreamEvent()
+                .type(IngestionStreamEventType.SNAPSHOT)
+                .ingestion(getCurrentIngestion());
+    }
+
+    /**
+     * Publica no stream o {@code INGESTION_UPDATED} da ingestão — status e contagens, sem as
+     * tasks. Sem nenhum inscrito, nem monta o evento.
+     *
+     * @param ingestionId id da ingestão
+     */
+    public void publishIngestionUpdated(Integer ingestionId) {
+        if (!ingestionEventBroadcaster.hasSubscribers()) {
+            return;
+        }
+
+        final Ingestion ingestion = Ingestion.findById(ingestionId);
+
+        ingestionEventBroadcaster.publish(
+                new IngestionStreamEvent()
+                        .type(IngestionStreamEventType.INGESTION_UPDATED)
+                        .ingestion(toSummary(ingestion, false))
+        );
+    }
+
+    /**
+     * Publica no stream o {@code TASK_UPDATED} da task. Sem nenhum inscrito, nem monta o evento.
+     *
+     * @param taskId id da task
+     */
+    public void publishTaskUpdated(Integer taskId) {
+        if (!ingestionEventBroadcaster.hasSubscribers()) {
+            return;
+        }
+
+        final IngestionTask task = IngestionTask.find(taskId)
+                .orElseThrow();
+
+        ingestionEventBroadcaster.publish(
+                new IngestionStreamEvent()
+                        .type(IngestionStreamEventType.TASK_UPDATED)
+                        .task(toTaskSummary(task, IngestionStepExecution.findByTask(taskId)))
+        );
+    }
+
+    /**
+     * Publica no stream o {@code STEP_FINISHED} da execução, com a task e todos os eventos da
+     * execução. Sem nenhum inscrito, nem monta o evento.
+     *
+     * @param executionId id da execução que terminou
+     */
+    public void publishStepFinished(Integer executionId) {
+        if (!ingestionEventBroadcaster.hasSubscribers()) {
+            return;
+        }
+
+        final IngestionStepExecution execution = IngestionStepExecution.findById(executionId);
+        final Integer taskId = execution.task.id;
+
+        final IngestionTask task = IngestionTask.find(taskId)
+                .orElseThrow();
+        final List<IngestionStepExecution> executions = IngestionStepExecution.findByTask(taskId);
+
+        ingestionEventBroadcaster.publish(
+                new IngestionStreamEvent()
+                        .type(IngestionStreamEventType.STEP_FINISHED)
+                        .task(toTaskSummary(task, executions))
+                        .execution(toExecutionDetails(List.of(execution)).getFirst())
+        );
+    }
+
+    /**
+     * Remove os sinks SSE já fechados pelo cliente. Chamado periodicamente pelo
+     * {@code IngestionTaskScheduler}.
+     */
+    public void pruneClosedSseConnections() {
+        final int removed = ingestionEventBroadcaster.pruneClosedSinks();
+
+        if (removed > 0) {
+            Log.debugf("%d conexões SSE de ingestão fechadas removidas", removed);
         }
     }
 
-    // ---------- helpers ----------
+    /**
+     * Converte a ingestão no resumo, com as contagens e a task em execução; com
+     * {@code withTasks}, também todas as tasks.
+     */
+    private IngestionSummary toSummary(Ingestion ingestion, boolean withTasks) {
+        final IngestionTaskSummary currentTask = IngestionTask.findRunning(ingestion.id)
+                .map(task -> toTaskSummary(task, IngestionStepExecution.findByTask(task.id)))
+                .orElse(null);
+
+        final IngestionSummary summary = ingestionMapper.toSummary(ingestion)
+                .taskCounts(toTaskCounts(ingestion.id))
+                .currentTask(currentTask);
+
+        if (!withTasks) {
+            return summary;
+        }
+
+        final Map<Integer, List<IngestionStepExecution>> executionsByTask = IngestionStepExecution
+                .findByIngestion(ingestion.id)
+                .stream()
+                .collect(Collectors.groupingBy(execution -> execution.task.id));
+
+        final List<IngestionTaskSummary> tasks = IngestionTask.findByIngestion(ingestion.id)
+                .stream()
+                .map(task -> toTaskSummary(task, executionsByTask.getOrDefault(task.id, List.of())))
+                .toList();
+
+        return summary.tasks(tasks);
+    }
+
+    private IngestionTaskCounts toTaskCounts(Integer ingestionId) {
+        final Map<IngestionTaskStatus, Integer> counts = IngestionTask.countByStatus(ingestionId)
+                .stream()
+                .collect(Collectors.toMap(
+                        IngestionTaskStatusCount::status,
+                        statusCount -> statusCount.count().intValue()
+                ));
+
+        final int total = counts.values()
+                .stream()
+                .mapToInt(Integer::intValue)
+                .sum();
+
+        return new IngestionTaskCounts()
+                .total(total)
+                .pending(counts.getOrDefault(IngestionTaskStatus.PENDING, 0))
+                .running(counts.getOrDefault(IngestionTaskStatus.RUNNING, 0))
+                .waitingCuration(counts.getOrDefault(IngestionTaskStatus.WAITING_CURATION, 0))
+                .resolved(counts.getOrDefault(IngestionTaskStatus.RESOLVED, 0))
+                .completed(counts.getOrDefault(IngestionTaskStatus.COMPLETED, 0))
+                .failed(counts.getOrDefault(IngestionTaskStatus.FAILED, 0));
+    }
+
+    /**
+     * Converte a task no resumo, com o título e o poster do anime resolvidos (override do TMDB,
+     * se houver) e o status mais recente de cada step.
+     *
+     * @param executions execuções da task, na ordem em que rodaram
+     */
+    private IngestionTaskSummary toTaskSummary(IngestionTask task,
+                                               List<IngestionStepExecution> executions) {
+
+        final IngestionTaskSummary summary = ingestionMapper.toTaskSummary(task)
+                .steps(latestSteps(executions));
+
+        if (task.anime != null) {
+            summary.title(animeOverrideService.resolveTitle(task.anime))
+                    .thumbnail(animeOverrideService.resolveThumbnailMedium(task.anime));
+        }
+
+        return summary;
+    }
+
+    /**
+     * Status da execução mais recente de cada step, na ordem dos steps — as execuções chegam na
+     * ordem em que rodaram, então a última de cada step sobrescreve as anteriores.
+     */
+    private List<IngestionTaskStepStatus> latestSteps(List<IngestionStepExecution> executions) {
+        final Map<IngestionStep, IngestionStepExecution> latestByStep =
+                new EnumMap<>(IngestionStep.class);
+
+        executions.forEach(execution -> latestByStep.put(execution.step, execution));
+
+        return latestByStep.values()
+                .stream()
+                .map(ingestionMapper::toTaskStepStatus)
+                .toList();
+    }
+
+    /**
+     * Converte as execuções, cada uma com os seus eventos, buscados numa consulta só.
+     */
+    private List<IngestionStepExecutionDetail> toExecutionDetails(
+            List<IngestionStepExecution> executions
+    ) {
+        if (executions.isEmpty()) {
+            return List.of();
+        }
+
+        final List<Integer> executionIds = executions.stream()
+                .map(execution -> execution.id)
+                .toList();
+
+        final Map<Integer, List<IngestionStepEventResponse>> eventsByExecution = IngestionStepEvent
+                .findByExecutions(executionIds)
+                .stream()
+                .collect(Collectors.groupingBy(
+                        event -> event.stepExecution.id,
+                        Collectors.mapping(ingestionMapper::toEventResponse, Collectors.toList())
+                ));
+
+        return executions.stream()
+                .map(execution -> ingestionMapper.toExecutionDetail(execution)
+                        .events(eventsByExecution.getOrDefault(execution.id, List.of())))
+                .toList();
+    }
 
     private AvailableFolderNode buildNode(String path,
                                           String name,

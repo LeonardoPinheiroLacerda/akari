@@ -55,8 +55,8 @@ public class AnimeTmdbProposalService {
     EpisodePairingComparisonService episodePairingComparisonService;
 
     /**
-     * Propõe a série ou filme do TMDB pro anime, pelo melhor candidato do anibridge — o mesmo
-     * critério do bind automático da ingestão — e devolve a ficha do título pra conferência.
+     * Propõe a série ou filme do TMDB pro anime, pelo melhor candidato do anibridge, e devolve
+     * a ficha do título pra conferência.
      *
      * <p>O id do MyAnimeList (fallback do anibridge) e o total de episódios (desempate entre
      * candidatos) vêm da AniList, então funciona mesmo que o anime ainda não esteja salvo no
@@ -78,7 +78,8 @@ public class AnimeTmdbProposalService {
         final Optional<TmdbMappingCandidate> candidate = anibridgeResolutionService.resolveBestCandidate(
                 anilistId,
                 anilistMedia.idMal(),
-                anilistMedia.episodes()
+                anilistMedia.episodes(),
+                anilistMedia.format()
         );
 
         if (candidate.isEmpty()) {
@@ -103,8 +104,8 @@ public class AnimeTmdbProposalService {
      * Propõe o pairing TMDB de cada arquivo de vídeo da pasta do anime, pela estratégia pedida —
      * sem gravar nada.
      *
-     * <p>{@code ANIBRIDGE} (padrão, também quando {@code strategy} vem {@code null}) usa a mesma
-     * resolução do pairing automático da ingestão ({@link EpisodePairingResolutionService});
+     * <p>{@code ANIBRIDGE} (padrão, também quando {@code strategy} vem {@code null}) resolve
+     * pelo anibridge ({@link EpisodePairingResolutionService});
      * {@code CONTINUITY} propõe o episódio seguinte ao do arquivo pareado anterior, sem consultar
      * o anibridge ({@link EpisodeContinuityResolutionService}). Os pares gravados da pasta são
      * lidos uma vez e servem às âncoras da continuidade e à comparação

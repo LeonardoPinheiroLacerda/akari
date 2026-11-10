@@ -11,7 +11,8 @@ import java.util.List;
  * Consulta aos {@link MappingSegment} ingeridos do anibridge — três buscas separadas, uma por
  * id de origem (AniList, MAL) e uma pelo lado TMDB. Devolve a lista crua, sem escolher "melhor
  * candidato" quando há mais de um nem aplicar a conversão episódio-a-episódio — isso é
- * responsabilidade de quem consumir (o ingestion decide o que precisa a partir da lista).
+ * responsabilidade de quem consumir (o {@code AnibridgeResolutionService} decide o que precisa
+ * a partir da lista).
  */
 @ApplicationScoped
 public class AnibridgeMappingService {
@@ -19,9 +20,8 @@ public class AnibridgeMappingService {
     /**
      * Busca os segments de um anime pelo id na AniList.
      *
-     * <p>{@code @Transactional} porque é chamado (via {@code AnibridgeResolutionService} e
-     * {@code FolderAutoBindService}) de dentro da thread virtual de reconciliação da ingestão,
-     * sem transação ambiente de request HTTP.
+     * <p>{@code @Transactional} pra funcionar também chamado (via
+     * {@code AnibridgeResolutionService}) de contextos sem transação ambiente.
      *
      * @param anilistId id do anime na AniList
      * @return os segments encontrados; vazio se não há mapeamento pra esse id

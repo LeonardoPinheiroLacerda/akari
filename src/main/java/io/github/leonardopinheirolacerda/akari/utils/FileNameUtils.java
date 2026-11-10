@@ -3,8 +3,8 @@ package io.github.leonardopinheirolacerda.akari.utils;
 import java.util.Set;
 
 /**
- * Classificação de arquivo por extensão de nome — usada pela ingestão pra filtrar quais itens
- * de um storage provider contam como vídeo.
+ * Classificação de arquivo por extensão de nome — a ingestão usa a extensão como formato dos
+ * arquivos de vídeo que cadastra.
  *
  * <p>Pura e sem estado: nenhum método toca disco, só processa string.
  */

@@ -3,8 +3,10 @@ package io.github.leonardopinheirolacerda.akari.domain.anilist.mapper;
 import io.github.leonardopinheirolacerda.akari.api.dto.AnilistFormat;
 import io.github.leonardopinheirolacerda.akari.api.dto.AnilistMediaSummary;
 import io.github.leonardopinheirolacerda.akari.api.dto.AnilistSeason;
+import io.github.leonardopinheirolacerda.akari.api.dto.AnimeTagResponse;
 import io.github.leonardopinheirolacerda.akari.domain.anilist.client.dtos.AnilistMediaResponse;
 import io.github.leonardopinheirolacerda.akari.domain.anilist.client.dtos.AnilistStudioConnectionResponse;
+import io.github.leonardopinheirolacerda.akari.domain.anilist.client.dtos.AnilistTagResponse;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
 
@@ -36,6 +38,9 @@ public interface AnilistMapper {
      * @return os resumos convertidos, na mesma ordem
      */
     List<AnilistMediaSummary> toSummaryList(List<AnilistMediaResponse> media);
+
+    @Mapping(source = "isMediaSpoiler", target = "isSpoiler")
+    AnimeTagResponse toTag(AnilistTagResponse tag);
 
     /**
      * Converte o formato cru da AniList pro enum do contrato.

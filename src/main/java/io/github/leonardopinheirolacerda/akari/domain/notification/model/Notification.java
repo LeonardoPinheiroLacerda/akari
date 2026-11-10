@@ -20,8 +20,7 @@ import java.util.Optional;
 /**
  * Uma notificação exibida ao usuário, persistida na tabela {@code notification}.
  *
- * <p>Produzida hoje só pela ingestão (conclusão, falha geral e falhas parciais do binding
- * automático de cada pasta, ver {@code NotificationService#notify}).
+ * <p>Criada por {@code NotificationService#notify}; nenhum domínio produz notificação hoje.
  */
 @Entity
 @Table(name = "notification")

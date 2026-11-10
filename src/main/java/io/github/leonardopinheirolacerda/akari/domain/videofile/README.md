@@ -7,33 +7,33 @@ está disponível em disco, segundo o javadoc da própria entidade.
 
 ## Responsabilidade principal
 
-CRUD administrado das pastas via API e suporte à ingestão: listagem sem paginação do conjunto
-inteiro de arquivos de uma pasta, usada na reconciliação e no pairing automático.
+CRUD administrado dos arquivos via API e suporte à ingestão: listagem sem paginação do
+conjunto inteiro de arquivos de uma pasta, usada pra saber quais arquivos já estão cadastrados.
 
 ## Funcionalidades existentes
 
 - `POST/GET/PUT/DELETE /v1/catalog/video-files` (CRUD completo).
 - `path` derivado server-side (`folder.path` + `name`) tanto em `createVideoFile` quanto em
   `updateVideoFile`; as duas operações também (re)calculam `naturalSortKey` a partir do
-  `name`.
+  `name`. `createVideoFile` recusa com `409` um arquivo cujo `path` já existe na pasta.
 - Listagem paginada por `folderId` (`listVideoFiles`): devolve página vazia (não 404) se a
   pasta não existir ou não tiver arquivos. Ordem não é garantida — não é a ordem usada pela
   tela de episódios.
 - Listagem paginada em ordem natural de nome (`listVideoFilesOrderedByNaturalSortKey`): mesma
   página vazia nos mesmos casos, mas ordenada por `naturalSortKey` (número de episódio
   extraído do nome, zero-preenchido; nome em minúsculas quando não extrai) com `id` como
-  desempate — base da listagem de episódios do anime (`AnimeEpisodeService`). Arquivo ainda
-  sem `naturalSortKey` calculado vai para o fim.
+  desempate — base da listagem de episódios do anime (`AnimeEpisodeService`). Arquivo sem
+  `naturalSortKey` (ingerido antes dessa coluna existir) vai para o fim.
 - Enriquecimento cross-domain em ambas as listagens: cada arquivo da página recebe
   `tmdbPairing` (via `AnimeTmdbFilePairingService.getTmdbFilePairings`).
-- `listByFolder`: lista completa sem paginação, usada pela reconciliação da ingestão, a partir
-  de contextos sem transação ambiente.
+- `listByFolder`: lista completa sem paginação, usada pela ingestão (`IngestionTaskService`)
+  pra pular os arquivos que a pasta já tem, a partir de contextos sem transação ambiente.
+- `countByFolder`: conta os arquivos de uma pasta sem carregá-los (`VideoFile.countByFolderId`),
+  usado pela ingestão (`AnilistSyncStepService`) pra comparar com o número de episódios do
+  anime.
 - `listByFolderOrderedByNaturalSortKey`: lista completa sem paginação, na mesma ordem natural da
   listagem de episódios (`naturalSortKey NULLS LAST`, depois `id`); usada pelas resoluções de
-  pairing do `anime` (anibridge, inclusive no pairing automático da ingestão, e continuidade).
-- `backfillNaturalSortKeyIfMissing`: preenche `naturalSortKey` de um arquivo já catalogado que
-  ainda não tem uma (arquivo ingerido antes dessa coluna existir); usado pela reconciliação ao
-  reencontrar o arquivo numa nova varredura. Não recalcula se já tiver uma.
+  pairing do `anime` (anibridge e continuidade).
 
 ## Dependências internas e externas
 
@@ -42,13 +42,13 @@ inteiro de arquivos de uma pasta, usada na reconciliação e no pairing automát
 - `anime` (service `AnimeTmdbFilePairingService`) — pairing TMDB por arquivo, usado no
   enriquecimento das duas listagens; `AnimeEpisodeService` (mesmo domínio `anime`) consome
   `listVideoFilesOrderedByNaturalSortKey` pra montar a tela de episódios.
-- `ingestion` (`extractor.EpisodeNumberExtractor`) — mesma heurística usada pelo pairing
-  automático, reaproveitada pra extrair o número de episódio que compõe `naturalSortKey`.
-  Dependência de mão dupla entre os dois domínios: `ingestion` já consumia `videofile`
-  (`VideoFileService` na reconciliação) e passa a ser consumido por ele também, só por esse
+- `ingestion` (`extractor.EpisodeNumberExtractor`) — mesma heurística usada pela resolução do
+  pairing de episódios, reaproveitada pra extrair o número de episódio que compõe
+  `naturalSortKey`. Dependência de mão dupla entre os dois domínios: `ingestion` consome
+  `videofile` (`VideoFileService` ao cadastrar os arquivos) e é consumido por ele, só por esse
   extractor — deliberado, pra não duplicar a extração de episódio em dois lugares.
 - `utils.DirectoryUtils` (`join`) — monta `path = folder.path + name`.
-- `exceptions.ResourceNotFoundException`.
+- `exceptions.ResourceNotFoundException`, `exceptions.ConflictException`.
 
 ## Módulos relacionados
 
@@ -62,14 +62,15 @@ inteiro de arquivos de uma pasta, usada na reconciliação e no pairing automát
   resolve com `videoFileService.findOrThrow(...)` ao iniciar sessão e ao reconciliar.
   Em todos os três casos o acoplamento é raso: busca pontual por id, sem leitura de campos além
   dos expostos pelo model — confirmado lendo os três services, não só por grep de import.
-- `ingestion` (`ReconciliationService`) — reconciliação via `listByFolder`; também chama
-  `backfillNaturalSortKeyIfMissing` ao reencontrar um arquivo já catalogado.
+- `ingestion` — `IngestionTaskService` lê os arquivos já cadastrados via `listByFolder` e
+  cadastra os novos via `createVideoFile`; `AnilistSyncStepService` conta os arquivos da pasta
+  via `countByFolder`.
 - `anime` (`AnimeTmdbFilePairingService`, `AnimeEpisodeService`, `EpisodePairingResolutionService`,
   `EpisodeContinuityResolutionService`) — pairing TMDB consumido nas listagens;
   `AnimeEpisodeService` consome `listVideoFilesOrderedByNaturalSortKey` direto; as duas
-  resoluções de pairing (anibridge — automático da ingestão e proposta do portal — e
-  continuidade) listam os arquivos da pasta via `listByFolderOrderedByNaturalSortKey`, sem
-  paginação e na mesma ordem natural da listagem de episódios.
+  resoluções de pairing da proposta do portal (anibridge e continuidade) listam os arquivos da
+  pasta via `listByFolderOrderedByNaturalSortKey`, sem paginação e na mesma ordem natural da
+  listagem de episódios.
 - `utils.VideoFileLocationUtils` — resolve a localização em disco (direto se `LOCAL`, via
   `VideoFileCache` se remoto) a partir do `VideoFile` e do seu `StorageProvider`.
 
@@ -77,15 +78,15 @@ inteiro de arquivos de uma pasta, usada na reconciliação e no pairing automát
 
 - `VideoFileResource` (implementa `VideoFileApi` gerado) — camada HTTP, delega 100% ao
   service.
-- `VideoFileService` — `listByFolder` é chamado diretamente por serviços de ingestão, fora da
-  camada HTTP; `listVideoFilesOrderedByNaturalSortKey` é chamado por `AnimeEpisodeService` (sem
-  resource próprio nesse domínio); `backfillNaturalSortKeyIfMissing` é chamado por
-  `ReconciliationService`.
+- `VideoFileService` — `listByFolder`, `countByFolder` e `createVideoFile` são chamados
+  diretamente pela ingestão, fora da camada HTTP; `listVideoFilesOrderedByNaturalSortKey` é chamado por
+  `AnimeEpisodeService` (sem resource próprio nesse domínio).
 
 ## Fluxos importantes
 
 - `createVideoFile`: valida `folderId` existente → deriva `path` via
-  `DirectoryUtils.join(folder.path, name)` → calcula `naturalSortKey` via
+  `DirectoryUtils.join(folder.path, name)` → lança `ConflictException` (409) se a pasta já tem
+  arquivo com esse `path` → calcula `naturalSortKey` via
   `naturalSortKeyOf(name)` (privado; extrai o episódio com `EpisodeNumberExtractor`, zero
   preenche; sem extração, cai pro nome em minúsculas) → persiste.
 - `updateVideoFile`: revalida `fileId` e o novo `folderId` → rederiva `path` com a pasta
@@ -94,19 +95,16 @@ inteiro de arquivos de uma pasta, usada na reconciliação e no pairing automát
   em ordem natural de nome) → mapeiam a página para DTO → buscam pairings TMDB em lote pelos
   `fileId`s da página → setam `tmdbPairing` em cada item (`null` quando não pareado) — mesmo
   helper privado (`toPageWithPairings`) nos dois casos.
-- `listByFolder`/`listByFolderOrderedByNaturalSortKey`: leitura sem paginação, anotadas
-  `@Transactional` mesmo sendo leitura — segundo o javadoc dos métodos, porque são chamadas de
-  contextos sem transação ambiente (ingestão).
-- `backfillNaturalSortKeyIfMissing`: no-op se o arquivo já tem `naturalSortKey`; senão calcula
-  via `naturalSortKeyOf(name)`, mesmo helper privado usado em `createVideoFile`/
-  `updateVideoFile`. Não busca nada — recebe a entidade já carregada pelo chamador.
+- `listByFolder`/`listByFolderOrderedByNaturalSortKey`/`countByFolder`: leitura sem paginação, anotadas
+  `@Transactional` mesmo sendo leitura, pra funcionar também chamadas de contextos sem
+  transação ambiente (ex.: as threads virtuais da ingestão).
 
 ## Arquivos críticos
 
-- `model/VideoFile.java` — queries estáticas (`find`, `findByFolderId`, `findPage`,
-  `findPageOrderedByNaturalSortKey`).
+- `model/VideoFile.java` — queries estáticas (`find`, `findByFolderAndPath`, `findByFolderId`,
+  `findPage`, `findPageOrderedByNaturalSortKey`).
 - `service/VideoFileService.java` — `createVideoFile`/`updateVideoFile` (derivação de `path` e
-  `naturalSortKey`), as duas listagens paginadas e `backfillNaturalSortKeyIfMissing`.
+  `naturalSortKey`) e as duas listagens paginadas.
 
 ## Observações técnicas e débitos identificados
 
@@ -114,7 +112,6 @@ inteiro de arquivos de uma pasta, usada na reconciliação e no pairing automát
   documentado explicitamente no javadoc do resource; ainda assim pode mascarar um `folderId`
   inválido vindo do client, que não recebe nenhum sinal de erro. **Backlog real** (confirmado
   pelo mantenedor, mesma categoria do risco equivalente em `mediafolder`).
-- Nenhuma validação de unicidade de `path`/`name` dentro da mesma pasta foi encontrada no
-  código (diferente de `MediaFolder`, que valida duplicidade de provider+path) — dois arquivos
-  com o mesmo `name` na mesma pasta não são impedidos pelo service. **Backlog real** (confirmado
-  pelo mantenedor).
+- A unicidade de `path` dentro da mesma pasta só é validada em `createVideoFile` (checagem
+  antes de inserir, sem constraint no banco): `updateVideoFile` não valida, e duas criações
+  concorrentes do mesmo arquivo passam as duas. **Backlog real** (confirmado pelo mantenedor).
