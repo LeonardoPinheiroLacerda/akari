@@ -8,6 +8,7 @@ import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -45,4 +46,20 @@ public class IngestionStepEvent extends PanacheEntityBase {
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     public OffsetDateTime createdAt;
+
+    /**
+     * Eventos das execuções, na ordem em que foram gravados, numa consulta só.
+     *
+     * @param executionIds ids das execuções
+     * @return os eventos, com a execução carregada
+     */
+    public static List<IngestionStepEvent> findByExecutions(List<Integer> executionIds) {
+        return IngestionStepEvent
+                .<IngestionStepEvent>find(
+                        "FROM IngestionStepEvent e JOIN FETCH e.stepExecution"
+                                + " WHERE e.stepExecution.id IN ?1 ORDER BY e.id",
+                        executionIds
+                )
+                .list();
+    }
 }

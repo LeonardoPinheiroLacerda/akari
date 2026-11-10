@@ -17,6 +17,7 @@ import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
 
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 
@@ -45,6 +46,9 @@ public class IngestionTaskExecutionService {
 
     @Inject
     AnimeService animeService;
+
+    @Inject
+    IngestionService ingestionService;
 
     /**
      * Pega a próxima task a executar e roda os steps dela em sequência, pulando os já executados.
@@ -99,6 +103,7 @@ public class IngestionTaskExecutionService {
      * Marca como {@code RUNNING} a próxima task a executar — uma {@code RUNNING} no início de um
      * ciclo só pode ter sobrado de uma queda do serviço, já que a task anterior sempre termina
      * antes. A primeira task de uma ingestão também marca a ingestão como {@code RUNNING}.
+     * Publica a mudança da task e da ingestão no stream SSE.
      *
      * @return a task, com a pasta carregada; vazio se não houver task a executar
      */
@@ -110,15 +115,18 @@ public class IngestionTaskExecutionService {
             claimed.status = IngestionTaskStatus.RUNNING;
 
             if (claimed.startedAt == null) {
-                claimed.startedAt = OffsetDateTime.now();
+                claimed.startedAt = OffsetDateTime.now(ZoneOffset.UTC);
             }
 
             final Ingestion ingestion = claimed.ingestion;
 
             if (ingestion.status == IngestionStatus.PENDING) {
                 ingestion.status = IngestionStatus.RUNNING;
-                ingestion.startedAt = OffsetDateTime.now();
+                ingestion.startedAt = OffsetDateTime.now(ZoneOffset.UTC);
             }
+
+            ingestionService.publishTaskUpdated(claimed.id);
+            ingestionService.publishIngestionUpdated(ingestion.id);
         });
 
         return task;
@@ -126,7 +134,8 @@ public class IngestionTaskExecutionService {
 
     /**
      * Grava a situação final da task, quando ela parou de ser processada e o anime vinculado à
-     * pasta, se houver — e fecha a ingestão, se essa era a última task dela a terminar.
+     * pasta, se houver — e fecha a ingestão, se essa era a última task dela a terminar. Publica
+     * a mudança da task e da ingestão no stream SSE.
      *
      * @param taskId id da task
      * @param status {@code COMPLETED}, {@code WAITING_CURATION} ou {@code FAILED}
@@ -136,13 +145,16 @@ public class IngestionTaskExecutionService {
         final IngestionTask task = IngestionTask.findById(taskId);
 
         task.status = status;
-        task.completedAt = OffsetDateTime.now();
+        task.completedAt = OffsetDateTime.now(ZoneOffset.UTC);
         task.anime = animeService.findByFolder(task.folder.id)
                 .orElse(null);
 
         Log.infof("Tarefa de ingestão %d terminou como %s", taskId, status);
 
         finishIngestionIfDone(task.ingestion);
+
+        ingestionService.publishTaskUpdated(taskId);
+        ingestionService.publishIngestionUpdated(task.ingestion.id);
     }
 
     /**
@@ -159,7 +171,7 @@ public class IngestionTaskExecutionService {
         ingestion.status = IngestionTask.existsFailed(ingestion.id)
                 ? IngestionStatus.COMPLETED_WITH_ERRORS
                 : IngestionStatus.COMPLETED;
-        ingestion.completedAt = OffsetDateTime.now();
+        ingestion.completedAt = OffsetDateTime.now(ZoneOffset.UTC);
 
         Log.infof("Ingestão %d terminou como %s", ingestion.id, ingestion.status);
     }

@@ -110,4 +110,72 @@ public class IngestionTask extends PanacheEntityBase {
                 IngestionTaskStatus.FAILED
         ) > 0;
     }
+
+    /**
+     * Busca uma task pelo id, com a pasta e o anime carregados.
+     *
+     * @param id id da task
+     * @return a task; vazio se não existir
+     */
+    public static Optional<IngestionTask> find(Integer id) {
+        return IngestionTask
+                .<IngestionTask>find(
+                        "FROM IngestionTask t JOIN FETCH t.folder LEFT JOIN FETCH t.anime"
+                                + " WHERE t.id = ?1",
+                        id
+                )
+                .firstResultOptional();
+    }
+
+    /**
+     * Todas as tasks da ingestão, na ordem em que foram criadas (a mesma em que rodam), com a
+     * pasta e o anime carregados.
+     *
+     * @param ingestionId id da ingestão
+     * @return as tasks
+     */
+    public static List<IngestionTask> findByIngestion(Integer ingestionId) {
+        return IngestionTask
+                .<IngestionTask>find(
+                        "FROM IngestionTask t JOIN FETCH t.folder LEFT JOIN FETCH t.anime"
+                                + " WHERE t.ingestion.id = ?1 ORDER BY t.id",
+                        ingestionId
+                )
+                .list();
+    }
+
+    /**
+     * A task em execução na ingestão — as tasks rodam uma de cada vez.
+     *
+     * @param ingestionId id da ingestão
+     * @return a task {@code RUNNING}, com a pasta e o anime carregados; vazio se nenhuma está
+     *         rodando
+     */
+    public static Optional<IngestionTask> findRunning(Integer ingestionId) {
+        return IngestionTask
+                .<IngestionTask>find(
+                        "FROM IngestionTask t JOIN FETCH t.folder LEFT JOIN FETCH t.anime"
+                                + " WHERE t.ingestion.id = ?1 AND t.status = ?2",
+                        ingestionId,
+                        IngestionTaskStatus.RUNNING
+                )
+                .firstResultOptional();
+    }
+
+    /**
+     * Quantidade de tasks da ingestão por status, numa consulta só.
+     *
+     * @param ingestionId id da ingestão
+     * @return uma linha por status que tem alguma task
+     */
+    public static List<IngestionTaskStatusCount> countByStatus(Integer ingestionId) {
+        return IngestionTask
+                .find(
+                        "select t.status, count(t) from IngestionTask t"
+                                + " where t.ingestion.id = ?1 group by t.status",
+                        ingestionId
+                )
+                .project(IngestionTaskStatusCount.class)
+                .list();
+    }
 }

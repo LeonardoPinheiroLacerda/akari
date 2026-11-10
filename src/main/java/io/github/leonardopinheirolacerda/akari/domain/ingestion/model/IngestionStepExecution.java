@@ -84,4 +84,36 @@ public class IngestionStepExecution extends PanacheEntityBase {
                 .firstResultOptional()
                 .isPresent();
     }
+
+    /**
+     * Execuções da task, na ordem em que rodaram.
+     *
+     * @param taskId id da task
+     * @return as execuções, com a task carregada
+     */
+    public static List<IngestionStepExecution> findByTask(Integer taskId) {
+        return IngestionStepExecution
+                .<IngestionStepExecution>find(
+                        "FROM IngestionStepExecution e JOIN FETCH e.task WHERE e.task.id = ?1"
+                                + " ORDER BY e.id",
+                        taskId
+                )
+                .list();
+    }
+
+    /**
+     * Execuções de todas as tasks da ingestão, na ordem em que rodaram, numa consulta só.
+     *
+     * @param ingestionId id da ingestão
+     * @return as execuções, com a task carregada
+     */
+    public static List<IngestionStepExecution> findByIngestion(Integer ingestionId) {
+        return IngestionStepExecution
+                .<IngestionStepExecution>find(
+                        "FROM IngestionStepExecution e JOIN FETCH e.task"
+                                + " WHERE e.task.ingestion.id = ?1 ORDER BY e.id",
+                        ingestionId
+                )
+                .list();
+    }
 }

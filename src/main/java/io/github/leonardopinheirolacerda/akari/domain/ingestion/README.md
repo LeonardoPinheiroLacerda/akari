@@ -4,7 +4,8 @@
 
 Registrar no catalog as pastas e os arquivos de vídeo de um subtree de storage provider, gravando
 cada disparo como uma `Ingestion` com uma `IngestionTask` por pasta com vídeo, executar as tasks
-step a step e permitir consultar quais pastas do provider já foram ingeridas.
+step a step, permitir consultar quais pastas do provider já foram ingeridas e expor o andamento
+das ingestões ao portal, por consulta e por um stream SSE.
 
 ## Responsabilidade principal
 
@@ -21,6 +22,18 @@ Orquestrar chamadas a `storageprovider` (listar a árvore remota e os vídeos de
   `IngestionService.createIngestionTasks`).
 - `GET /v1/ingestion/providers/{providerId}/available-folders` — lista a árvore de pastas remotas
   do provider marcando quais já foram ingeridas (`IngestionService.listAvailableFolders`).
+- `GET /v1/ingestion/current` — a ingestão em andamento ou, sem nenhuma, a mais recente, com as
+  contagens de tasks por status, a task em execução e todas as tasks; `204` se nunca houve
+  ingestão (`IngestionService.getCurrentIngestion`).
+- `GET /v1/ingestion` — página de ingestões, da mais nova pra mais antiga, cada uma no mesmo
+  formato de `/current` (`IngestionService.listIngestions`).
+- `GET /v1/ingestion/tasks/{taskId}` — a task com todas as execuções dos steps e os eventos de
+  cada uma (`IngestionService.getIngestionTask`).
+- `GET /v1/ingestion/events` — stream SSE, endpoint code-first (fora de `paths` no contrato,
+  mesmo molde de `/v1/cache/events`), payload `IngestionStreamEvent`: `SNAPSHOT` na inscrição
+  (a ingestão de `/current`), `INGESTION_UPDATED` (status e contagens, sem as tasks),
+  `TASK_UPDATED` e `STEP_FINISHED` (a task e a execução que terminou, com os eventos dela). A
+  conexão fica aberta mesmo sem ingestão em andamento; os sinks fechados são limpos a cada 60s.
 - Execução das tasks em background (`IngestionTaskScheduler` → `IngestionTaskExecutionService`):
   uma task por vez, cada uma passando pelos steps em sequência e gravando uma
   `IngestionStepExecution` por step e os `IngestionStepEvent`s dela.
@@ -101,13 +114,23 @@ algo daqui. Fora essa exceção, o módulo é um orquestrador de ponta: consome 
 
 ## Pontos de entrada
 
-- `resource/IngestionResource` — implementa `IngestionApi` (gerado do contrato), único ponto de
-  entrada HTTP do domínio.
-- `service/IngestionService` — ponto de entrada lógico do disparo e da listagem.
+- `resource/IngestionResource` — implementa `IngestionApi` (gerado do contrato).
+- `resource/IngestionEventResource` — code-first, expõe `/v1/ingestion/events` (SSE), sem
+  interface gerada; monta o `SNAPSHOT` pelo `IngestionService` e entrega o sink ao
+  `sse/IngestionEventBroadcaster`.
+- `service/IngestionService` — ponto de entrada lógico do disparo, da listagem, das consultas
+  de andamento e da publicação no stream (`publishIngestionUpdated`, `publishTaskUpdated`,
+  `publishStepFinished`).
 - `service/IngestionTaskService` — chamado só pelo `IngestionService`, dentro das threads
   virtuais.
 - `scheduler/IngestionTaskScheduler` — a cada 1s (`ConcurrentExecution.SKIP`), chama
-  `IngestionTaskExecutionService.executeNextTask`.
+  `IngestionTaskExecutionService.executeNextTask`; a cada 60s, limpa os sinks SSE fechados
+  (`IngestionService.pruneClosedSseConnections`).
+
+A publicação no stream acompanha as gravações que já existem: a criação da ingestão, o
+`claimNextTask` e o `finishTask` do `IngestionTaskExecutionService`, e o `start`/`finish` do
+`IngestionStepService`. Os três últimos publicam dentro da própria transação, então o evento
+reflete o que está sendo gravado. Sem nenhum inscrito, `publish*` sai antes de consultar o banco.
 
 ## Fluxos importantes
 

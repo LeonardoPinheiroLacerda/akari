@@ -3,7 +3,10 @@ package io.github.leonardopinheirolacerda.akari.domain.ingestion.resource;
 import io.github.leonardopinheirolacerda.akari.api.IngestionApi;
 import io.github.leonardopinheirolacerda.akari.api.dto.AvailableFolderNode;
 import io.github.leonardopinheirolacerda.akari.api.dto.IngestSubtreeRequest;
+import io.github.leonardopinheirolacerda.akari.api.dto.IngestionPage;
 import io.github.leonardopinheirolacerda.akari.api.dto.IngestionStartedResponse;
+import io.github.leonardopinheirolacerda.akari.api.dto.IngestionSummary;
+import io.github.leonardopinheirolacerda.akari.api.dto.IngestionTaskDetail;
 import io.github.leonardopinheirolacerda.akari.domain.ingestion.service.IngestionService;
 import io.github.leonardopinheirolacerda.akari.exceptions.BusinessRuleException;
 import io.github.leonardopinheirolacerda.akari.exceptions.IntegrationException;
@@ -62,5 +65,41 @@ public class IngestionResource implements IngestionApi {
     @Override
     public AvailableFolderNode listAvailableFolders(Integer providerId, String rootPath) {
         return ingestionService.listAvailableFolders(providerId, rootPath);
+    }
+
+    /**
+     * {@code GET /v1/ingestion/current} — a ingestão em andamento ou, sem nenhuma em andamento,
+     * a mais recente, com todas as tasks.
+     *
+     * @return a ingestão; {@code null} ({@code 204}) se nenhuma foi disparada ainda
+     */
+    @Override
+    public IngestionSummary getCurrentIngestion() {
+        return ingestionService.getCurrentIngestion();
+    }
+
+    /**
+     * {@code GET /v1/ingestion} — página de ingestões, da mais nova pra mais antiga, cada uma com
+     * todas as tasks.
+     *
+     * @param page número da página, 0-based
+     * @param size tamanho da página
+     * @return a página
+     */
+    @Override
+    public IngestionPage listIngestions(Integer page, Integer size) {
+        return ingestionService.listIngestions(page, size);
+    }
+
+    /**
+     * {@code GET /v1/ingestion/tasks/{taskId}} — a task com a linha do tempo de cada step.
+     *
+     * @param taskId id da task
+     * @return a task com todas as execuções dos steps e os eventos de cada uma
+     * @throws ResourceNotFoundException (traduzida em 404) se o {@code taskId} não existir
+     */
+    @Override
+    public IngestionTaskDetail getIngestionTask(Integer taskId) {
+        return ingestionService.getIngestionTask(taskId);
     }
 }

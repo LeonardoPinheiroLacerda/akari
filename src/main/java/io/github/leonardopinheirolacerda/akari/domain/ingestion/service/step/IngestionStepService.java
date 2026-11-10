@@ -6,9 +6,12 @@ import io.github.leonardopinheirolacerda.akari.domain.ingestion.model.IngestionT
 import io.github.leonardopinheirolacerda.akari.domain.ingestion.model.enums.IngestionEventType;
 import io.github.leonardopinheirolacerda.akari.domain.ingestion.model.enums.IngestionStep;
 import io.github.leonardopinheirolacerda.akari.domain.ingestion.model.enums.IngestionStepStatus;
+import io.github.leonardopinheirolacerda.akari.domain.ingestion.service.IngestionService;
+import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
 
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.Map;
 
 /**
@@ -23,6 +26,9 @@ import java.util.Map;
  * dele.
  */
 public abstract class IngestionStepService {
+
+    @Inject
+    IngestionService ingestionService;
 
     /**
      * Identifica o step implementado pela subclasse — usado pra localizar as execuções dele na
@@ -57,7 +63,7 @@ public abstract class IngestionStepService {
 
     /**
      * Abre uma nova tentativa do step na task, como {@code RUNNING}, e marca o step como o atual
-     * da task.
+     * da task — publicando a mudança da task no stream SSE.
      *
      * @param taskId id da task
      * @return a execução aberta, por onde o step grava seus eventos e fecha a execução
@@ -75,11 +81,13 @@ public abstract class IngestionStepService {
         execution.step = step;
         execution.status = IngestionStepStatus.RUNNING;
         execution.attempt = (int) currentAttempts + 1;
-        execution.startedAt = OffsetDateTime.now();
+        execution.startedAt = OffsetDateTime.now(ZoneOffset.UTC);
 
         execution.persist();
 
         task.currentStep = step;
+
+        ingestionService.publishTaskUpdated(taskId);
 
         return new StepRun(this, execution);
     }
@@ -111,7 +119,8 @@ public abstract class IngestionStepService {
     }
 
     /**
-     * Fecha a execução com o status final do step.
+     * Fecha a execução com o status final do step e publica no stream SSE o
+     * {@code STEP_FINISHED}, com os eventos da execução.
      *
      * <p>A execução recebida veio da transação do {@link #start} e está desanexada; por isso é
      * buscada de novo pelo id — alterar a recebida não seria gravado. Chamado pelo
@@ -126,6 +135,8 @@ public abstract class IngestionStepService {
         final IngestionStepExecution execution = IngestionStepExecution.findById(stepExecution.id);
 
         execution.status = status;
-        execution.completedAt = OffsetDateTime.now();
+        execution.completedAt = OffsetDateTime.now(ZoneOffset.UTC);
+
+        ingestionService.publishStepFinished(execution.id);
     }
 }
