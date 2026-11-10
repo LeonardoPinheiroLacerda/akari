@@ -168,8 +168,10 @@ carregada) e a marca `RUNNING` (e a ingestão dela, se ainda `PENDING`) → cham
 sequência, pulando os que `isExecuted` diz já terem terminado → um step que termina
 `UNRESOLVED` (rodou sem erro, mas não conseguiu decidir sozinho) para a task em
 `WAITING_CURATION`, e um que termina `FAILED`, em `FAILED`; se todos passarem, a task fica
-`COMPLETED` → `finishTask` grava o status, o `completedAt` e o anime vinculado à pasta e, se era
-a última task da ingestão a terminar, fecha a ingestão, na mesma transação. Exceção inesperada
+`COMPLETED` → `finishTask` grava o status, o `completedAt` e o anime vinculado à pasta, grava o
+status de revisão do anime (`AnimeService.updateReviewStatus`: `PENDING_REVIEW` se a task terminou
+`COMPLETED` e o anime é filme, ou série com todo arquivo pareado; `PARTIAL` senão; `REVIEWED` não
+muda) e, se era a última task da ingestão a terminar, fecha a ingestão, na mesma transação. Exceção inesperada
 termina a task `FAILED`, só com log.
 
 - **Uma task por vez:** tasks da mesma franquia rodando juntas disputam as arestas de

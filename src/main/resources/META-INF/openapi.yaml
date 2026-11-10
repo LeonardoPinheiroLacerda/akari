@@ -4404,12 +4404,13 @@ components:
     AnimeReviewStatus:
       type: string
       description: |
-        Estado de revisão de um anime. Hoje só `REVIEWED` é gravado, pela confirmação manual;
-        nenhum fluxo grava `PENDING_REVIEW` nem `PARTIAL`.
-        - `PENDING_REVIEW`: vínculo completo (AniList + TMDB + todos os arquivos pareados),
-          aguardando confirmação manual.
-        - `PARTIAL`: vínculo incompleto (TMDB não vinculado, temporadas conflitantes, ou nem
-          todo arquivo pareado) — precisa de atenção.
+        Estado de revisão de um anime. `PENDING_REVIEW` e `PARTIAL` são gravados ao fim da tarefa
+        de ingestão da pasta; `REVIEWED`, pela confirmação manual. `null` enquanto a pasta não
+        terminou uma ingestão.
+        - `PENDING_REVIEW`: a tarefa terminou com todos os steps e o vínculo está completo —
+          filme, ou série com todos os arquivos pareados —, aguardando confirmação manual.
+        - `PARTIAL`: vínculo incompleto (tarefa parada em curadoria ou com falha, ou série com
+          algum arquivo sem par) — precisa de atenção.
         - `REVIEWED`: confirmado manualmente; nenhum recálculo automático sobrescreve esse
           estado.
       enum:

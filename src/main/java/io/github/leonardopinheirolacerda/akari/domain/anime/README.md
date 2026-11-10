@@ -39,7 +39,8 @@ Eixo base:
 - Remover a metadata de um anime, liberando a pasta (`deleteAnime`). Os animes `MANUAL_MEMBER` na franquia dele voltam pra `AUTO` (`Anime.resetManualMembers`).
 - Ler a metadata local por `anilistId` ou por `folderId` (`getAnime`, `getAnimeByFolder`).
 - Ressincronizar a metadata com a AniList, preservando pasta e atribuição de franquia (`syncAnime`).
-- Confirmação manual de revisão da ingestão (`markAsReviewed`), que trava o campo contra recálculos automáticos.
+- Status de revisão gravado ao fim da task de ingestão da pasta (`updateReviewStatus`, chamado pela ingestão): `PENDING_REVIEW` quando a task terminou com todos os steps e o anime é filme, ou série com todo arquivo pareado; `PARTIAL` nos demais casos.
+- Confirmação manual de revisão da ingestão (`markAsReviewed`), que trava o campo contra recálculos automáticos — `updateReviewStatus` não altera um anime `REVIEWED`.
 - Resumir o binding de várias pastas numa chamada (`getAnimeBindings`), consumido por `mediafolder` pra embutir `animeBinding` na listagem de pastas.
 
 Grafo de relações:

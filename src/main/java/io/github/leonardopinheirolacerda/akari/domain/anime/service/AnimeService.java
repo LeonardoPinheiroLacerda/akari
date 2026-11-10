@@ -5,13 +5,16 @@ import io.github.leonardopinheirolacerda.akari.api.dto.AnimeBindingSummary;
 import io.github.leonardopinheirolacerda.akari.api.dto.AnimeResponse;
 import io.github.leonardopinheirolacerda.akari.api.dto.AnimeReviewStatus;
 import io.github.leonardopinheirolacerda.akari.api.dto.FranchiseAssignment;
+import io.github.leonardopinheirolacerda.akari.api.dto.TmdbMediaType;
 import io.github.leonardopinheirolacerda.akari.domain.anilist.client.dtos.AnilistMediaResponse;
 import io.github.leonardopinheirolacerda.akari.domain.anilist.service.AnilistSearchService;
 import io.github.leonardopinheirolacerda.akari.domain.anime.graph.FranchiseResolver;
 import io.github.leonardopinheirolacerda.akari.domain.anime.mapper.AnimeMapper;
 import io.github.leonardopinheirolacerda.akari.domain.anime.model.Anime;
+import io.github.leonardopinheirolacerda.akari.domain.anime.model.TmdbFilePairing;
 import io.github.leonardopinheirolacerda.akari.domain.mediafolder.model.MediaFolder;
 import io.github.leonardopinheirolacerda.akari.domain.mediafolder.service.MediaFolderService;
+import io.github.leonardopinheirolacerda.akari.domain.videofile.service.VideoFileService;
 import io.github.leonardopinheirolacerda.akari.exceptions.BusinessRuleException;
 import io.github.leonardopinheirolacerda.akari.exceptions.ResourceNotFoundException;
 import io.quarkus.logging.Log;
@@ -41,6 +44,9 @@ public class AnimeService {
 
     @Inject
     AnimeOverrideService animeOverrideService;
+
+    @Inject
+    VideoFileService videoFileService;
 
     /**
      * Busca o anime na AniList e cria a metadata vinculada à pasta informada. Também
@@ -233,6 +239,32 @@ public class AnimeService {
     }
 
     /**
+     * Grava o status de revisão do anime ao fim da task de ingestão da pasta dele:
+     * {@code PENDING_REVIEW} quando a task terminou com todos os steps e o anime está completo —
+     * filme (os overrides já foram preenchidos) ou série com todo arquivo da pasta pareado;
+     * {@code PARTIAL} nos demais casos. Um anime já {@code REVIEWED} não é alterado.
+     *
+     * @param anilistId id do anime na AniList
+     * @param stepsCompleted {@code true} se a task terminou {@code COMPLETED}
+     * @throws ResourceNotFoundException se não há metadata salva pro id informado
+     */
+    @Transactional
+    public void updateReviewStatus(Integer anilistId, boolean stepsCompleted) {
+        final Anime anime = findOrThrow(anilistId);
+
+        if (anime.reviewStatus == AnimeReviewStatus.REVIEWED) {
+            return;
+        }
+
+        if (stepsCompleted && isComplete(anime)) {
+            anime.reviewStatus = AnimeReviewStatus.PENDING_REVIEW;
+            return;
+        }
+
+        anime.reviewStatus = AnimeReviewStatus.PARTIAL;
+    }
+
+    /**
      * Busca o anime pelo {@code anilistId} ou lança 404. Usado também por outros services do
      * domínio (ex.: {@link AnimeTmdbService}) que precisam do model cru, não do DTO.
      *
@@ -253,4 +285,18 @@ public class AnimeService {
         return animeOverrideService.toResponse(anime, FranchiseResolver.resolve());
     }
 
+    /**
+     * Filme: completo com o TMDB vinculado. Série: completa com todo arquivo da pasta pareado.
+     */
+    private boolean isComplete(Anime anime) {
+        if (anime.tmdbMediaType == TmdbMediaType.MOVIE) {
+            return true;
+        }
+
+        final long files = videoFileService.countByFolder(anime.folder.id);
+        final long paired = TmdbFilePairing.findByFolderId(anime.folder.id)
+                .size();
+
+        return files > 0 && paired == files;
+    }
 }

@@ -134,8 +134,9 @@ public class IngestionTaskExecutionService {
 
     /**
      * Grava a situação final da task, quando ela parou de ser processada e o anime vinculado à
-     * pasta, se houver — e fecha a ingestão, se essa era a última task dela a terminar. Publica
-     * a mudança da task e da ingestão no stream SSE.
+     * pasta, se houver, com o status de revisão dele ({@code AnimeService#updateReviewStatus}) —
+     * e fecha a ingestão, se essa era a última task dela a terminar. Publica a mudança da task e
+     * da ingestão no stream SSE.
      *
      * @param taskId id da task
      * @param status {@code COMPLETED}, {@code WAITING_CURATION} ou {@code FAILED}
@@ -148,6 +149,13 @@ public class IngestionTaskExecutionService {
         task.completedAt = OffsetDateTime.now(ZoneOffset.UTC);
         task.anime = animeService.findByFolder(task.folder.id)
                 .orElse(null);
+
+        if (task.anime != null) {
+            animeService.updateReviewStatus(
+                    task.anime.anilistId,
+                    status == IngestionTaskStatus.COMPLETED
+            );
+        }
 
         Log.infof("Tarefa de ingestão %d terminou como %s", taskId, status);
 
