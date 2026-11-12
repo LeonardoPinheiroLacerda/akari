@@ -31,9 +31,9 @@ Fluxo padrão de uma requisição:
         → model (Panache active record) e/ou client (REST externo) e/ou service de outro domínio
 ```
 
-O sistema tem 13 domínios de negócio hoje: `storageprovider`, `ingestion`, `mediafolder`,
+O sistema tem 14 domínios de negócio hoje: `storageprovider`, `ingestion`, `mediafolder`,
 `videofile`, `cache`, `mediaprobe`, `playback`, `anilist`, `tmdb`, `anime`, `anibridge`,
-`setting`, `notification`.
+`setting`, `notification`, `smartlist`.
 
 ## Padrões utilizados
 
@@ -149,11 +149,12 @@ anime           → anilist, tmdb, anibridge, mediafolder, videofile, setting, i
 playback        → videofile, mediaprobe, storageprovider, setting, cache (direto via
                   CacheService.findCacheItemByFileId, e indireto via utils pro path do arquivo)
 ingestion       → storageprovider, mediafolder, videofile, anime, anilist, anibridge, setting
+smartlist       → anime
 ```
 
-Nenhum domínio depende de `playback`, `mediaprobe`, `cache` ou `notification` — são "topo" do
-grafo, consumidos só pela camada HTTP (ou, no caso de `notification`, sem nenhum produtor hoje e
-nunca lido de volta por outro domínio).
+Nenhum domínio depende de `playback`, `mediaprobe`, `cache`, `notification` ou `smartlist` — são
+"topo" do grafo, consumidos só pela camada HTTP (ou, no caso de `notification`, sem nenhum produtor
+hoje e nunca lido de volta por outro domínio).
 
 **Ciclos deliberados `videofile` ↔ `ingestion` e `anime` ↔ `ingestion`:** `ingestion` depende
 de `videofile` (lista e cria os arquivos de vídeo das pastas) e de `anime` (o step

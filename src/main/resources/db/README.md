@@ -37,6 +37,7 @@ não há tabela compartilhada entre domínios além das FKs explícitas abaixo.
 | `ingestion_task` | V20 | `ingestion` (`IngestionTask`) | Uma por pasta da ingestão. FK em `ingestion` e em `media_folder`, ambas `ON DELETE CASCADE` (remover a pasta remove as tasks dela); FK em `anime(anilist_id)` nullable, `ON DELETE SET NULL`. |
 | `ingestion_step_execution` | V20 | `ingestion` (`IngestionStepExecution`) | Uma tentativa de uma etapa de uma task; FK em `ingestion_task`, `ON DELETE CASCADE`; `CHECK (attempt > 0)`. |
 | `ingestion_step_event` | V20 | `ingestion` (`IngestionStepEvent`) | Evento da linha do tempo de uma tentativa; FK em `ingestion_step_execution`, `ON DELETE CASCADE`; `details` em `JSONB`. |
+| `smart_list` | V22 | `smartlist` | `criteria` é `JSONB` — o filtro da lista (`SmartListCriteria`); os itens não são gravados, são recalculados a cada consulta. Sem FK. |
 
 ## Migrations de alteração (não criam tabela nova)
 

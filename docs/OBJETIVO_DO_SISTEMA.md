@@ -86,13 +86,18 @@ anibridge, franquias/relações entre animes).
    Hoje nenhum domínio emite notificação. O push em tempo real via SSE em
    `/v1/notifications/events` emite um evento a cada notificação nova, no mesmo molde do SSE de
    `cache` (`/v1/cache/events`): endpoint code-first, payload (`NotificationEvent`) no contrato.
+10. **Listas por critério** (`SmartList`) → o admin cadastra listas para o front (ex.: "comédia
+    com ecchi a partir de 2015, por nota média"), cada uma um filtro fixo + ordenação, com a
+    ordem das listas definida por `position`. Os itens são raízes de franquia, recalculados a
+    cada consulta: critérios de conteúdo (gêneros, tags, estúdio, status, adulto) valem pra
+    qualquer membro da franquia, os demais só pra raiz; animes ocultos ficam de fora.
 
 ## Atores envolvidos
 
 - **Administrador do backend** — único ator humano explícito no contrato: cadastra storage
   providers, configura preferências (`Setting`), dispara/acompanha ingestão, cura metadata de
-  anime (binding, overrides, organização em franquias), gerencia o cache e acompanha
-  notificações.
+  anime (binding, overrides, organização em franquias), cadastra as listas por critério,
+  gerencia o cache e acompanha notificações.
   Não há diferenciação de papéis/permissões no contrato, e **confirmado em código**: não existe
   nenhum mecanismo de autenticação/autorização implementado (sem `@RolesAllowed`,
   `SecurityIdentity` ou configuração de segurança) — é uma lacuna real reconhecida, não uma
@@ -122,6 +127,7 @@ anibridge, franquias/relações entre animes).
   chamadas nem reordena.
 - Preferências administrativas chave/valor, com suporte a valores secretos.
 - Notificações de observabilidade com push em tempo real.
+- Listas por critério para o front, com itens (raízes de franquia) recalculados a cada consulta.
 
 ## Visão de produto
 
