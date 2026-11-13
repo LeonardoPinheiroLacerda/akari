@@ -200,6 +200,30 @@ public class SettingService {
     }
 
     /**
+     * Lê a preferência {@code tmdb.episode.name-language}.
+     *
+     * @return o idioma ({@code pt} ou {@code pt-BR}) do nome dos episódios buscados no TMDB;
+     *         {@code null} se a preferência estiver vazia, pra manter o idioma padrão do TMDB
+     * @throws ResourceNotFoundException se a preferência não existir
+     * @throws BusinessRuleException se o valor não for um idioma válido
+     */
+    public Locale getTmdbEpisodeNameLanguage() {
+        return findLanguageOrThrow("tmdb.episode.name-language");
+    }
+
+    /**
+     * Lê a preferência {@code tmdb.episode.synopsis-language}.
+     *
+     * @return o idioma ({@code pt} ou {@code pt-BR}) da sinopse dos episódios buscados no TMDB;
+     *         {@code null} se a preferência estiver vazia, pra manter o idioma padrão do TMDB
+     * @throws ResourceNotFoundException se a preferência não existir
+     * @throws BusinessRuleException se o valor não for um idioma válido
+     */
+    public Locale getTmdbEpisodeSynopsisLanguage() {
+        return findLanguageOrThrow("tmdb.episode.synopsis-language");
+    }
+
+    /**
      * Lê a preferência {@code tmdb.include-adult}.
      *
      * @return {@code true} se buscas no TMDB devem incluir conteúdo adulto

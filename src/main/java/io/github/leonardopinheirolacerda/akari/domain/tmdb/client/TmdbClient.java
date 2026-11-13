@@ -96,11 +96,15 @@ public interface TmdbClient {
     @Path("/3/tv/{series_id}/translations")
     TmdbTranslationsResponse getTvTranslations(@PathParam("series_id") Integer seriesId);
 
-    /** {@code GET /3/tv/{id}/season/{n}} — episódios de uma temporada. */
+    /**
+     * {@code GET /3/tv/{id}/season/{n}} — episódios de uma temporada. {@code language}
+     * {@code null} não manda o parâmetro, e o TMDB responde no idioma padrão dele.
+     */
     @GET
     @Path("/3/tv/{series_id}/season/{season_number}")
     TmdbSeasonResponse getSeason(
             @PathParam("series_id") Integer seriesId,
-            @PathParam("season_number") Integer seasonNumber);
+            @PathParam("season_number") Integer seasonNumber,
+            @QueryParam("language") String language);
 
 }

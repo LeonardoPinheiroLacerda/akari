@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.leonardopinheirolacerda.akari.api.dto.TmdbMovieSearchResultPage;
 import io.github.leonardopinheirolacerda.akari.api.dto.TmdbTvSearchResultPage;
 import io.github.leonardopinheirolacerda.akari.domain.cache.model.IntegrationCache;
+import io.github.leonardopinheirolacerda.akari.exceptions.BusinessRuleException;
 import io.github.leonardopinheirolacerda.akari.exceptions.IntegrationException;
 import io.github.leonardopinheirolacerda.akari.exceptions.ResourceNotFoundException;
 import io.github.leonardopinheirolacerda.akari.domain.setting.service.SettingService;
@@ -19,13 +20,19 @@ import io.github.leonardopinheirolacerda.akari.domain.tmdb.client.dtos.TmdbTvSea
 import io.github.leonardopinheirolacerda.akari.domain.tmdb.mapper.TmdbMapper;
 import io.github.leonardopinheirolacerda.akari.utils.CacheUtils;
 import io.github.leonardopinheirolacerda.akari.utils.HttpErrorUtils;
+import io.github.leonardopinheirolacerda.akari.utils.TmdbLanguageUtils;
 import io.quarkus.logging.Log;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
 import jakarta.ws.rs.ProcessingException;
 import jakarta.ws.rs.WebApplicationException;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import org.eclipse.microprofile.rest.client.inject.RestClient;
 
 /**
@@ -240,7 +247,18 @@ public class TmdbService {
     }
 
     /**
-     * Lê os episódios de uma temporada de série no TMDB, cache-first.
+     * Lê os episódios de uma temporada de série no TMDB, cache-first, com nome e sinopse de cada
+     * episódio nos idiomas das preferências {@code tmdb.episode.name-language} e
+     * {@code tmdb.episode.synopsis-language}.
+     *
+     * <p>A temporada é buscada primeiro sem idioma (o padrão do TMDB), que dá a estrutura e o
+     * texto final de quem não tem tradução. Pra cada episódio, nome e sinopse percorrem os
+     * idiomas do mais específico ao mais amplo — idioma e país ({@code pt-BR}), só o idioma
+     * ({@code pt}), e o mesmo pro {@code tmdb.override.fallback-language} —, buscando a
+     * temporada naquele idioma só quando ainda falta algum episódio. Episódio com sinopse vazia
+     * num idioma conta como sem tradução nele: o TMDB devolve um nome genérico
+     * ("Episódio 5") e a sinopse vazia nesse caso. Preferência vazia mantém o texto do padrão
+     * do TMDB.
      *
      * @param seriesId id da série no TMDB
      * @param seasonNumber número da temporada
@@ -249,17 +267,65 @@ public class TmdbService {
      * @throws ResourceNotFoundException se a série ou a temporada informada não existirem no
      *         TMDB
      * @throws IntegrationException se a chamada ao TMDB falhar por outro motivo
+     * @throws BusinessRuleException se alguma preferência de idioma tiver um idioma inválido
      */
     @Transactional
     public TmdbSeasonResponse getSeason(Integer seriesId, Integer seasonNumber, Boolean forceRefresh) {
-        final String cacheKey = CacheUtils.buildKey("tv", "season", String.valueOf(seriesId), String.valueOf(seasonNumber));
+        final TmdbSeasonResponse season = getSeasonInLanguage(
+                seriesId,
+                seasonNumber,
+                null,
+                forceRefresh
+        );
 
-        return CacheUtils.resolve(
-                forceRefresh,
-                settingService.getTmdbCacheTtl(),
-                () -> IntegrationCache.readEntry(cacheKey, TmdbSeasonResponse.class, objectMapper),
-                () -> fetchSeason(seriesId, seasonNumber),
-                payload -> IntegrationCache.writeEntry(cacheKey, payload, objectMapper)
+        final Locale nameLanguage = settingService.getTmdbEpisodeNameLanguage();
+        final Locale synopsisLanguage = settingService.getTmdbEpisodeSynopsisLanguage();
+        final Locale fallbackLanguage = settingService.getTmdbOverrideFallbackLanguage();
+
+        final List<Locale> nameLanguages = nameLanguage == null
+                ? List.of()
+                : TmdbLanguageUtils.languageChain(nameLanguage, fallbackLanguage);
+
+        final List<Locale> synopsisLanguages = synopsisLanguage == null
+                ? List.of()
+                : TmdbLanguageUtils.languageChain(synopsisLanguage, fallbackLanguage);
+
+        if (season.episodes() == null) {
+            return season;
+        }
+
+        if (nameLanguages.isEmpty() && synopsisLanguages.isEmpty()) {
+            return season;
+        }
+
+        final Map<Locale, Map<Integer, TmdbEpisodeResponse>> episodesByLanguage = new HashMap<>();
+
+        final Function<Locale, Map<Integer, TmdbEpisodeResponse>> episodesIn = language -> episodesByLanguage
+                .computeIfAbsent(
+                        language,
+                        key -> episodesByNumber(seriesId, seasonNumber, key, forceRefresh)
+                );
+
+        final List<TmdbEpisodeResponse> episodes = season.episodes()
+                .stream()
+                .map(episode -> withTexts(
+                        episode,
+                        localizedText(episode, nameLanguages, episodesIn, TmdbEpisodeResponse::name),
+                        localizedText(episode, synopsisLanguages, episodesIn, TmdbEpisodeResponse::overview)
+                ))
+                .toList();
+
+        return new TmdbSeasonResponse(
+                season.objectId(),
+                season.airDate(),
+                episodes,
+                season.name(),
+                season.overview(),
+                season.id(),
+                season.networks(),
+                season.posterPath(),
+                season.seasonNumber(),
+                season.voteAverage()
         );
     }
 
@@ -399,9 +465,119 @@ public class TmdbService {
         }
     }
 
-    private TmdbSeasonResponse fetchSeason(Integer seriesId, Integer seasonNumber) {
+    /**
+     * Temporada num idioma, cache-first. {@code language} {@code null} busca sem idioma (o
+     * padrão do TMDB), com a mesma chave de cache de antes de existir o idioma.
+     */
+    private TmdbSeasonResponse getSeasonInLanguage(Integer seriesId,
+                                                   Integer seasonNumber,
+                                                   Locale language,
+                                                   Boolean forceRefresh) {
+
+        final String languageTag = language == null
+                ? null
+                : language.toLanguageTag();
+
+        final String cacheKey = seasonCacheKey(seriesId, seasonNumber, languageTag);
+
+        return CacheUtils.resolve(
+                forceRefresh,
+                settingService.getTmdbCacheTtl(),
+                () -> IntegrationCache.readEntry(cacheKey, TmdbSeasonResponse.class, objectMapper),
+                () -> fetchSeason(seriesId, seasonNumber, languageTag),
+                payload -> IntegrationCache.writeEntry(cacheKey, payload, objectMapper)
+        );
+    }
+
+    private static String seasonCacheKey(Integer seriesId, Integer seasonNumber, String languageTag) {
+        if (languageTag == null) {
+            return CacheUtils.buildKey("tv", "season", String.valueOf(seriesId), String.valueOf(seasonNumber));
+        }
+
+        return CacheUtils.buildKey(
+                "tv",
+                "season",
+                String.valueOf(seriesId),
+                String.valueOf(seasonNumber),
+                languageTag
+        );
+    }
+
+    /**
+     * Episódios da temporada num idioma, pelo número do episódio.
+     */
+    private Map<Integer, TmdbEpisodeResponse> episodesByNumber(Integer seriesId,
+                                                                Integer seasonNumber,
+                                                                Locale language,
+                                                                Boolean forceRefresh) {
+
+        final TmdbSeasonResponse season = getSeasonInLanguage(seriesId, seasonNumber, language, forceRefresh);
+
+        if (season.episodes() == null) {
+            return Map.of();
+        }
+
+        return season.episodes()
+                .stream()
+                .filter(episode -> episode.episodeNumber() != null)
+                .collect(Collectors.toMap(
+                        TmdbEpisodeResponse::episodeNumber,
+                        Function.identity(),
+                        (first, second) -> first
+                ));
+    }
+
+    /**
+     * Texto do episódio no primeiro idioma em que ele tem tradução (sinopse não vazia); sem
+     * nenhum, o texto do padrão do TMDB.
+     */
+    private static String localizedText(TmdbEpisodeResponse episode,
+                                        List<Locale> languages,
+                                        Function<Locale, Map<Integer, TmdbEpisodeResponse>> episodesIn,
+                                        Function<TmdbEpisodeResponse, String> text) {
+
+        for (Locale language : languages) {
+            final TmdbEpisodeResponse translated = episodesIn
+                    .apply(language)
+                    .get(episode.episodeNumber());
+
+            if (translated == null) {
+                continue;
+            }
+
+            if (translated.overview() == null || translated.overview().isBlank()) {
+                continue;
+            }
+
+            return text.apply(translated);
+        }
+
+        return text.apply(episode);
+    }
+
+    private static TmdbEpisodeResponse withTexts(TmdbEpisodeResponse episode, String name, String overview) {
+        return new TmdbEpisodeResponse(
+                episode.tmdbId(),
+                episode.seasonNumber(),
+                episode.episodeNumber(),
+                episode.episodeType(),
+                name,
+                overview,
+                episode.airDate(),
+                episode.stillPath(),
+                episode.runtime(),
+                episode.productionCode(),
+                episode.showId(),
+                episode.voteAverage(),
+                episode.voteCount(),
+                episode.crew(),
+                episode.guestStars()
+        );
+    }
+
+    private TmdbSeasonResponse fetchSeason(Integer seriesId, Integer seasonNumber, String language) {
         try {
-            return tmdbClient.getSeason(seriesId, seasonNumber);
+            return tmdbClient.getSeason(seriesId, seasonNumber, language);
         } catch (ProcessingException | WebApplicationException e) {
             if (HttpErrorUtils.isNotFound(e)) {
                 throw new ResourceNotFoundException("Não foi possível localizar a temporada informada no TMDB");

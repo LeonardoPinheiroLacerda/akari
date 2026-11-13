@@ -4,7 +4,7 @@
 Reunir helpers puros, sem estado, de uso geral entre domínios — lógica pequena e reutilizável que não justifica um service ou não pertence a um domínio específico.
 
 ## Responsabilidade principal
-Oferecer funções estáticas, sem injeção CDI (todas as classes são `final` com construtor privado), para: cache-first genérico, manipulação de paths/nomes de arquivo, classificação de erro HTTP, ordenação paginada via Panache, retry com backoff, espera bloqueante sem propagar interrupção, montagem de URLs de imagem do TMDB e resolução de localização em disco de um `VideoFile`. O subpacote `utils/model/` abriga `CacheEntry`, o único tipo de dado puro consumido por um desses helpers (as 9 classes do pacote raiz são só helpers estáticos, sem estado próprio).
+Oferecer funções estáticas, sem injeção CDI (todas as classes são `final` com construtor privado), para: cache-first genérico, manipulação de paths/nomes de arquivo, classificação de erro HTTP, ordenação paginada via Panache, retry com backoff, espera bloqueante sem propagar interrupção, montagem de URLs de imagem do TMDB, ordem de procura dos idiomas do TMDB e resolução de localização em disco de um `VideoFile`. O subpacote `utils/model/` abriga `CacheEntry`, o único tipo de dado puro consumido por um desses helpers (as 10 classes do pacote raiz são só helpers estáticos, sem estado próprio).
 
 ## Funcionalidades existentes
 - **`CacheUtils`** — `buildKey(String...)` monta chave de cache normalizada (trim+lowercase, unida por `:`); `resolve(forceRefresh, ttl, cacheReader, loader, writer)` implementa o fluxo cache-first (serve do cache se fresco, senão busca no upstream e grava). Usa `model.CacheEntry` (subpacote deste `utils/`, não o `model/` raiz do projeto).
@@ -16,6 +16,7 @@ Oferecer funções estáticas, sem injeção CDI (todas as classes são `final` 
 - **`RetryUtils`** — `withRateLimitRetry(Supplier<T>)` retenta indefinidamente com backoff exponencial (2s a 60s) só em `429`, propagando qualquer outro erro na primeira tentativa.
 - **`ThreadUtils`** — `sleepUninterruptibly(millis)`: dorme sem propagar `InterruptedException`, só restaura a interrupt flag.
 - **`TmdbImageUtils`** — fábrica de URLs completas do CDN de imagens do TMDB (`posterSmall/Medium/Large`, `backdrop`, `logo`, `thumbnail`), null-safe, compartilhada pelos domínios `tmdb` e `anime`.
+- **`TmdbLanguageUtils`** — `languageChain(Locale...)`: ordem em que um texto ou imagem do TMDB é procurado entre os idiomas das preferências — pra cada idioma, idioma e país (`pt-BR`) e depois só o idioma (`pt`), sem `null` nem repetição. Compartilhada pelos overrides da série (`anime`) e pelos episódios (`tmdb`), pra que os dois procurem na mesma ordem.
 - **`VideoFileLocationUtils`** — `resolvePath(videoFile, storageProviderClientFactory, cacheDir)` resolve o caminho em disco de um `VideoFile`: direto se o provider for `LOCAL`, via cache local se for remoto e já tiver terminado de baixar.
 
 ## Dependências internas e externas
