@@ -1,0 +1,12 @@
+# Autenticação do control server do gluetun, consultado pelo mod de sincronização de porta do
+# qBittorrent. Copie para gluetun/config.toml e troque a apikey pela mesma GSP_GTN_API_KEY do .env.
+[[roles]]
+name = "portforward"
+routes = [
+  "GET /v1/portforward",
+  "GET /v1/openvpn/portforwarded",
+  "GET /v1/vpn/status",
+  "GET /v1/openvpn/status",
+]
+auth = "apikey"
+apikey = "PASTE_YOUR_GENERATED_KEY_HERE"

@@ -23,9 +23,26 @@ Quarkus, visite <https://quarkus.io/>.
 
 ## Dependências externas para rodar localmente
 
-- **PostgreSQL** — `docker-compose up -d` sobe só o banco (porta `5432`, credenciais padrão
-  `akari`/`akari`, sobrescrevíveis com `DB_USERNAME`/`DB_PASSWORD`). Migrations Flyway em
-  `src/main/resources/db/` aplicam no boot da aplicação.
+- **`docker-compose.yml`** — sobe o banco e a stack de torrent. Antes, copie `.env.example` para
+  `.env` e `gluetun/config.toml.example` para `gluetun/config.toml` e preencha os valores;
+  `LIBRARY_DIR` é obrigatório: sem ele nenhum comando do compose roda, nem para subir só o banco
+  (`docker compose up -d postgres`).
+- **PostgreSQL** — porta `5432`, credenciais padrão `akari`/`akari`, sobrescrevíveis com
+  `DB_USERNAME`/`DB_PASSWORD`. Migrations Flyway em `src/main/resources/db/` aplicam no boot da
+  aplicação.
+- **gluetun + qBittorrent** — o qBittorrent roda no netns do gluetun (ProtonVPN via WireGuard,
+  com port forwarding): todo o tráfego dele sai pela VPN e, se ela cair, fica sem rede. A WebUI/API
+  fica em `127.0.0.1:8090` e o proxy HTTP do gluetun, por onde sai o scrape dos provedores de
+  torrent, em `127.0.0.1:8888`. A chave WireGuard é gerada no painel do ProtonVPN com apenas o
+  NAT-PMP habilitado (Moderate NAT é incompatível com port forwarding).
+  - Na primeira subida (`docker compose up -d --build`), o qBittorrent gera uma senha temporária
+    para o usuário `admin`, visível em `docker logs akari-qbittorrent`; defina a senha definitiva
+    na WebUI.
+  - `LIBRARY_DIR` é montado no container no mesmo caminho absoluto do host, então o caminho que o
+    akari enxerga é o mesmo que o qBittorrent usa. Cadastre um storage provider `LOCAL` com
+    `rootPath` igual a `LIBRARY_DIR`.
+  - Arquivos ainda incompletos ganham a extensão `.!qB`, que a ingestão ignora por não ser de
+    vídeo.
 - **rclone rcd** — necessário só para usar um storage provider `MEGA` (obscurecimento de
   credenciais e acesso remoto). Suba com `./rclone-rcd.sh`: ele roda **fora** de container, de
   propósito, para enxergar o mesmo filesystem do host que a aplicação (relevante para `cache.dir`).

@@ -20,3 +20,85 @@ services:
       retries: 10
 
     restart: unless-stopped
+
+  gluetun:
+    image: ghcr.io/qdm12/gluetun:v3.41.3
+    container_name: akari-gluetun
+
+    cap_add:
+      - NET_ADMIN
+
+    devices:
+      - /dev/net/tun:/dev/net/tun
+
+    sysctls:
+      - net.ipv6.conf.all.disable_ipv6=1
+
+    environment:
+      - VPN_SERVICE_PROVIDER=protonvpn
+      - VPN_TYPE=wireguard
+      - WIREGUARD_PRIVATE_KEY=${WIREGUARD_PRIVATE_KEY}
+      - WIREGUARD_MTU=1320
+
+      - SERVER_COUNTRIES=${SERVER_COUNTRIES}
+      - SERVER_CITIES=${SERVER_CITIES:-}
+      - SERVER_HOSTNAMES=${SERVER_HOSTNAMES:-}
+
+      - VPN_PORT_FORWARDING=on
+      - VPN_PORT_FORWARDING_PROVIDER=protonvpn
+      - PORT_FORWARD_ONLY=on
+
+      - CONTROL_SERVER_ADDRESS=127.0.0.1:8000
+
+      # Proxy HTTP pelo qual o akari faz o scrape dos provedores de torrent pela VPN.
+      - HTTPPROXY=on
+
+      - TZ=${TZ}
+
+    ports:
+      # WebUI/API do qBittorrent (roda no netns do gluetun)
+      - "127.0.0.1:8090:8080"
+      - "127.0.0.1:8888:8888"
+
+    volumes:
+      - ./data/gluetun:/gluetun
+      - ./gluetun/config.toml:/gluetun/auth/config.toml:ro
+
+    restart: unless-stopped
+
+  qbittorrent:
+    build:
+      context: ./qbittorrent
+    image: akari-qbittorrent:local
+    container_name: akari-qbittorrent
+
+    network_mode: "service:gluetun"
+
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+      - WEBUI_PORT=8080
+
+      # Sincroniza a porta de escuta do qBittorrent com o port forwarding do gluetun.
+      - DOCKER_MODS=ghcr.io/t-anc/gsp-qbittorent-gluetun-sync-port-mod:main
+      - GSP_GTN_API_KEY=${GSP_GTN_API_KEY}
+      - GSP_MINIMAL_LOGS=false
+
+    volumes:
+      - ./data/qbittorrent-config:/config
+      - ./data/qbittorrent-downloads:/downloads
+      # Mesmo caminho absoluto no host e no container: o akari passa ao qBittorrent o caminho
+      # que ele mesmo enxerga, sem tradução.
+      - ${LIBRARY_DIR:?defina LIBRARY_DIR no .env}:${LIBRARY_DIR}
+
+    ulimits:
+      nofile:
+        soft: 32768
+        hard: 65536
+
+    depends_on:
+      gluetun:
+        condition: service_healthy
+
+    restart: unless-stopped
