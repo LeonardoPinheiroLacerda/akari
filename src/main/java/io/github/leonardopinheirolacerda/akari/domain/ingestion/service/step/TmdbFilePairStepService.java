@@ -84,7 +84,8 @@ public class TmdbFilePairStepService extends IngestionStepService {
      *
      * <p>Fluxo: pasta sem anime vinculado ou anime sem binding TMDB → {@code FAILED}; binding
      * de filme → {@code SKIPPED}, já que filme não tem episódios; senão pareia os arquivos
-     * ({@code AnimeTmdbFilePairingFillService#fillPairings}, com retry de rate limit), grava um
+     * ({@code AnimeTmdbFilePairingFillService#fillPairings}, com retry de rate limit, que também
+     * regrava o nome/sinopse dos episódios já pareados quando mudaram), grava um
      * evento {@code WARNING} por arquivo que ficou sem par, e termina {@code COMPLETED} — ou
      * {@code UNRESOLVED} se nenhum arquivo da pasta ficou pareado, nem por um pairing que já
      * existia.
@@ -161,6 +162,7 @@ public class TmdbFilePairStepService extends IngestionStepService {
                 Map.of(
                         "paired", fill.paired(),
                         "kept", fill.kept(),
+                        "textsUpdated", fill.textsUpdated(),
                         "unpaired", fill.unpaired().size()
                 )
         );
@@ -199,6 +201,14 @@ public class TmdbFilePairStepService extends IngestionStepService {
 
         if (fill.kept() > 0) {
             parts.add(plural(fill.kept(), "já tinha par", "já tinham par"));
+        }
+
+        if (fill.textsUpdated() > 0) {
+            parts.add(plural(
+                    fill.textsUpdated(),
+                    "texto de episódio atualizado",
+                    "textos de episódio atualizados"
+            ));
         }
 
         if (!fill.unpaired().isEmpty()) {

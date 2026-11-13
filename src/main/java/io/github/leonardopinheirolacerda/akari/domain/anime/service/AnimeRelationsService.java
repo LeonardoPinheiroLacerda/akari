@@ -19,6 +19,7 @@ import io.github.leonardopinheirolacerda.akari.domain.anime.mapper.AnimeRelation
 import io.github.leonardopinheirolacerda.akari.domain.anime.model.Anime;
 import io.github.leonardopinheirolacerda.akari.domain.anime.model.AnimeRelation;
 import io.github.leonardopinheirolacerda.akari.domain.anime.model.RelationType;
+import io.github.leonardopinheirolacerda.akari.domain.user.service.UserService;
 import io.github.leonardopinheirolacerda.akari.exceptions.ResourceNotFoundException;
 import io.github.leonardopinheirolacerda.akari.model.PageResult;
 import io.quarkus.logging.Log;
@@ -51,6 +52,9 @@ public class AnimeRelationsService {
 
     @Inject
     AnilistSearchService anilistSearchService;
+
+    @Inject
+    UserService userService;
 
     /**
      * Reconstrói as arestas que saem do anime a partir da resposta da AniList, em cascata:
@@ -149,11 +153,13 @@ public class AnimeRelationsService {
      * pertence e {@link FranchiseClassifier} pra como os membros são divididos.
      *
      * @param anilistId anime que ancora a busca; não precisa ser a raiz
+     * @param userId usuário cuja lista define o {@code inWatchlist}; {@code null} deixa
+     *               {@code inWatchlist} {@code null}
      * @return a franquia organizada
-     * @throws ResourceNotFoundException se não há metadata salva pro id informado, ou se o anime
-     *         está fora de qualquer franquia
+     * @throws ResourceNotFoundException se não há metadata salva pro id informado, se o anime
+     *         está fora de qualquer franquia, ou se o {@code userId} informado não existir
      */
-    public AnimeFranchiseResponse getAnimeFranchise(Integer anilistId) {
+    public AnimeFranchiseResponse getAnimeFranchise(Integer anilistId, Integer userId) {
         requireAnimeExists(anilistId, "montar a franquia");
 
         final FranchiseResolution resolution = FranchiseResolver.resolve();
@@ -176,11 +182,16 @@ public class AnimeRelationsService {
                 AnimeRelation.findByAnilistIdsEitherSide(memberIds)
         );
 
+        final Boolean inWatchlist = userId == null
+                ? null
+                : userService.isInWatchlist(userId, anilistId);
+
         return new AnimeFranchiseResponse()
                 .root(animeOverrideService.toResponse(memberById.get(rootId), resolution))
                 .seasons(toResponses(sections.seasonIds(), memberById, resolution))
                 .movies(toResponses(sections.movieIds(), memberById, resolution))
-                .specials(toResponses(sections.specialIds(), memberById, resolution));
+                .specials(toResponses(sections.specialIds(), memberById, resolution))
+                .inWatchlist(inWatchlist);
     }
 
     private List<AnimeResponse> toResponses(List<Integer> anilistIds,

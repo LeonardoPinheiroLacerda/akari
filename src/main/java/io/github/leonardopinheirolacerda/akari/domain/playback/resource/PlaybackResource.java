@@ -2,6 +2,7 @@ package io.github.leonardopinheirolacerda.akari.domain.playback.resource;
 
 import io.github.leonardopinheirolacerda.akari.api.PlaybackApi;
 import io.github.leonardopinheirolacerda.akari.api.dto.FileAvailabilityResponse;
+import io.github.leonardopinheirolacerda.akari.api.dto.PlaybackHeartbeatRequest;
 import io.github.leonardopinheirolacerda.akari.api.dto.PlaybackSessionResponse;
 import io.github.leonardopinheirolacerda.akari.api.dto.SeekRequest;
 import io.github.leonardopinheirolacerda.akari.api.dto.SessionHeartbeat;
@@ -59,8 +60,8 @@ public class PlaybackResource implements PlaybackApi {
      * @param startPlaybackSessionRequest arquivo e preferências de transcode da sessão
      * @return a sessão recém-criada, com {@code 201 Created}
      * @throws ResourceNotFoundException (traduzida em 404) se o {@code fileId} não existir no
-     *         catalog, ou se o arquivo de provider remoto ainda não tiver terminado de baixar
-     *         no cache
+     *         catalog, se o arquivo de provider remoto ainda não tiver terminado de baixar no
+     *         cache, ou se o {@code userId} informado não existir
      * @throws BusinessRuleException (traduzida em 400) se o {@code profile} informado for
      *         desconhecido, se nenhuma estratégia de transcode se aplicar a ele, ou se os
      *         índices de faixa não existirem no arquivo
@@ -133,15 +134,17 @@ public class PlaybackResource implements PlaybackApi {
     }
 
     /**
-     * {@code POST /v1/playback/sessions/{sessionId}/heartbeat} — mantém a sessão viva.
+     * {@code POST /v1/playback/sessions/{sessionId}/heartbeat} — mantém a sessão viva e, numa
+     * sessão com usuário, grava a posição atual no histórico dele.
      *
      * @param sessionId id da sessão de playback
+     * @param playbackHeartbeatRequest posição atual do player (opcional)
      * @return a validade restante da sessão, com {@code 200 OK}
      * @throws ResourceNotFoundException (traduzida em 404) se a sessão não existe ou já expirou
      */
     @Override
-    public SessionHeartbeat heartbeatPlaybackSession(UUID sessionId) {
-        return playbackService.heartbeatPlaybackSession(sessionId);
+    public SessionHeartbeat heartbeatPlaybackSession(UUID sessionId, PlaybackHeartbeatRequest playbackHeartbeatRequest) {
+        return playbackService.heartbeatPlaybackSession(sessionId, playbackHeartbeatRequest);
     }
 
     /**

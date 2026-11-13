@@ -9,17 +9,23 @@ import io.github.leonardopinheirolacerda.akari.domain.anime.model.FilePairingRes
 import io.github.leonardopinheirolacerda.akari.domain.anime.model.TmdbFilePairing;
 import io.github.leonardopinheirolacerda.akari.domain.anime.model.TmdbFilePairingFill;
 import io.github.leonardopinheirolacerda.akari.domain.anime.model.UnpairedVideoFile;
+import io.github.leonardopinheirolacerda.akari.domain.tmdb.client.dtos.TmdbEpisodeResponse;
+import io.github.leonardopinheirolacerda.akari.domain.tmdb.service.TmdbService;
 import io.github.leonardopinheirolacerda.akari.exceptions.BusinessRuleException;
 import io.github.leonardopinheirolacerda.akari.exceptions.ResourceNotFoundException;
+import io.github.leonardopinheirolacerda.akari.utils.RetryUtils;
 import io.quarkus.logging.Log;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
@@ -46,6 +52,9 @@ public class AnimeTmdbFilePairingFillService {
     @Inject
     AnimeTmdbFilePairingMapper animeTmdbFilePairingMapper;
 
+    @Inject
+    TmdbService tmdbService;
+
     /**
      * Pareia com episódios do TMDB os arquivos da pasta do anime que ainda não têm pairing.
      *
@@ -53,7 +62,9 @@ public class AnimeTmdbFilePairingFillService {
      * exceto quando o episódio também foi resolvido pra outro arquivo sem pairing ou já está
      * gravado em outro arquivo da pasta — nesses casos nenhum dos arquivos envolvidos é
      * pareado ({@code EPISODE_CONFLICT}). Arquivo com pairing já gravado é mantido como está,
-     * mesmo que a resolução aponte outro episódio.
+     * mesmo que a resolução aponte outro episódio — só o nome e a sinopse do episódio são
+     * regravados com o texto atual do TMDB (mesma cadeia de idiomas do pairing novo, via
+     * {@link TmdbService#getSeasonEpisodes}), e só quando mudaram.
      *
      * <p>A resolução, que consulta o anibridge e o TMDB, roda fora de transação; só a gravação
      * roda numa transação curta ({@link #writePairings}).
@@ -61,8 +72,8 @@ public class AnimeTmdbFilePairingFillService {
      * @param anilistId id do anime na AniList
      * @param folderId pasta do anime
      * @param folderName nome da pasta, só pra log
-     * @return quantos arquivos foram pareados agora, quantos já tinham pairing e os que ficaram
-     *         sem par, com o motivo
+     * @return quantos arquivos foram pareados agora, quantos já tinham pairing, quantos desses
+     *         tiveram o texto do episódio atualizado e os que ficaram sem par, com o motivo
      * @throws ResourceNotFoundException se o anime não existir ou não tiver binding TMDB
      * @throws BusinessRuleException se o binding TMDB for de filme
      */
@@ -125,27 +136,39 @@ public class AnimeTmdbFilePairingFillService {
             pairings.put(resolution.videoFile().id, resolution.pairing());
         }
 
-        writePairings(pairings);
+        final Map<Integer, TmdbEpisodeResponse> textUpdates = findTextUpdates(
+                anime.tmdbId,
+                currentPairings
+        );
+
+        writePairings(pairings, textUpdates);
 
         Log.infof(
-                "Pairing TMDB da pasta %d preenchido: %d pareados, %d mantidos, %d sem par",
+                "Pairing TMDB da pasta %d preenchido: %d pareados, %d mantidos "
+                        + "(%d com texto atualizado), %d sem par",
                 folderId,
                 pairings.size(),
                 kept,
+                textUpdates.size(),
                 unpaired.size()
         );
 
-        return new TmdbFilePairingFill(pairings.size(), kept, unpaired);
+        return new TmdbFilePairingFill(pairings.size(), kept, textUpdates.size(), unpaired);
     }
 
     /**
-     * Grava os pairings novos numa transação curta. Package-private (não {@code private}) pra
-     * que o {@code @Transactional} seja interceptado quando chamado por {@link #fillPairings}.
+     * Grava os pairings novos e regrava o nome/sinopse dos já existentes, numa transação curta.
+     * Package-private (não {@code private}) pra que o {@code @Transactional} seja interceptado
+     * quando chamado por {@link #fillPairings}.
      *
-     * @param pairings pairing de cada arquivo, pelo id do arquivo
+     * @param pairings pairing novo de cada arquivo, pelo id do arquivo
+     * @param textUpdates episódio com o texto atual, pelo id do arquivo já pareado cujo texto
+     *                    mudou
      */
     @Transactional
-    void writePairings(Map<Integer, TmdbFilePairingRequest> pairings) {
+    void writePairings(Map<Integer, TmdbFilePairingRequest> pairings,
+                       Map<Integer, TmdbEpisodeResponse> textUpdates) {
+
         pairings.forEach((fileId, request) -> {
             final TmdbFilePairing pairing = new TmdbFilePairing();
             pairing.fileId = fileId;
@@ -154,6 +177,70 @@ public class AnimeTmdbFilePairingFillService {
 
             pairing.persist();
         });
+
+        textUpdates.forEach((fileId, episode) -> TmdbFilePairing
+                .find(fileId)
+                .ifPresent(pairing -> {
+                    pairing.episodeName = episode.name();
+                    pairing.episodeOverview = episode.overview();
+                }));
+    }
+
+    /**
+     * Episódio com o texto atual de cada pairing já gravado cujo nome ou sinopse mudou, sem
+     * mexer na temporada/episódio gravados. Cada temporada é buscada uma vez.
+     *
+     * @param tmdbId série do TMDB vinculada ao anime
+     * @param currentPairings pairings já gravados na pasta
+     * @return o episódio pelo id do arquivo, só dos que precisam ser regravados
+     */
+    private Map<Integer, TmdbEpisodeResponse> findTextUpdates(Integer tmdbId,
+                                                             List<TmdbFilePairing> currentPairings) {
+
+        final Map<Integer, Map<Integer, TmdbEpisodeResponse>> episodesBySeason = new HashMap<>();
+        final Map<Integer, TmdbEpisodeResponse> textUpdates = new LinkedHashMap<>();
+
+        for (TmdbFilePairing pairing : currentPairings) {
+            if (pairing.seasonNumber == null) {
+                continue;
+            }
+
+            if (pairing.episodeNumber == null) {
+                continue;
+            }
+
+            final TmdbEpisodeResponse episode = episodesBySeason
+                    .computeIfAbsent(
+                            pairing.seasonNumber,
+                            seasonNumber -> episodesByNumber(tmdbId, seasonNumber)
+                    )
+                    .get(pairing.episodeNumber);
+
+            if (episode == null) {
+                continue;
+            }
+
+            if (Objects.equals(episode.name(), pairing.episodeName)
+                    && Objects.equals(episode.overview(), pairing.episodeOverview)) {
+                continue;
+            }
+
+            textUpdates.put(pairing.fileId, episode);
+        }
+
+        return textUpdates;
+    }
+
+    private Map<Integer, TmdbEpisodeResponse> episodesByNumber(Integer tmdbId, Integer seasonNumber) {
+        return RetryUtils
+                .withRateLimitRetry(() -> tmdbService.getSeasonEpisodes(tmdbId, seasonNumber))
+                .stream()
+                .filter(episode -> episode.episodeNumber() != null)
+                .collect(Collectors.toMap(
+                        TmdbEpisodeResponse::episodeNumber,
+                        Function.identity(),
+                        (first, second) -> first
+                ));
     }
 
     private static UnpairedVideoFile toUnpaired(FilePairingResolution resolution, String reason) {

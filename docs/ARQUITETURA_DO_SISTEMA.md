@@ -31,9 +31,9 @@ Fluxo padrão de uma requisição:
         → model (Panache active record) e/ou client (REST externo) e/ou service de outro domínio
 ```
 
-O sistema tem 14 domínios de negócio hoje: `storageprovider`, `ingestion`, `mediafolder`,
+O sistema tem 15 domínios de negócio hoje: `storageprovider`, `ingestion`, `mediafolder`,
 `videofile`, `cache`, `mediaprobe`, `playback`, `anilist`, `tmdb`, `anime`, `anibridge`,
-`setting`, `notification`, `smartlist`.
+`setting`, `notification`, `smartlist`, `user`.
 
 ## Padrões utilizados
 
@@ -145,11 +145,13 @@ anilist         → cache (IntegrationCache)
 tmdb            → cache (IntegrationCache), setting
 anibridge       → tmdb
 anime           → anilist, tmdb, anibridge, mediafolder, videofile, setting, ingestion
-                  (extractor.EpisodeNumberExtractor)
+                  (extractor.EpisodeNumberExtractor), user
 playback        → videofile, mediaprobe, storageprovider, setting, cache (direto via
-                  CacheService.findCacheItemByFileId, e indireto via utils pro path do arquivo)
+                  CacheService.findCacheItemByFileId, e indireto via utils pro path do arquivo),
+                  user
 ingestion       → storageprovider, mediafolder, videofile, anime, anilist, anibridge, setting
 smartlist       → anime
+user            → anime, videofile
 ```
 
 Nenhum domínio depende de `playback`, `mediaprobe`, `cache`, `notification` ou `smartlist` — são
@@ -162,9 +164,18 @@ de `videofile` (lista e cria os arquivos de vídeo das pastas) e de `anime` (o s
 dependem de `ingestion` só por `extractor.EpisodeNumberExtractor` — uma classe utilitária
 estática, sem service: `videofile` reaproveita a heurística de extração de episódio pra calcular
 a chave de ordenação natural (`VideoFileService.naturalSortKeyOf`), e `anime` pra resolver o
-pairing de episódios (`anime/pairing/FolderEpisodeNumbering`), em vez de duplicá-la. São os únicos
-ciclos do grafo, ambos só por esse extractor; Java não impede (não há dependência circular de
-build, maven é um módulo só), mas é uma exceção notável à topologia acíclica do restante.
+pairing de episódios (`anime/pairing/FolderEpisodeNumbering`), em vez de duplicá-la. Java não
+impede (não há dependência circular de build, maven é um módulo só), mas é uma exceção notável à
+topologia acíclica do restante.
+
+**Ciclo deliberado `anime` ↔ `user`:** `user` depende de `anime` pra lista de títulos
+(`AnimeService.findOrThrow` valida o anime, `AnimeOverrideService.toBindingSummary` monta o card;
+`WatchlistItem` referencia `Anime`), e `anime` depende de `user` só pra embutir o estado do
+usuário nas telas, sem o cliente combinar chamadas: o progresso de cada episódio na listagem de
+episódios (`AnimeEpisodeService` → `UserService.findWatchProgressByFiles`) e se o anime está na
+lista na franquia (`AnimeRelationsService` → `UserService.isInWatchlist`). Diferente dos ciclos com `ingestion`, é
+service a service — funciona porque os dois são beans `@ApplicationScoped` (o CDI injeta proxies),
+e é o único ciclo do grafo entre services.
 
 **Acoplamento atípico identificado:** o service de busca do TMDB (`tmdb.service.
 TmdbService`) expõe só 2 operações via `resource/` (`/v1/tmdb/search/movies` e

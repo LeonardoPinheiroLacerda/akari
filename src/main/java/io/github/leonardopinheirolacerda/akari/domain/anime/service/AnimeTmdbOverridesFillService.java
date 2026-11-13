@@ -11,6 +11,7 @@ import io.github.leonardopinheirolacerda.akari.exceptions.BusinessRuleException;
 import io.github.leonardopinheirolacerda.akari.exceptions.IntegrationException;
 import io.github.leonardopinheirolacerda.akari.exceptions.IntegrationNotConfiguredException;
 import io.github.leonardopinheirolacerda.akari.exceptions.ResourceNotFoundException;
+import io.github.leonardopinheirolacerda.akari.utils.TmdbLanguageUtils;
 import io.quarkus.logging.Log;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -165,8 +166,9 @@ public class AnimeTmdbOverridesFillService {
     }
 
     /**
-     * Primeiro texto de tradução na ordem de idiomas de {@link #languageChain}, a partir do
-     * idioma configurado e depois do de fallback. Tradução sem texto conta como inexistente.
+     * Primeiro texto de tradução na ordem de idiomas de {@link TmdbLanguageUtils#languageChain},
+     * a partir do idioma configurado e depois do de fallback. Tradução sem texto conta como
+     * inexistente.
      *
      * @param translations traduções do título no TMDB
      * @param language idioma configurado ({@code pt-BR} ou {@code pt}), ou {@code null} pra não
@@ -185,7 +187,7 @@ public class AnimeTmdbOverridesFillService {
             return null;
         }
 
-        for (Locale locale : languageChain(language, fallbackLanguage)) {
+        for (Locale locale : TmdbLanguageUtils.languageChain(language, fallbackLanguage)) {
             final String text = findText(translations, locale, valueExtractor);
 
             if (text != null) {
@@ -227,13 +229,13 @@ public class AnimeTmdbOverridesFillService {
             return backdrop;
         }
 
-        return selectImageByLanguage(backdrops, languageChain(fallbackLanguage));
+        return selectImageByLanguage(backdrops, TmdbLanguageUtils.languageChain(fallbackLanguage));
     }
 
     /**
      * Logo mais votado do primeiro idioma da lista que tiver logo. Cada idioma da lista é
-     * procurado do mais específico ao mais amplo ({@link #languageChain}); {@code none} procura
-     * o logo sem idioma.
+     * procurado do mais específico ao mais amplo ({@link TmdbLanguageUtils#languageChain});
+     * {@code none} procura o logo sem idioma.
      *
      * @param logos logos do título no TMDB
      * @param languages idiomas em ordem de preferência ({@code en-US}, {@code ja},
@@ -257,7 +259,7 @@ public class AnimeTmdbOverridesFillService {
             return selectMostVotedImageWithoutLanguage(logos);
         }
 
-        return selectImageByLanguage(logos, languageChain(Locale.forLanguageTag(language)));
+        return selectImageByLanguage(logos, TmdbLanguageUtils.languageChain(Locale.forLanguageTag(language)));
     }
 
     /**
@@ -311,34 +313,6 @@ public class AnimeTmdbOverridesFillService {
                         .thenComparing(TmdbImageResponse::width, Comparator.nullsFirst(Comparator.naturalOrder())))
                 .map(TmdbImageResponse::filePath)
                 .orElse(null);
-    }
-
-    /**
-     * Ordem de procura dos idiomas, do mais específico ao mais amplo: pra cada idioma, na ordem
-     * recebida, idioma e país ({@code pt-BR}) quando ele tem país, e depois só o idioma
-     * ({@code pt}). Idiomas {@code null} são ignorados.
-     *
-     * @param languages idiomas em ordem de preferência
-     * @return os idiomas a procurar, sem repetição
-     */
-    private static List<Locale> languageChain(Locale... languages) {
-        final List<Locale> chain = new ArrayList<>();
-
-        for (Locale locale : languages) {
-            if (locale == null) {
-                continue;
-            }
-
-            chain.add(locale);
-
-            if (!locale.getCountry().isEmpty()) {
-                chain.add(Locale.of(locale.getLanguage()));
-            }
-        }
-
-        return chain.stream()
-                .distinct()
-                .toList();
     }
 
     /**
