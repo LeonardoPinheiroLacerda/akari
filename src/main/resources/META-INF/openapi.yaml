@@ -207,6 +207,20 @@ tags:
       Cada lista guarda um filtro fixo (gêneros, tags, ano, ...) e uma ordenação, não títulos
       fixos: os itens são recalculados a cada consulta. Os itens são sempre raízes de franquia.
       A ordem das listas na listagem segue o `position` de cada uma.
+  - name: User
+    description: |
+      Perfis de usuário (sem senha nem autenticação), com histórico de visualização e lista de
+      títulos de cada um.
+
+      O histórico é alimentado pelo heartbeat das sessões de playback iniciadas com `userId`:
+      guarda, por arquivo, a última posição recebida e se o episódio já foi assistido (posição
+      a partir de 90% da duração). Uma vez assistido, continua assistido. Ele aparece no
+      `watchProgress` de cada episódio em
+      `GET /v1/metadata/animes/{anilistId}/episodes?userId=`.
+
+      A lista de títulos aceita adicionar e remover animes, os dois idempotentes. Se um anime
+      está na lista do perfil aparece em `inWatchlist` de
+      `GET /v1/metadata/animes/{anilistId}/franchise?userId=`.
 
 paths:
 
@@ -946,6 +960,11 @@ paths:
         sessão e devolve a validade restante. O TTL é uma preferência do admin. O cliente deve
         chamar novamente antes de a validade expirar. Responde `404` se a sessão não existe ou já
         expirou.
+
+        O corpo é opcional: com `positionSeconds`, numa sessão iniciada com `userId`, grava a
+        posição atual no histórico do usuário (ver tag `User`).
+      requestBody:
+        $ref: '#/components/requestBodies/PlaybackHeartbeatRequestBody'
       responses:
         '200':
           $ref: '#/components/responses/HeartbeatOk'
@@ -1145,9 +1164,14 @@ paths:
 
         Anime sem arquivos na pasta devolve página vazia — só é `404` se o `anilistId` não
         existir.
+
+        Com `userId`, cada episódio vem com o `watchProgress` do usuário (onde parou e se já foi
+        assistido), pra tela marcar os episódios sem outra chamada; episódio que o usuário nunca
+        abriu vem com `watchProgress` `null`. `404` se o usuário não existir.
       parameters:
         - $ref: '#/components/parameters/PageParam'
         - $ref: '#/components/parameters/SizeParam'
+        - $ref: '#/components/parameters/UserIdQueryParam'
       responses:
         '200':
           $ref: '#/components/responses/VideoFilePageOk'
@@ -1234,6 +1258,12 @@ paths:
         `root`, `seasons`, `movies` e `specials` usam o `AnimeResponse` completo (mesmos campos
         de `GET /v1/metadata/animes/{anilistId}`, com os mesmos overrides manuais). Sem
         duplicatas: cada membro aparece em só uma das listas.
+
+        Com `userId`, `inWatchlist` diz se o `anilistId` consultado (o da rota, não
+        necessariamente a raiz) está na lista do usuário; sem `userId`, vem `null`. `404` se o
+        usuário não existir.
+      parameters:
+        - $ref: '#/components/parameters/UserIdQueryParam'
       responses:
         '200':
           $ref: '#/components/responses/AnimeFranchiseOk'
@@ -1859,6 +1889,110 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  # ---------- user ----------
+  /v1/users:
+    get:
+      tags: [User]
+      operationId: listUsers
+      summary: Lista os usuários
+      description: Ordenados por `id`.
+      responses:
+        '200':
+          $ref: '#/components/responses/UserListOk'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      tags: [User]
+      operationId: createUser
+      summary: Cadastra um usuário
+      requestBody:
+        $ref: '#/components/requestBodies/UserRequestBody'
+      responses:
+        '201':
+          $ref: '#/components/responses/UserCreated'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/users/{userId}:
+    parameters:
+      - $ref: '#/components/parameters/UserIdPathParam'
+    delete:
+      tags: [User]
+      operationId: deleteUser
+      summary: Remove um usuário
+      description: |
+        Remove o usuário e tudo o que é dele: o histórico de visualização e a lista de títulos.
+        Uma sessão de playback em andamento do usuário não é interrompida: ela segue sem
+        usuário (para de gravar progresso) até expirar normalmente. Responde `404` se o usuário
+        não existir.
+      responses:
+        '204':
+          description: Usuário removido
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/users/{userId}/watchlist:
+    parameters:
+      - $ref: '#/components/parameters/UserIdPathParam'
+    get:
+      tags: [User]
+      operationId: listUserWatchlist
+      summary: Lista de títulos do usuário (paginado)
+      description: Do título adicionado mais recentemente pro mais antigo.
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/SizeParam'
+      responses:
+        '200':
+          $ref: '#/components/responses/AnimeBindingSummaryPageOk'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      tags: [User]
+      operationId: addUserWatchlistItem
+      summary: Adiciona um título à lista do usuário
+      description: |
+        Idempotente: adicionar um título que já está na lista não faz nada. Responde `404` se o
+        usuário ou o anime não existir.
+      requestBody:
+        $ref: '#/components/requestBodies/WatchlistItemRequestBody'
+      responses:
+        '204':
+          description: Título na lista
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/users/{userId}/watchlist/{anilistId}:
+    parameters:
+      - $ref: '#/components/parameters/UserIdPathParam'
+      - $ref: '#/components/parameters/AnilistIdPathParam'
+    delete:
+      tags: [User]
+      operationId: removeUserWatchlistItem
+      summary: Remove um título da lista do usuário
+      description: |
+        Idempotente: remover um título que não está na lista responde `204` sem fazer nada.
+        Responde `404` só se o usuário não existir.
+      responses:
+        '204':
+          description: Título fora da lista
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
 components:
 
   parameters:
@@ -2125,6 +2259,23 @@ components:
       schema:
         type: integer
         format: int32
+    UserIdPathParam:
+      name: userId
+      in: path
+      required: true
+      description: Id do usuário
+      schema:
+        $ref: '#/components/schemas/UserId'
+    UserIdQueryParam:
+      name: userId
+      in: query
+      required: false
+      description: |
+        Id do usuário. Quando informado, a resposta traz o estado desse usuário: o
+        `watchProgress` de cada episódio na listagem de episódios, ou o `inWatchlist` na
+        franquia.
+      schema:
+        $ref: '#/components/schemas/UserId'
 
   requestBodies:
     # ---------- storageprovider ----------
@@ -2275,6 +2426,28 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/SmartListRequest'
+    # ---------- user ----------
+    UserRequestBody:
+      description: Nome do usuário
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/UserRequest'
+    WatchlistItemRequestBody:
+      description: Título a adicionar na lista
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/WatchlistItemRequest'
+    PlaybackHeartbeatRequestBody:
+      description: Posição atual do player
+      required: false
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/PlaybackHeartbeatRequest'
 
   responses:
     # ---------- comuns ----------
@@ -2697,6 +2870,19 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/SmartListResponse'
+    # ---------- user ----------
+    UserListOk:
+      description: Lista (possivelmente vazia) de usuários
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/UserList'
+    UserCreated:
+      description: Usuário cadastrado
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/UserResponse'
 
   schemas:
     # ---------- comuns ----------
@@ -3518,6 +3704,12 @@ components:
           description: >-
             Pairing TMDB do arquivo, quando houver. Enriquecido só na listagem
             (`GET /video-files`); `null` nas leituras que não computam esse campo.
+        watchProgress:
+          allOf: [{ $ref: '#/components/schemas/WatchProgress' }]
+          nullable: true
+          description: >-
+            Progresso do usuário no arquivo. Preenchido só na listagem de episódios do anime
+            com `userId`; `null` nas demais leituras e em arquivo que o usuário nunca abriu.
 
     VideoFilePage:
       description: Envelope paginado de arquivos
@@ -4038,6 +4230,13 @@ components:
           description: |
             `true` reproduz sem legenda, ignorando `subtitleTrackIndex` e a legenda padrão das
             preferências.
+        userId:
+          allOf: [{ $ref: '#/components/schemas/UserId' }]
+          nullable: true
+          description: |
+            Usuário que está assistindo. Com ele, a posição enviada nos heartbeats da sessão vira
+            o progresso do arquivo no histórico do usuário; sem ele, a sessão não grava
+            histórico. Responde `404` se o usuário não existir.
 
     SeekRequest:
       type: object
@@ -4889,6 +5088,12 @@ components:
             cadeia, ...). Ordenados por `year`/`season`
           items:
             $ref: '#/components/schemas/AnimeResponse'
+        inWatchlist:
+          type: boolean
+          nullable: true
+          description: |
+            Se o anime consultado (o `anilistId` da rota, não necessariamente a raiz) está na
+            lista do usuário. Só preenchido com `userId`; `null` sem ele.
 
     FranchiseAssignment:
       type: string
@@ -5933,3 +6138,85 @@ components:
       description: Listas cadastradas, ordenadas por `position` e `id`
       items:
         $ref: '#/components/schemas/SmartListResponse'
+
+    # ---------- user ----------
+    UserId:
+      type: integer
+      format: int32
+      description: Id do usuário
+
+    UserRequest:
+      type: object
+      description: Payload de `POST /v1/users`
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          description: Nome exibido no seletor de perfis
+
+    UserResponse:
+      type: object
+      description: Usuário cadastrado
+      required: [id, name, createdAt]
+      properties:
+        id:
+          $ref: '#/components/schemas/UserId'
+        name:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    UserList:
+      type: array
+      description: Usuários cadastrados, ordenados por `id`
+      items:
+        $ref: '#/components/schemas/UserResponse'
+
+    WatchlistItemRequest:
+      type: object
+      description: Payload de `POST /v1/users/{userId}/watchlist`
+      required: [anilistId]
+      properties:
+        anilistId:
+          $ref: '#/components/schemas/AnilistId'
+
+    PlaybackHeartbeatRequest:
+      type: object
+      description: Posição atual do player, enviada no heartbeat
+      properties:
+        positionSeconds:
+          type: number
+          format: double
+          minimum: 0
+          nullable: true
+          description: |
+            Posição atual, em segundos a partir do início da mídia (mesma semântica do
+            `positionSeconds` do seek), não o `currentTime` da playlist. Numa sessão iniciada com
+            `userId`, vira a posição do arquivo no histórico do usuário; sem `userId`, é
+            ignorada.
+
+    WatchProgress:
+      type: object
+      description: Progresso do usuário num arquivo
+      required: [positionSeconds, watched, lastWatchedAt]
+      properties:
+        positionSeconds:
+          type: number
+          format: double
+          description: Última posição recebida no heartbeat, em segundos a partir do início da mídia
+        durationSeconds:
+          type: number
+          format: double
+          nullable: true
+          description: Duração da mídia, em segundos; `null` se o probe não informou
+        watched:
+          type: boolean
+          description: |
+            `true` quando alguma posição recebida chegou a 90% da duração. Uma vez `true`,
+            continua `true`, mesmo se o usuário rever o episódio do começo.
+        lastWatchedAt:
+          type: string
+          format: date-time
+          description: Quando a última posição foi recebida

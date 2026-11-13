@@ -54,12 +54,14 @@ public class AnimeRelationsResource implements AnimeRelationsApi {
      * em raiz/temporadas/filmes/especiais, pra tela de detalhe do app.
      *
      * @param anilistId anime que ancora a busca; não precisa ser a raiz
+     * @param userId usuário cuja lista define o {@code inWatchlist} (opcional)
      * @return a franquia organizada, com {@code 200 OK}
      * @throws ResourceNotFoundException (traduzida em 404) se não há metadata salva pro id
-     *         informado, ou se o anime está fora de qualquer franquia
+     *         informado, se o anime está fora de qualquer franquia, ou se o {@code userId}
+     *         informado não existir
      */
     @Override
-    public AnimeFranchiseResponse getAnimeFranchise(Integer anilistId) {
-        return animeRelationsService.getAnimeFranchise(anilistId);
+    public AnimeFranchiseResponse getAnimeFranchise(Integer anilistId, Integer userId) {
+        return animeRelationsService.getAnimeFranchise(anilistId, userId);
     }
 }

@@ -27,11 +27,13 @@ public class AnimeEpisodeResource implements AnimeEpisodesApi {
      * @param anilistId id do anime na AniList
      * @param page página desejada, 0-based
      * @param size tamanho da página
+     * @param userId id do usuário cujo progresso marca os episódios (opcional)
      * @return página de episódios, com {@code 200 OK}
-     * @throws ResourceNotFoundException (traduzida em 404) se o {@code anilistId} não existir
+     * @throws ResourceNotFoundException (traduzida em 404) se o {@code anilistId} ou o
+     *         {@code userId} informado não existir
      */
     @Override
-    public VideoFilePage listAnimeEpisodes(Integer anilistId, Integer page, Integer size) {
-        return animeEpisodeService.listAnimeEpisodes(anilistId, page, size);
+    public VideoFilePage listAnimeEpisodes(Integer anilistId, Integer page, Integer size, Integer userId) {
+        return animeEpisodeService.listAnimeEpisodes(anilistId, page, size, userId);
     }
 }

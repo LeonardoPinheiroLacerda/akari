@@ -10,7 +10,7 @@ O domínio é organizado em dois eixos mais uma faceta de listagem que combina o
 
 - **Eixo base (Anime):** binding anime↔pasta, fetch/sync na AniList, status de revisão da ingestão, organização dos animes em franquias, o grafo de relações entre animes (sequel/prequel/side story) e a franquia organizada em raiz/temporadas/filmes/especiais pra tela de detalhe do app.
 - **Eixo TMDB (enriquecimento opcional):** binding TMDB↔anime, overrides manuais de título/sinopse/poster/backdrop/logo, e pairing por arquivo de vídeo (temporada/episódio/thumbnail). Um anime funciona sem TMDB; só banner e logo do `AnimeResponse` ficam `null` sem binding + overrides.
-- **Episódios (AnimeEpisodes):** resolve a pasta do anime (eixo base) e delega a listagem em si pro domínio `videofile`, já em ordem natural de nome — pronta pra tela de episódios do app, sem o cliente precisar descobrir `folderId` nem reordenar. O pareamento TMDB (eixo TMDB) só enriquece cada item (via `videofile`), não define mais a posição.
+- **Episódios (AnimeEpisodes):** resolve a pasta do anime (eixo base) e delega a listagem em si pro domínio `videofile`, já em ordem natural de nome — pronta pra tela de episódios do app, sem o cliente precisar descobrir `folderId` nem reordenar. O pareamento TMDB (eixo TMDB) só enriquece cada item (via `videofile`), não define mais a posição. Com `userId`, cada item também vem com o `watchProgress` do usuário (onde parou, se já assistiu), vindo do domínio `user`.
 
 Cada faceta bem distinta tem seu próprio par resource/service, todos compartilhando o mesmo `model/` (principalmente `Anime`), conforme a convenção do projeto pra domínios com múltiplos resources:
 
@@ -47,7 +47,7 @@ Grafo de relações:
 - Sincronizar as arestas do grafo a partir da resposta da AniList, em cascata pros vizinhos já conhecidos localmente (`syncRelations`).
 - Materializar o grafo via BFS bidirecional até profundidade configurável (`getAnimeRelationGraph`).
 - Listar as raízes das franquias (naturais e manuais), paginadas (`listRelationRoots`).
-- Montar a franquia de um anime já organizada em raiz/temporadas/filmes/especiais pra tela de detalhe do app (`getAnimeFranchise`); `404` se o anime está fora de qualquer franquia.
+- Montar a franquia de um anime já organizada em raiz/temporadas/filmes/especiais pra tela de detalhe do app (`getAnimeFranchise`); `404` se o anime está fora de qualquer franquia. Com `userId`, traz `inWatchlist` — se o anime da rota (não necessariamente a raiz) está na lista do usuário, vindo do domínio `user`; sem `userId`, `null`.
 
 Organização em franquias (`AnimeFranchiseService`, portal):
 - Listar as franquias, com busca no título da raiz e dos membros e filtro por tipo de raiz (`listFranchises`).
@@ -93,7 +93,7 @@ File pairing:
 - Resumir pairings de vários arquivos numa chamada (`getTmdbFilePairings`), consumido por `videofile` pra embutir `tmdbPairing` na listagem de arquivos.
 
 Episódios:
-- Paginar os episódios (arquivos de vídeo) do anime em ordem natural de nome (trechos numéricos comparam como número, `id` como desempate), delegando a listagem em si pro `videofile`; o pareamento TMDB, quando houver, só enriquece o item, não define a posição (`listAnimeEpisodes`).
+- Paginar os episódios (arquivos de vídeo) do anime em ordem natural de nome (trechos numéricos comparam como número, `id` como desempate), delegando a listagem em si pro `videofile`; o pareamento TMDB, quando houver, só enriquece o item, não define a posição; com `userId`, embute o `watchProgress` do usuário em cada item, numa consulta só pros ids da página (`listAnimeEpisodes`).
 
 ## Dependências internas e externas
 
@@ -124,10 +124,11 @@ Episódios:
 - `EpisodePairingResolutionService`: `videofile.service.VideoFileService` (arquivos da pasta).
 - `anime/pairing`: `anibridge.service.AnibridgeResolutionService` (candidato da série vinculada, segments, conversão de episódio — `AnibridgeEpisodeMapper`/`AnibridgeFolderMapping`), `tmdb.service.TmdbService` (temporadas/episódios — `TmdbEpisodeValidator`) e a classe utilitária `ingestion.extractor.EpisodeNumberExtractor` (número do episódio no nome do arquivo — `FolderEpisodeNumbering`).
 - `EpisodeContinuityResolutionService`: `videofile.service.VideoFileService` (arquivos da pasta em ordem natural), `tmdb.service.TmdbService` (ficha e temporadas da série).
-- `AnimeEpisodeService`: `videofile.service.VideoFileService` (`listVideoFilesOrderedByNaturalSortKey` — listagem em si, já com `tmdbPairing` embutido).
+- `AnimeEpisodeService`: `videofile.service.VideoFileService` (`listVideoFilesOrderedByNaturalSortKey` — listagem em si, já com `tmdbPairing` embutido), `user.service.UserService` (`findWatchProgressByFiles` — progresso do usuário nos episódios da página).
+- `AnimeRelationsService`: `user.service.UserService` (`isInWatchlist` — `inWatchlist` da franquia com `userId`).
 - Model `Anime` referencia `mediafolder.model.MediaFolder` via `@OneToOne`.
 
-O acoplamento alto do domínio como um todo (7 domínios externos: `anilist`, `tmdb`, `anibridge`, `mediafolder`, `videofile`, `setting` e `ingestion`, este só pelo `EpisodeNumberExtractor`) é distribuído entre as facetas; a resolução do pairing (`anime/pairing`) é a parte mais acoplada (`anibridge`, `tmdb` e o extractor do `ingestion`), dividida em etapas pra que cada classe dependa só do que a sua etapa usa.
+O acoplamento alto do domínio como um todo (8 domínios externos: `anilist`, `tmdb`, `anibridge`, `mediafolder`, `videofile`, `setting`, `user` e `ingestion`, este só pelo `EpisodeNumberExtractor`) é distribuído entre as facetas; a resolução do pairing (`anime/pairing`) é a parte mais acoplada (`anibridge`, `tmdb` e o extractor do `ingestion`), dividida em etapas pra que cada classe dependa só do que a sua etapa usa.
 
 ## Módulos relacionados
 
@@ -137,6 +138,7 @@ O acoplamento alto do domínio como um todo (7 domínios externos: `anilist`, `t
 - **`anilist`** e **`tmdb`**: fontes de dados externos consumidas via seus `*SearchService`.
 - **`anibridge`**: `AnimeTmdbProposalService` usa `AnibridgeResolutionService.resolveBestCandidate` pra propor o binding TMDB, passando o formato do anime na AniList pro desempate entre filme e série.
 - **`setting`**: `AnimeTmdbOverridesFillService` injeta o `SettingService` pra ler os idiomas do preenchimento dos overrides.
+- **`user`**: `UserService` usa `AnimeService.findOrThrow` pra validar o anime adicionado à lista do usuário e `AnimeOverrideService.toBindingSummary` pro card dos itens; `WatchlistItem.anime` referencia `Anime`. No sentido contrário, `AnimeEpisodeService` usa `UserService.findWatchProgressByFiles` e `AnimeRelationsService` usa `UserService.isInWatchlist` — ciclo `anime ↔ user`, service a service (ver `docs/ARQUITETURA_DO_SISTEMA.md`).
 - **`smartlist`**: `SmartListService` lê `Anime.listAll()`, resolve as raízes com `FranchiseResolver.resolve()` e monta os itens com `AnimeOverrideService.toBindingSummary`/`resolveTitle` — mudanças na resolução de franquias ou no título exibido mudam os itens das listas.
 
 ## Pontos de entrada

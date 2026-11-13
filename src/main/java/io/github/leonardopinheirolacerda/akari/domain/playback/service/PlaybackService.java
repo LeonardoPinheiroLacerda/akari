@@ -5,6 +5,7 @@ import io.github.leonardopinheirolacerda.akari.api.dto.CacheStatus;
 import io.github.leonardopinheirolacerda.akari.api.dto.FileAvailabilityResponse;
 import io.github.leonardopinheirolacerda.akari.api.dto.FileAvailabilityStatus;
 import io.github.leonardopinheirolacerda.akari.api.dto.MediaInfoResponse;
+import io.github.leonardopinheirolacerda.akari.api.dto.PlaybackHeartbeatRequest;
 import io.github.leonardopinheirolacerda.akari.api.dto.PlaybackSessionResponse;
 import io.github.leonardopinheirolacerda.akari.api.dto.SeekRequest;
 import io.github.leonardopinheirolacerda.akari.api.dto.SessionHeartbeat;
@@ -29,6 +30,8 @@ import io.github.leonardopinheirolacerda.akari.domain.playback.transcode.spec.Hl
 import io.github.leonardopinheirolacerda.akari.domain.playback.transcode.spec.HwAccel;
 import io.github.leonardopinheirolacerda.akari.domain.setting.service.SettingService;
 import io.github.leonardopinheirolacerda.akari.domain.storageprovider.provider.StorageProviderClientFactory;
+import io.github.leonardopinheirolacerda.akari.domain.user.model.User;
+import io.github.leonardopinheirolacerda.akari.domain.user.service.UserService;
 import io.github.leonardopinheirolacerda.akari.domain.videofile.model.VideoFile;
 import io.github.leonardopinheirolacerda.akari.domain.videofile.service.VideoFileService;
 import io.github.leonardopinheirolacerda.akari.exceptions.BusinessRuleException;
@@ -160,6 +163,9 @@ public class PlaybackService {
     @Inject
     TranscodeProcessRegistry transcodeProcessRegistry;
 
+    @Inject
+    UserService userService;
+
     /**
      * Inicia uma nova sessão de transcode HLS.
      *
@@ -167,10 +173,12 @@ public class PlaybackService {
      * independente: sem {@code audioTrackIndex}, o áudio padrão; sem {@code subtitleTrackIndex},
      * a legenda padrão — a menos que {@code subtitleDisabled} peça pra reproduzir sem legenda.
      *
-     * @param request arquivo, profile e faixas de áudio/legenda escolhidas
+     * @param request arquivo, profile, faixas de áudio/legenda escolhidas e o usuário que está
+     *                assistindo (opcional)
      * @return a sessão recém-criada, com {@code startOffsetSeconds=0}
-     * @throws ResourceNotFoundException se o {@code fileId} não existir no catalog, ou se o
-     *         arquivo de provider remoto ainda não tiver terminado de baixar no cache
+     * @throws ResourceNotFoundException se o {@code fileId} não existir no catalog, se o
+     *         arquivo de provider remoto ainda não tiver terminado de baixar no cache, ou se o
+     *         {@code userId} informado não existir
      * @throws BusinessRuleException se o {@code profile} informado for desconhecido, se nenhuma
      *         estratégia de transcode se aplicar a ele, ou se os índices de faixa não existirem
      *         no arquivo
@@ -183,6 +191,9 @@ public class PlaybackService {
     @Transactional
     public PlaybackSessionResponse startPlaybackSession(StartPlaybackSessionRequest request) {
         final VideoFile videoFile = videoFileService.findOrThrow(request.getFileId());
+        final User user = request.getUserId() == null
+                ? null
+                : userService.findOrThrow(request.getUserId());
         final Profile profile = resolveProfile(request.getProfile().name());
         final Path inputFile = VideoFileLocationUtils.resolvePath(
                 videoFile,
@@ -228,6 +239,10 @@ public class PlaybackService {
         session.startOffsetSeconds = 0.0;
         session.processStartedAt = now;
         session.lastHeartbeatAt = now;
+        session.user = user;
+        session.durationSeconds = mediaInfo.getContainer() == null
+                ? null
+                : mediaInfo.getContainer().getDurationSeconds();
 
         session.persist();
 
@@ -361,18 +376,22 @@ public class PlaybackService {
     }
 
     /**
-     * Renova o TTL de uma sessão ativa.
+     * Renova o TTL de uma sessão ativa e, numa sessão com usuário, grava a posição recebida no
+     * histórico dele.
      *
      * @param sessionId id da sessão
+     * @param request posição atual do player; {@code null} (ou sem posição) só renova o TTL
      * @return quanto tempo falta até a sessão expirar sem um novo heartbeat
      * @throws ResourceNotFoundException se a sessão não existir ou já tiver expirado (não
      *         revive uma sessão expirada)
      */
     @Transactional
-    public SessionHeartbeat heartbeatPlaybackSession(UUID sessionId) {
+    public SessionHeartbeat heartbeatPlaybackSession(UUID sessionId, PlaybackHeartbeatRequest request) {
         final PlaybackSession session = findActiveOrThrow(sessionId);
 
         session.lastHeartbeatAt = OffsetDateTime.now();
+
+        recordWatchProgress(session, request);
 
         final Duration playbackSessionHeartbeatTtlSetting = settingService.getPlaybackSessionHeartbeatTtl();
         final long seconds = playbackSessionHeartbeatTtlSetting.toSeconds();
@@ -470,6 +489,27 @@ public class PlaybackService {
         }
 
         return session;
+    }
+
+    private void recordWatchProgress(PlaybackSession session, PlaybackHeartbeatRequest request) {
+        if (session.user == null) {
+            return;
+        }
+
+        if (request == null) {
+            return;
+        }
+
+        if (request.getPositionSeconds() == null) {
+            return;
+        }
+
+        userService.recordWatchProgress(
+                session.user,
+                session.videoFile,
+                request.getPositionSeconds(),
+                session.durationSeconds
+        );
     }
 
     private PlaybackSession restart(PlaybackSession session,

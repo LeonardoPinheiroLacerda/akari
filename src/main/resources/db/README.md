@@ -32,12 +32,15 @@ não há tabela compartilhada entre domínios além das FKs explícitas abaixo.
 | `tmdb_file_pairing` | V8, V14 | `anime` (`TmdbFilePairing`) | PK é o próprio `file_id` (1:1 com `video_file`), não um id gerado. V14 adiciona os campos de metadata do episódio TMDB (nome, sinopse, data, runtime, nota, tipo). |
 | `anibridge_mapping_release` / `anibridge_mapping_segment` | V9 | `anibridge` | `_release` guarda qual release do dataset do GitHub foi ingerida; `_segment` é o mapeamento episódio↔temporada propriamente dito. **Confirmado** em `MappingRelease.java`: `_release` tem PK `id` sem `SERIAL` porque é uma linha singleton fixa (`SINGLETON_ID = 1`, sempre a mesma linha é atualizada) — o id não vem do upstream, só não precisa de autoincremento por existir uma única linha. |
 | `video_file_cache` | V12 | `cache` (`VideoFileCache`) | Fila/status de download remoto→cache local; PK `UUID`, 1:1 com `video_file` (`UNIQUE`). |
-| `playback_session` | V13 | `playback` | Sessão de transcode HLS; PK `UUID` (o `sessionId` da API); sem FK de volta — é limpa por exclusão de linha, não por histórico. |
+| `playback_session` | V13, V23, V24 | `playback` | Sessão de transcode HLS; PK `UUID` (o `sessionId` da API); sem FK de volta — é limpa por exclusão de linha, não por histórico. V23 adiciona `user_id` (FK em `app_user`, nullable) e `duration_seconds` (duração do probe, usada pra marcar assistido); V24 deixa a FK de `user_id` `ON DELETE SET NULL` — remover o usuário desvincula a sessão em vez de apagar a linha, que precisa ser encerrada pelo `playback` (processo `ffmpeg` e pasta de trabalho). |
 | `ingestion` | V20 | `ingestion` | Uma execução de ingestão de um subtree; `status` como `TEXT`. |
 | `ingestion_task` | V20 | `ingestion` (`IngestionTask`) | Uma por pasta da ingestão. FK em `ingestion` e em `media_folder`, ambas `ON DELETE CASCADE` (remover a pasta remove as tasks dela); FK em `anime(anilist_id)` nullable, `ON DELETE SET NULL`. |
 | `ingestion_step_execution` | V20 | `ingestion` (`IngestionStepExecution`) | Uma tentativa de uma etapa de uma task; FK em `ingestion_task`, `ON DELETE CASCADE`; `CHECK (attempt > 0)`. |
 | `ingestion_step_event` | V20 | `ingestion` (`IngestionStepEvent`) | Evento da linha do tempo de uma tentativa; FK em `ingestion_step_execution`, `ON DELETE CASCADE`; `details` em `JSONB`. |
 | `smart_list` | V22 | `smartlist` | `criteria` é `JSONB` — o filtro da lista (`SmartListCriteria`); os itens não são gravados, são recalculados a cada consulta. Sem FK. |
+| `app_user` | V23 | `user` | Perfil de usuário (só nome). Chama `app_user` porque `user` é palavra reservada no Postgres. |
+| `user_watch_history` | V23 | `user` (`WatchHistory`) | Progresso por usuário e arquivo, `UNIQUE (user_id, file_id)`; FKs em `app_user` e `video_file`, ambas `ON DELETE CASCADE`. |
+| `user_watchlist_item` | V23 | `user` (`WatchlistItem`) | Título na lista do usuário, `UNIQUE (user_id, anilist_id)`; FKs em `app_user` e `anime(anilist_id)`, ambas `ON DELETE CASCADE`. |
 
 ## Migrations de alteração (não criam tabela nova)
 

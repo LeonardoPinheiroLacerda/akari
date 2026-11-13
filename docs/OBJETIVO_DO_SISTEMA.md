@@ -91,6 +91,11 @@ anibridge, franquias/relações entre animes).
     ordem das listas definida por `position`. Os itens são raízes de franquia, recalculados a
     cada consulta: critérios de conteúdo (gêneros, tags, estúdio, status, adulto) valem pra
     qualquer membro da franquia, os demais só pra raiz; animes ocultos ficam de fora.
+11. **Perfis, histórico e lista** (`User`) → o cliente cadastra perfis (só nome, sem senha) e
+    inicia a sessão de playback com o `userId`; o heartbeat da sessão manda a posição do player,
+    que vira o progresso do arquivo no histórico do perfil (onde parou e se já assistiu — a
+    partir de 90% da duração). A listagem de episódios com `userId` já vem com esse progresso em
+    cada episódio. Cada perfil também mantém uma lista de títulos (animes).
 
 ## Atores envolvidos
 
@@ -102,7 +107,10 @@ anibridge, franquias/relações entre animes).
   nenhum mecanismo de autenticação/autorização implementado (sem `@RolesAllowed`,
   `SecurityIdentity` ou configuração de segurança) — é uma lacuna real reconhecida, não uma
   decisão definitiva de escopo. Cobertura futura prevista é *single-tenant* (login simples para
-  proteger o admin único existente), sem abrir caminho para múltiplos usuários/perfis.
+  proteger o admin único existente).
+- **Perfil de usuário** (`User`) — quem assiste. Separa o histórico de visualização e a lista de
+  títulos de cada pessoa da casa, no estilo de um seletor de perfis: só nome, sem senha nem
+  autenticação — o cliente escolhe o perfil e manda o `userId` nas chamadas.
 - **Cliente/aplicação consumidora da API** — qualquer frontend que fala com a API REST do akari
   (portal web, app) para navegar o catálogo, buscar metadata e reproduzir vídeo. O contrato não
   modela esse ator como uma entidade de domínio, apenas como consumidor HTTP.
@@ -128,6 +136,8 @@ anibridge, franquias/relações entre animes).
 - Preferências administrativas chave/valor, com suporte a valores secretos.
 - Notificações de observabilidade com push em tempo real.
 - Listas por critério para o front, com itens (raízes de franquia) recalculados a cada consulta.
+- Perfis de usuário sem senha, com histórico de visualização (onde parou, assistido) alimentado
+  pelo heartbeat do playback e lista de títulos por perfil.
 
 ## Visão de produto
 
@@ -135,10 +145,9 @@ akari se posiciona como o **backend de um servidor de mídia pessoal especializa
 diferenciação em relação a um servidor de mídia genérico está na camada de metadata (binding
 AniList + TMDB, relações de franquia, mapeamento de numeração de episódio) e no fato de ser
 *contract-first* e de módulo único — prioriza simplicidade operacional (um único processo Quarkus,
-Postgres, sem orquestração multi-serviço) sobre flexibilidade multi-tenant ou multi-usuário. O
-produto é pensado para uso doméstico/pessoal, com um único admin — essa orientação é deliberada e
-permanece mesmo quando a lacuna de autenticação (ver "Atores") for coberta: o auth futuro é
-*single-tenant* (protege o admin único), não um passo em direção a multi-usuário.
+Postgres, sem orquestração multi-serviço) sobre flexibilidade multi-tenant. O produto é pensado
+para uso doméstico/pessoal, com um único admin e perfis de usuário para quem assiste (histórico e
+lista por pessoa, sem autenticação) — o auth futuro é *single-tenant* (protege o admin único).
 
 ## Contexto operacional do sistema
 

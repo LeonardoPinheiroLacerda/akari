@@ -1,5 +1,6 @@
 package io.github.leonardopinheirolacerda.akari.domain.playback.model;
 
+import io.github.leonardopinheirolacerda.akari.domain.user.model.User;
 import io.github.leonardopinheirolacerda.akari.domain.videofile.model.VideoFile;
 import io.quarkus.hibernate.orm.panache.PanacheEntityBase;
 import jakarta.persistence.Column;
@@ -74,6 +75,17 @@ public class PlaybackSession extends PanacheEntityBase {
     /** Último heartbeat recebido; {@code null} até o primeiro. */
     @Column(name = "last_heartbeat_at")
     public OffsetDateTime lastHeartbeatAt;
+
+    /**
+     * Usuário que está assistindo; {@code null} = sessão sem usuário, que não grava histórico.
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id")
+    public User user;
+
+    /** Duração da mídia segundo o probe; {@code null} se o probe não informou. */
+    @Column(name = "duration_seconds")
+    public Double durationSeconds;
 
     /**
      * Confirma se a sessão expirou por falta de heartbeat.
