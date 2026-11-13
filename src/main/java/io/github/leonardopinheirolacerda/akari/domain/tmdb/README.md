@@ -30,7 +30,9 @@ internamente por outros domínios (chamada direta ao service, sem passar por `Tm
 - `getMovieDetails` / `getTvDetails` — `GET /3/movie/{id}` e `GET /3/tv/{id}`.
 - `getMovieImages` / `getTvImages` — `GET /3/movie|tv/{id}/images`.
 - `getMovieTranslations` / `getTvTranslations` — `GET /3/movie|tv/{id}/translations`.
-- `getSeason` — `GET /3/tv/{id}/season/{n}` (episódios de uma temporada).
+- `getSeason` — `GET /3/tv/{id}/season/{n}` (episódios de uma temporada), com nome e sinopse
+  de cada episódio nos idiomas de `tmdb.episode.name-language` e
+  `tmdb.episode.synopsis-language` (ver "Fluxos importantes").
 - `getSeasonEpisodes` — só os episódios de uma temporada, sobre o `getSeason`; temporada
   inexistente no TMDB ou sem episódios vira lista vazia. Usado pelas estratégias de pairing de
   episódios, que andam pela série inteira.
@@ -45,12 +47,14 @@ Internas (outros domínios usados por este):
   `TmdbService` via `CacheUtils.resolve`.
 - `domain.setting.service.SettingService` — as preferências `tmdb.api-key` (token),
   `tmdb.cache.ttl`, `tmdb.default-language` e `tmdb.include-adult`. Usado tanto em
-  `TmdbService` quanto em `TmdbAuthHeadersFactory`. As preferências de idioma dos overrides
-  (`tmdb.image.logo-language`, `tmdb.override.*`) são lidas pelo domínio `anime`, não por
-  este.
-- `utils.CacheUtils`, `utils.HttpErrorUtils`, `utils.RetryUtils`, `utils.TmdbImageUtils` —
-  helpers compartilhados (cache-aside, classificação de erro HTTP 404, retry em rate limit,
-  montagem de URL de CDN).
+  `TmdbService` quanto em `TmdbAuthHeadersFactory`. O `getSeason` também lê os idiomas dos
+  episódios (`tmdb.episode.name-language`, `tmdb.episode.synopsis-language`) e o
+  `tmdb.override.fallback-language`. As demais preferências de idioma dos overrides
+  (`tmdb.image.logo-language`, `tmdb.override.title-language`/`synopsis-language`) são lidas
+  pelo domínio `anime`, não por este.
+- `utils.CacheUtils`, `utils.HttpErrorUtils`, `utils.RetryUtils`, `utils.TmdbImageUtils`,
+  `utils.TmdbLanguageUtils` — helpers compartilhados (cache-aside, classificação de erro HTTP
+  404, retry em rate limit, montagem de URL de CDN, ordem de procura dos idiomas).
 - `exceptions.*` (`AkariException` e subclasses) — `IntegrationException`,
   `IntegrationNotConfiguredException`, `ResourceNotFoundException`.
 
@@ -85,6 +89,8 @@ Externa:
 
 `utils.TmdbImageUtils` é explicitamente documentado como compartilhado entre `tmdb` e `anime`
 para garantir os mesmos tamanhos de imagem nos dois domínios.
+`utils.TmdbLanguageUtils` também: os episódios (`getSeason`) e os overrides da série procuram os
+idiomas na mesma ordem.
 
 Nenhum outro domínio depende de `TmdbSearchResource`/`TmdbSearchApi` — o acoplamento cruzado é
 todo via `TmdbService` e os DTOs de `client/dtos`.
@@ -97,6 +103,20 @@ todo via `TmdbService` e os DTOs de `client/dtos`.
   imagens, traduções e temporadas (não tem contrato HTTP próprio).
 
 ## Fluxos importantes
+
+**Idioma dos episódios (`getSeason`)**: a temporada é buscada primeiro sem `language` (padrão do
+TMDB, inglês), com a chave de cache `tv:season:{id}:{n}` — ela dá a estrutura e o texto de quem
+não tem tradução. Com `tmdb.episode.name-language` e/ou `tmdb.episode.synopsis-language`
+preenchidos, cada episódio procura o texto na ordem: idioma configurado (`pt-BR`), só o idioma
+(`pt`, que o TMDB responde como `pt-PT`), `tmdb.override.fallback-language` e só o idioma dele —
+mesma ordem dos overrides da série. A temporada em cada idioma é buscada só quando ainda falta
+algum episódio, com cache próprio (`tv:season:{id}:{n}:{idioma}`). Episódio com sinopse vazia
+num idioma conta como sem tradução nele — nesse caso o TMDB devolve nome genérico ("Episódio 5")
+e sinopse vazia, e os dois saem do próximo idioma. Preferência vazia mantém o texto do padrão do
+TMDB. Como as resoluções de pairing (anibridge e continuidade) e o schema do modal de pairing
+passam todos pelo `getSeason`, o nome e a sinopse gravados no pairing seguem essas preferências —
+inclusive nos pairings já gravados, que o step `TMDB_FILEPAIR` regrava em toda ingestão quando o
+texto mudou (ver `domain/ingestion/README.md`).
 
 **Busca paginada (cache-first):** `TmdbSearchResource` → `TmdbService.searchMovies`/
 `searchTv` → resolve `includeAdult` e `language` via `SettingService` → monta `cacheKey` com

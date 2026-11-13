@@ -26,7 +26,7 @@ Cada faceta bem distinta tem seu próprio par resource/service, todos compartilh
 
 `EpisodePairingResolutionService`, as etapas dele em `anime/pairing` e o `AbsoluteEpisodeOffsetService` também não têm resource próprio: são a resolução do pairing TMDB dos arquivos de uma pasta pela estratégia do anibridge, usada pela proposta de pairing do portal (`AnimeTmdbProposalService`, que só devolve) e pelo pairing automático do step `TMDB_FILEPAIR` da ingestão (`AnimeTmdbFilePairingFillService`, que grava) — moram aqui, junto do pairing, e não em `ingestion` (que já depende de `anime`; o contrário faria um ciclo de services). `EpisodeContinuityResolutionService` (estratégia de continuidade) e `EpisodePairingComparisonService` (comparação da resolução com os pares gravados), também usados só pela proposta, também não têm resource.
 
-`AnimeTmdbFilePairingFillService` também não tem resource: grava o pairing dos arquivos resolvidos pelo `EpisodePairingResolutionService` pro step `TMDB_FILEPAIR` da ingestão, só onde não há decisão a tomar (arquivo sem pairing, episódio sem conflito).
+`AnimeTmdbFilePairingFillService` também não tem resource: grava o pairing dos arquivos resolvidos pelo `EpisodePairingResolutionService` pro step `TMDB_FILEPAIR` da ingestão, só onde não há decisão a tomar (arquivo sem pairing, episódio sem conflito). No arquivo que já tem pairing, mantém a temporada/episódio e só regrava o nome e a sinopse do episódio quando o texto atual do TMDB (`TmdbService.getSeasonEpisodes`, nos idiomas de `tmdb.episode.*`) difere do salvo.
 
 `AnimeTmdbOverridesFillService` também não tem resource: preenche os overrides a partir do TMDB pro step `TMDB_OVERRIDES` da ingestão, fora do `AnimeTmdbService` pra não inchar o service do binding com as regras de escolha por idioma.
 
@@ -104,7 +104,7 @@ Episódios:
 - `AnimeService`, `AnimeRelationsService` e `AnimeFranchiseService` usam `graph/FranchiseResolver` pra preencher `franchiseRootId` de cada `AnimeResponse`; os dois últimos também usam `graph/FranchiseClassifier`.
 - `AnimeTmdbService` injeta `AnimeService` (busca o anime base, reusa `findOrThrow`).
 - `AnimeTmdbFilePairingService` injeta `AnimeTmdbService` (reusa `findTvBoundAnimeOrThrow`).
-- `AnimeTmdbFilePairingFillService` injeta `AnimeTmdbService` (reusa `findTvBoundAnimeOrThrow`) e `EpisodePairingResolutionService` (resolução pelo anibridge).
+- `AnimeTmdbFilePairingFillService` injeta `AnimeTmdbService` (reusa `findTvBoundAnimeOrThrow`), `EpisodePairingResolutionService` (resolução pelo anibridge) e `TmdbService` (texto atual dos episódios já pareados).
 - `AnimeTmdbOverridesFillService` injeta `AnimeTmdbService` (reusa `findBoundAnimeOrThrow`, `fetchTranslations` e `fetchImages`, estes dois package-private).
 - `AnimeTmdbProposalService` injeta `AnimeTmdbService` (reusa `fetchDetails` pra montar a ficha e `findTvBoundAnimeOrThrow`), `EpisodePairingResolutionService` (estratégia anibridge), `EpisodeContinuityResolutionService` (estratégia de continuidade) e `EpisodePairingComparisonService` (pares gravados e comparação) — só escolhe a estratégia e encadeia os três.
 - `AnimeTmdbFilePairingMapper.toPairingRequest` é o único ponto que traduz um episódio do TMDB pros campos do pairing — usado por `EpisodePairingResolutionService` e `EpisodeContinuityResolutionService`.
@@ -192,7 +192,7 @@ Preferência de idioma com valor fora do formato (`pt_BR`, `en US`) é recusada 
 - `graph/model/RelationClosure.java` — resultado da BFS (`animeIds` alcançados + `edges` percorridas).
 - `service/AnimeTmdbOverridesFillService.java` — escolha por idioma dos overrides preenchidos a partir do TMDB.
 - `service/EpisodePairingResolutionService.java` e `pairing/` — resolução do pairing em etapas (numeração da pasta, conversão pelo anibridge com a numeração absoluta, validação no TMDB); `pairing/FolderEpisodeNumbering.java` decide o número de cada arquivo quando o extrator falha na pasta, e um erro ali pareia a pasta inteira errado.
-- `service/AnimeTmdbFilePairingFillService.java` — o que o pairing automático grava sozinho: mantém pairing existente e não grava episódio em conflito.
+- `service/AnimeTmdbFilePairingFillService.java` — o que o pairing automático grava sozinho: mantém a temporada/episódio do pairing existente (só regrava o nome/sinopse do episódio quando mudaram) e não grava episódio em conflito.
 - `service/AnimeTmdbService.java` — binding TMDB, overrides, schema de opções.
 - `service/AnimeTmdbFilePairingService.java` — pairing por arquivo e schema de temporadas/episódios.
 - `model/AnimeRelation.java` + `model/RelationType.java` — grafo de relações; `RelationType` concentra as listas-fonte-única usadas pela franquia (`DERIVED_LINKS`, `AUTO_PARENT_LINKS`, `SERIES_FORMATS`, `MOVIE_FORMATS`).
