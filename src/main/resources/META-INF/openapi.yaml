@@ -221,6 +221,15 @@ tags:
       A lista de títulos aceita adicionar e remover animes, os dois idempotentes. Se um anime
       está na lista do perfil aparece em `inWatchlist` de
       `GET /v1/metadata/animes/{anilistId}/franchise?userId=`.
+  - name: TorrentSearch
+    description: |
+      Busca de releases de anime em provedores de torrent (`TorrentProviderType`).
+
+      Cada provedor é lido por webscrap das páginas de busca do site, sempre pelo proxy HTTP do
+      gluetun: o tráfego sai pela VPN e, sem ela, a busca falha (`502`) em vez de sair pela
+      conexão direta. As releases voltam agrupadas por edição — o grupo de fansub mais os
+      descritores técnicos do título (temporada, resolução, fonte, mídia, áudio, codec,
+      profundidade de cor) —, um item por episódio dentro de cada edição.
 
 paths:
 
@@ -1993,6 +2002,38 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  # ---------- torrent ----------
+  /v1/torrent/search:
+    get:
+      tags: [TorrentSearch]
+      operationId: searchTorrentReleases
+      summary: Busca releases num provedor de torrent, agrupadas por edição
+      description: |
+        Lê todas as páginas de resultado que o provedor oferece, ordenadas da release mais nova
+        para a mais antiga: a primeira sozinha, para saber o total, e as demais em paralelo.
+        Nada é persistido. Quando o próprio provedor corta a busca (o nyaa entrega no máximo
+        1000 resultados), as releases mais antigas ficam de fora e `truncated` vem `true` —
+        refinar a query (grupo, resolução, temporada) traz o que faltou.
+
+        Dentro de cada edição fica uma release por episódio: entre versões do mesmo episódio
+        vence a de maior versão (`v2` sobre a original) e, empatando, a de mais seeders.
+        Releases sem número de episódio (batches, extras) ficam todas, depois dos episódios.
+        Nenhuma edição é resposta válida.
+      parameters:
+        - $ref: '#/components/parameters/TorrentProviderParam'
+        - $ref: '#/components/parameters/SearchQueryParam'
+      responses:
+        '200':
+          $ref: '#/components/responses/TorrentSearchResultOk'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '502':
+          $ref: '#/components/responses/BadGateway'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
 components:
 
   parameters:
@@ -2015,7 +2056,7 @@ components:
       name: q
       in: query
       required: true
-      description: Texto de busca, repassado ao upstream (AniList ou TMDB)
+      description: Texto de busca, repassado ao upstream (AniList, TMDB ou provedor de torrent)
       schema:
         $ref: '#/components/schemas/SearchQuery'
     ForceRefreshParam:
@@ -2276,6 +2317,13 @@ components:
         franquia.
       schema:
         $ref: '#/components/schemas/UserId'
+    TorrentProviderParam:
+      name: provider
+      in: query
+      required: true
+      description: Provedor de torrent onde buscar
+      schema:
+        $ref: '#/components/schemas/TorrentProviderType'
 
   requestBodies:
     # ---------- storageprovider ----------
@@ -2474,6 +2522,14 @@ components:
     BadGateway:
       description: >-
         Falha num sistema externo — AniList, TMDB, rclone ou ffprobe (`INTEGRATION_ERROR`)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    TooManyRequests:
+      description: >-
+        Um sistema externo recusou por excesso de requisições (`RATE_LIMITED`) — tente de novo
+        mais tarde
       content:
         application/json:
           schema:
@@ -2883,6 +2939,13 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/UserResponse'
+    # ---------- torrent ----------
+    TorrentSearchResultOk:
+      description: Edições encontradas (possivelmente nenhuma)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/TorrentSearchResult'
 
   schemas:
     # ---------- comuns ----------
@@ -3004,6 +3067,8 @@ components:
           método, `Content-Type` ou `Accept` não suportados.
         - `INTEGRATION_ERROR` (502): um sistema externo (AniList, TMDB, rclone, ffprobe)
           falhou ou está indisponível.
+        - `RATE_LIMITED` (429): um sistema externo (ex.: um provedor de torrent) recusou a
+          chamada por excesso de requisições; o `message` diz quando tentar de novo.
         - `INTEGRATION_NOT_CONFIGURED` (503): uma preferência obrigatória está sem valor —
           o admin precisa configurá-la em
           `PUT /v1/settings/{key}`.
@@ -3018,6 +3083,7 @@ components:
         - CONFLICT
         - REQUEST_ERROR
         - INTEGRATION_ERROR
+        - RATE_LIMITED
         - INTEGRATION_NOT_CONFIGURED
         - TRANSCODE_FAILED
         - INTERNAL_ERROR
@@ -6220,3 +6286,97 @@ components:
           type: string
           format: date-time
           description: Quando a última posição foi recebida
+
+    # ---------- torrent ----------
+    TorrentProviderType:
+      type: string
+      description: Provedor de torrent. Cada valor é lido por uma implementação de webscrap própria.
+      enum:
+        - NYAA
+
+    TorrentSearchResult:
+      type: object
+      description: Resultado de `GET /v1/torrent/search`
+      required: [editions, truncated]
+      properties:
+        editions:
+          type: array
+          description: Edições encontradas, ordenadas pelo grupo e depois pelo rótulo
+          items:
+            $ref: '#/components/schemas/TorrentEdition'
+        truncated:
+          type: boolean
+          description: |
+            `true` quando o provedor cortou a busca no limite dele (o nyaa entrega no máximo
+            1000 resultados): as releases mais antigas ficaram de fora e vale refinar a query
+
+
+    TorrentEdition:
+      type: object
+      description: |
+        Edição de um anime: as releases de um mesmo grupo com os mesmos descritores técnicos no
+        título. Nome e número do episódio não entram no agrupamento, então todos os episódios da
+        mesma release caem na mesma edição.
+      required: [key, label, releases]
+      properties:
+        key:
+          type: string
+          description: |
+            Chave estável da edição (grupo + descritores normalizados), usada para fixar a
+            edição escolhida
+        group:
+          type: string
+          nullable: true
+          description: Grupo de fansub, tirado dos colchetes no início do título; `null` sem colchetes
+        label:
+          type: string
+          description: |
+            Descritores técnicos na ordem natural (ex.: `S01 1080p CR WEB-DL MULTi AAC2.0 H.264`),
+            ou `(sem specs)` quando o título não traz nenhum
+        releases:
+          type: array
+          description: Uma release por episódio, em ordem de episódio; as sem episódio por último
+          items:
+            $ref: '#/components/schemas/TorrentReleaseResponse'
+
+    TorrentReleaseResponse:
+      type: object
+      description: Release encontrada no provedor
+      required: [infoHash, magnetUri, title]
+      properties:
+        infoHash:
+          type: string
+          description: Info-hash BitTorrent (40 caracteres hexadecimais, minúsculos)
+        magnetUri:
+          type: string
+          description: Link magnet como o provedor publica (hash, nome e trackers do próprio site)
+        title:
+          type: string
+          description: Título da release como publicado no provedor
+        episode:
+          type: integer
+          format: int32
+          nullable: true
+          description: Número do episódio extraído do título; `null` em batches e extras
+        resolution:
+          type: string
+          nullable: true
+          description: 'Resolução extraída do título (ex.: `1080p`)'
+        size:
+          type: string
+          nullable: true
+          description: 'Tamanho como o provedor exibe (ex.: `1.4 GiB`)'
+        seeders:
+          type: integer
+          format: int32
+          nullable: true
+          description: Seeders no momento da busca
+        publishedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Quando a release foi publicada no provedor
+        pageUrl:
+          type: string
+          nullable: true
+          description: Página da release no provedor

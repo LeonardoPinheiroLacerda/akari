@@ -12,6 +12,7 @@ Padronizar como falhas da aplicação se tornam respostas HTTP no formato `ApiEr
 - `ConflictException` — `409` / `CONFLICT`: o recurso que se quer criar já existe ou o estado atual impede a operação (ex.: criar franquia manual com um anime que já é raiz).
 - `IntegrationException` — `502` / `INTEGRATION_ERROR`: sistema externo (AniList, TMDB, rclone, ffprobe) falhou; duas construtoras (com e sem `cause`).
 - `IntegrationNotConfiguredException` — `503` / `INTEGRATION_NOT_CONFIGURED`: preferência obrigatória sem valor configurado.
+- `RateLimitedException` — `429` / `RATE_LIMITED`: sistema externo recusou por excesso de requisições (ex.: provedor de torrent respondendo `429`); a mensagem diz quando tentar de novo.
 - `RequestValidationException` — `400` / `VALIDATION_ERROR`: parâmetro de request mal formado ou fora do permitido (não é violação de contrato em si).
 - `ResourceNotFoundException` — `404` / `RESOURCE_NOT_FOUND`: recurso buscado não existe.
 
