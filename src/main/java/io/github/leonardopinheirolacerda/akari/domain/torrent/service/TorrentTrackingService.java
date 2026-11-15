@@ -3,6 +3,7 @@ package io.github.leonardopinheirolacerda.akari.domain.torrent.service;
 import io.github.leonardopinheirolacerda.akari.api.dto.TorrentDownloadRequest;
 import io.github.leonardopinheirolacerda.akari.api.dto.TorrentEdition;
 import io.github.leonardopinheirolacerda.akari.api.dto.TorrentReleaseResponse;
+import io.github.leonardopinheirolacerda.akari.api.dto.TrackedAnimeQueriesRequest;
 import io.github.leonardopinheirolacerda.akari.api.dto.TrackedAnimeRequest;
 import io.github.leonardopinheirolacerda.akari.api.dto.TrackedAnimeResponse;
 import io.github.leonardopinheirolacerda.akari.domain.anilist.client.dtos.AnilistCoverImageResponse;
@@ -69,13 +70,13 @@ public class TorrentTrackingService {
      * Começa a rastrear um anime numa edição de um provedor.
      *
      * <p>Fluxo: anime já rastreado → {@code 409}; confere que o anime pode receber downloads
-     * (biblioteca configurada, pasta na biblioteca); busca a query no provedor (todas as páginas)
-     * e confere que a edição aparece nela; grava o rastreio com o título e a capa da AniList e,
+     * (biblioteca configurada, pasta na biblioteca); busca as queries no provedor (todas as
+     * páginas) e confere que a edição aparece nelas; grava o rastreio com o título e a capa da AniList e,
      * como último episódio encontrado, o maior que a edição já tem — só os que saírem depois são
      * baixados sozinhos. A busca e a AniList rodam fora de transação; só a gravação abre uma,
      * curta.
      *
-     * @param trackedAnimeRequest anime, provedor, query e edição a rastrear
+     * @param trackedAnimeRequest anime, provedor, queries e edição a rastrear
      * @return o rastreio criado
      * @throws ConflictException se o anime já é rastreado, ou se está vinculado a uma pasta de
      *         outro storage provider
@@ -96,10 +97,10 @@ public class TorrentTrackingService {
         torrentDownloadService.checkDownloadable(anilistId);
 
         final TorrentEdition edition = torrentSearchService
-                .findEdition(trackedAnimeRequest.getProvider(), trackedAnimeRequest.getQuery(), trackedAnimeRequest.getEditionKey())
+                .findEdition(trackedAnimeRequest.getProvider(), trackedAnimeRequest.getQueries(), trackedAnimeRequest.getEditionKey())
                 .orElseThrow(() -> new BusinessRuleException(
-                        "A edição informada não aparece na busca \"%s\" do provedor %s"
-                                .formatted(trackedAnimeRequest.getQuery(), trackedAnimeRequest.getProvider())));
+                        "A edição informada não aparece na busca %s do provedor %s"
+                                .formatted(trackedAnimeRequest.getQueries(), trackedAnimeRequest.getProvider())));
 
         final AnilistMediaResponse anilistMedia = anilistSearchService.findById(anilistId, false);
         final AnilistCoverImageResponse coverImage = anilistMedia.coverImage();
@@ -109,7 +110,7 @@ public class TorrentTrackingService {
         trackedAnime.title = Objects.requireNonNullElse(anilistMedia.title().romaji(), anilistMedia.title().english());
         trackedAnime.coverImage = coverImage == null ? null : coverImage.large();
         trackedAnime.provider = trackedAnimeRequest.getProvider();
-        trackedAnime.query = trackedAnimeRequest.getQuery();
+        trackedAnime.queries = trackedAnimeRequest.getQueries();
         trackedAnime.editionKey = edition.getKey();
         trackedAnime.editionGroup = edition.getGroup();
         trackedAnime.editionLabel = edition.getLabel();
@@ -120,6 +121,26 @@ public class TorrentTrackingService {
                 .run(trackedAnime::persist);
 
         Log.infof("Anime %d rastreado na edição %s (último episódio encontrado: %s)", anilistId, edition.getKey(), trackedAnime.latestEpisode);
+
+        return torrentMapper.toTrackedResponse(trackedAnime);
+    }
+
+    /**
+     * Troca as queries de busca de um rastreio; a edição e o último episódio encontrado
+     * continuam, e a próxima checagem já busca com as queries novas.
+     *
+     * @param trackedId id do rastreio
+     * @param trackedAnimeQueriesRequest as novas queries
+     * @return o rastreio atualizado
+     * @throws ResourceNotFoundException se o rastreio não existir
+     */
+    @Transactional
+    public TrackedAnimeResponse updateQueries(Integer trackedId, TrackedAnimeQueriesRequest trackedAnimeQueriesRequest) {
+        final TrackedAnime trackedAnime = findOrThrow(trackedId);
+
+        trackedAnime.queries = trackedAnimeQueriesRequest.getQueries();
+
+        Log.infof("Queries do rastreio %d trocadas para %s", trackedId, trackedAnime.queries);
 
         return torrentMapper.toTrackedResponse(trackedAnime);
     }
@@ -145,12 +166,10 @@ public class TorrentTrackingService {
      * @throws IntegrationException se o provedor (ou o proxy da VPN) não responder
      */
     public TorrentEdition listReleases(Integer trackedId) {
-        final TrackedAnime trackedAnime = TrackedAnime
-                .<TrackedAnime>findByIdOptional(trackedId)
-                .orElseThrow(() -> new ResourceNotFoundException("Não foi possível localizar um rastreio com o id informado"));
+        final TrackedAnime trackedAnime = findOrThrow(trackedId);
 
         return torrentSearchService
-                .findEdition(trackedAnime.provider, trackedAnime.query, trackedAnime.editionKey)
+                .findEdition(trackedAnime.provider, trackedAnime.queries, trackedAnime.editionKey)
                 .orElseGet(() -> new TorrentEdition()
                         .key(trackedAnime.editionKey)
                         .group(trackedAnime.editionGroup)
@@ -189,6 +208,12 @@ public class TorrentTrackingService {
         }
     }
 
+    private TrackedAnime findOrThrow(Integer trackedId) {
+        return TrackedAnime
+                .<TrackedAnime>findByIdOptional(trackedId)
+                .orElseThrow(() -> new ResourceNotFoundException("Não foi possível localizar um rastreio com o id informado"));
+    }
+
     private Integer latestEpisodeOf(TorrentEdition edition) {
         return edition
                 .getReleases()
@@ -202,7 +227,7 @@ public class TorrentTrackingService {
     private void checkTrackedAnime(TrackedAnime trackedAnime) {
         final List<ParsedRelease> latestReleases = torrentSearchService.findLatestReleases(
                 trackedAnime.provider,
-                trackedAnime.query,
+                trackedAnime.queries,
                 trackedAnime.editionKey
         );
 
@@ -240,7 +265,7 @@ public class TorrentTrackingService {
 
         Log.infof("Primeira página não alcança o episódio %d do rastreio %d; usando a busca completa", trackedAnime.latestEpisode, trackedAnime.id);
 
-        return torrentSearchService.findAllReleases(trackedAnime.provider, trackedAnime.query, trackedAnime.editionKey);
+        return torrentSearchService.findAllReleases(trackedAnime.provider, trackedAnime.queries, trackedAnime.editionKey);
     }
 
     private List<ParsedRelease> newReleasesOf(TrackedAnime trackedAnime, List<ParsedRelease> releases) {

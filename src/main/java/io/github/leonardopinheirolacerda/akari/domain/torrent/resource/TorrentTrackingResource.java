@@ -2,6 +2,7 @@ package io.github.leonardopinheirolacerda.akari.domain.torrent.resource;
 
 import io.github.leonardopinheirolacerda.akari.api.TorrentTrackingApi;
 import io.github.leonardopinheirolacerda.akari.api.dto.TorrentEdition;
+import io.github.leonardopinheirolacerda.akari.api.dto.TrackedAnimeQueriesRequest;
 import io.github.leonardopinheirolacerda.akari.api.dto.TrackedAnimeRequest;
 import io.github.leonardopinheirolacerda.akari.api.dto.TrackedAnimeResponse;
 import io.github.leonardopinheirolacerda.akari.domain.torrent.service.TorrentTrackingService;
@@ -41,7 +42,7 @@ public class TorrentTrackingResource implements TorrentTrackingApi {
     /**
      * {@code POST /v1/torrent/tracked} — começa a rastrear um anime.
      *
-     * @param trackedAnimeRequest anime, provedor, query e edição a rastrear
+     * @param trackedAnimeRequest anime, provedor, queries e edição a rastrear
      * @return o rastreio criado, com {@code 201 Created}
      * @throws BusinessRuleException (traduzida em 400) se a edição não aparecer na busca ou a
      *         biblioteca não for {@code LOCAL}
@@ -57,6 +58,20 @@ public class TorrentTrackingResource implements TorrentTrackingApi {
     @Override
     public TrackedAnimeResponse trackAnime(TrackedAnimeRequest trackedAnimeRequest) {
         return torrentTrackingService.track(trackedAnimeRequest);
+    }
+
+    /**
+     * {@code PUT /v1/torrent/tracked/{trackedId}/queries} — troca as queries de busca de um
+     * rastreio.
+     *
+     * @param trackedId id do rastreio
+     * @param trackedAnimeQueriesRequest as novas queries
+     * @return o rastreio atualizado, com {@code 200 OK}
+     * @throws ResourceNotFoundException (traduzida em 404) se o rastreio não existir
+     */
+    @Override
+    public TrackedAnimeResponse updateTrackedAnimeQueries(Integer trackedId, TrackedAnimeQueriesRequest trackedAnimeQueriesRequest) {
+        return torrentTrackingService.updateQueries(trackedId, trackedAnimeQueriesRequest);
     }
 
     /**

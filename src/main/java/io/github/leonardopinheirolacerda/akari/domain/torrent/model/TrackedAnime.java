@@ -11,6 +11,8 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -45,8 +47,12 @@ public class TrackedAnime extends PanacheEntityBase {
     @Column(nullable = false)
     public TorrentProviderType provider;
 
+    /**
+     * Queries de busca no provedor; as releases de todas são juntadas.
+     */
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(nullable = false)
-    public String query;
+    public List<String> queries;
 
     @Column(name = "edition_key", nullable = false)
     public String editionKey;

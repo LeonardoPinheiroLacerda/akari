@@ -13,6 +13,7 @@ import io.github.leonardopinheirolacerda.akari.domain.torrent.model.EditionTrait
 import io.github.leonardopinheirolacerda.akari.domain.torrent.model.ParsedRelease;
 import io.github.leonardopinheirolacerda.akari.domain.torrent.model.TorrentRelease;
 import io.github.leonardopinheirolacerda.akari.domain.torrent.provider.TorrentProviderClientFactory;
+import io.github.leonardopinheirolacerda.akari.domain.torrent.provider.client.TorrentProviderClient;
 import io.github.leonardopinheirolacerda.akari.domain.torrent.provider.model.ScrapedRelease;
 import io.github.leonardopinheirolacerda.akari.domain.torrent.provider.model.ScrapedSearch;
 import io.github.leonardopinheirolacerda.akari.exceptions.IntegrationException;
@@ -61,35 +62,37 @@ public class TorrentSearchService {
      * Busca releases num provedor e as agrupa por edição, com uma release por episódio.
      *
      * @param provider provedor onde buscar
-     * @param query texto de busca
+     * @param queries textos de busca; cada um é buscado e as releases são juntadas, sem repetir
      * @return as edições encontradas, ordenadas pelo grupo e depois pelo rótulo (nenhuma se nada
-     *         bater), e se o provedor cortou a busca no limite de resultados dele
+     *         bater), e se o provedor cortou alguma das buscas no limite de resultados dele
      * @throws RateLimitedException se o provedor recusar por excesso de requisições
      * @throws IntegrationException se o provedor (ou o proxy da VPN) não responder
      */
-    public TorrentSearchResult search(TorrentProviderType provider, String query) {
-        final ScrapedSearch scrapedSearch = torrentProviderClientFactory
-                .getClient(provider)
-                .search(query);
+    public TorrentSearchResult search(TorrentProviderType provider, List<String> queries) {
+        final List<ScrapedSearch> searches = searchAll(provider, queries);
+
+        final boolean truncated = searches
+                .stream()
+                .anyMatch(ScrapedSearch::truncated);
 
         return new TorrentSearchResult()
-                .editions(toEditions(scrapedSearch.releases()))
-                .truncated(scrapedSearch.truncated());
+                .editions(toEditions(releasesOf(searches)))
+                .truncated(truncated);
     }
 
     /**
-     * Busca releases num provedor (todas as páginas) e devolve só uma edição, com uma release
-     * por episódio e o estado de download de cada uma.
+     * Busca releases num provedor (todas as páginas de cada query) e devolve só uma edição, com
+     * uma release por episódio e o estado de download de cada uma.
      *
      * @param provider provedor onde buscar
-     * @param query texto de busca
+     * @param queries textos de busca
      * @param editionKey chave da edição desejada
      * @return a edição, se ela aparece na busca
      * @throws RateLimitedException se o provedor recusar por excesso de requisições
      * @throws IntegrationException se o provedor (ou o proxy da VPN) não responder
      */
-    public Optional<TorrentEdition> findEdition(TorrentProviderType provider, String query, String editionKey) {
-        final List<ParsedRelease> releases = findAllReleases(provider, query, editionKey);
+    public Optional<TorrentEdition> findEdition(TorrentProviderType provider, List<String> queries, String editionKey) {
+        final List<ParsedRelease> releases = findAllReleases(provider, queries, editionKey);
 
         if (releases.isEmpty()) {
             return Optional.empty();
@@ -98,40 +101,72 @@ public class TorrentSearchService {
     }
 
     /**
-     * Busca todas as releases de uma edição (todas as páginas do provedor), uma por episódio.
+     * Busca todas as releases de uma edição (todas as páginas de cada query), uma por episódio.
      *
      * @param provider provedor onde buscar
-     * @param query texto de busca
+     * @param queries textos de busca
      * @param editionKey chave da edição desejada
      * @return as releases numeradas da edição, em ordem de episódio, seguidas das sem número
      * @throws RateLimitedException se o provedor recusar por excesso de requisições
      * @throws IntegrationException se o provedor (ou o proxy da VPN) não responder
      */
-    public List<ParsedRelease> findAllReleases(TorrentProviderType provider, String query, String editionKey) {
-        final ScrapedSearch scrapedSearch = torrentProviderClientFactory
-                .getClient(provider)
-                .search(query);
-
-        return editionReleasesOf(scrapedSearch.releases(), editionKey);
+    public List<ParsedRelease> findAllReleases(TorrentProviderType provider, List<String> queries, String editionKey) {
+        return editionReleasesOf(releasesOf(searchAll(provider, queries)), editionKey);
     }
 
     /**
-     * Busca as releases mais recentes de uma edição: só a primeira página do provedor, uma
+     * Busca as releases mais recentes de uma edição: só a primeira página de cada query, uma
      * release por episódio.
      *
      * @param provider provedor onde buscar
-     * @param query texto de busca
+     * @param queries textos de busca
      * @param editionKey chave da edição desejada
      * @return as releases numeradas da edição, em ordem de episódio, seguidas das sem número
      * @throws RateLimitedException se o provedor recusar por excesso de requisições
      * @throws IntegrationException se o provedor (ou o proxy da VPN) não responder
      */
-    public List<ParsedRelease> findLatestReleases(TorrentProviderType provider, String query, String editionKey) {
-        final List<ScrapedRelease> scrapedReleases = torrentProviderClientFactory
-                .getClient(provider)
-                .searchLatest(query);
+    public List<ParsedRelease> findLatestReleases(TorrentProviderType provider, List<String> queries, String editionKey) {
+        final TorrentProviderClient client = torrentProviderClientFactory.getClient(provider);
 
-        return editionReleasesOf(scrapedReleases, editionKey);
+        final List<ScrapedRelease> releases = queries
+                .stream()
+                .distinct()
+                .flatMap(query -> client
+                        .searchLatest(query)
+                        .stream())
+                .toList();
+
+        return editionReleasesOf(distinctReleases(releases), editionKey);
+    }
+
+    private List<ScrapedSearch> searchAll(TorrentProviderType provider, List<String> queries) {
+        final TorrentProviderClient client = torrentProviderClientFactory.getClient(provider);
+
+        return queries
+                .stream()
+                .distinct()
+                .map(client::search)
+                .toList();
+    }
+
+    private List<ScrapedRelease> releasesOf(List<ScrapedSearch> searches) {
+        final List<ScrapedRelease> releases = searches
+                .stream()
+                .flatMap(search -> search
+                        .releases()
+                        .stream())
+                .toList();
+
+        return distinctReleases(releases);
+    }
+
+    // A mesma release pode aparecer em mais de uma query: fica a primeira, pelo info-hash.
+    private List<ScrapedRelease> distinctReleases(List<ScrapedRelease> releases) {
+        final Map<String, ScrapedRelease> byInfoHash = new LinkedHashMap<>();
+
+        releases.forEach(release -> byInfoHash.putIfAbsent(release.infoHash(), release));
+
+        return List.copyOf(byInfoHash.values());
     }
 
     private List<ParsedRelease> editionReleasesOf(List<ScrapedRelease> scrapedReleases, String editionKey) {

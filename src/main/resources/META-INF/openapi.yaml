@@ -249,9 +249,10 @@ tags:
     description: |
       Rastreio de animes em lançamento nos provedores de torrent.
 
-      Cada rastreio fixa um anime da AniList, um provedor, a query de busca e a edição escolhida
-      (grupo + descritores técnicos, a `key` de `TorrentEdition`). A cada poucos minutos o akari
-      lê a primeira página da busca de cada rastreio e baixa todo episódio da edição acima do
+      Cada rastreio fixa um anime da AniList, um provedor, as queries de busca e a edição
+      escolhida (grupo + descritores técnicos, a `key` de `TorrentEdition`). As queries podem ser
+      editadas depois. A cada poucos minutos o akari lê a primeira página de cada query de cada
+      rastreio e baixa todo episódio da edição acima do
       último encontrado (`latestEpisode`), pelo mesmo fluxo de `POST /v1/torrent/downloads`. Ao
       criar o rastreio, o último episódio encontrado é o maior que a edição já tem, então só os
       episódios que saírem depois são baixados sozinhos; os anteriores são baixados à mão pela
@@ -2046,9 +2047,14 @@ paths:
         vence a de maior versão (`v2` sobre a original) e, empatando, a de mais seeders.
         Releases sem número de episódio (batches, extras) ficam todas, depois dos episódios.
         Nenhuma edição é resposta válida.
+
+        Aceita várias queries (`?q=…&q=…`): cada uma é buscada no provedor e as releases são
+        juntadas, sem repetir a mesma release, antes de agrupar as edições. Serve para os grupos
+        que escrevem o nome do anime de jeitos diferentes (ex.: com o subtítulo do arco ou só
+        com a temporada, `S04`). `truncated` vem `true` se o provedor cortou alguma delas.
       parameters:
         - $ref: '#/components/parameters/TorrentProviderParam'
-        - $ref: '#/components/parameters/SearchQueryParam'
+        - $ref: '#/components/parameters/TorrentQueriesParam'
       responses:
         '200':
           $ref: '#/components/responses/TorrentSearchResultOk'
@@ -2128,7 +2134,7 @@ paths:
       operationId: trackAnime
       summary: Começa a rastrear um anime numa edição de um provedor de torrent
       description: |
-        Busca a query no provedor (todas as páginas) e confere que a edição existe nela; o maior
+        Busca as queries no provedor (todas as páginas) e confere que a edição existe nelas; o maior
         episódio da edição vira o último encontrado. Um anime só tem um rastreio. Anime vinculado
         a uma pasta de outro storage provider que não o da biblioteca responde `409`, como no
         download.
@@ -2168,6 +2174,28 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /v1/torrent/tracked/{trackedId}/queries:
+    parameters:
+      - $ref: '#/components/parameters/TrackedIdPathParam'
+    put:
+      tags: [TorrentTracking]
+      operationId: updateTrackedAnimeQueries
+      summary: Troca as queries de busca de um rastreio
+      description: |
+        Substitui a lista de queries; a edição e o último episódio encontrado continuam. A
+        próxima checagem já busca com as queries novas.
+      requestBody:
+        $ref: '#/components/requestBodies/TrackedAnimeQueriesRequestBody'
+      responses:
+        '200':
+          $ref: '#/components/responses/TrackedAnimeOk'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /v1/torrent/tracked/{trackedId}/releases:
     parameters:
       - $ref: '#/components/parameters/TrackedIdPathParam'
@@ -2176,7 +2204,7 @@ paths:
       operationId: listTrackedAnimeReleases
       summary: Releases da edição rastreada, um por episódio
       description: |
-        Refaz a busca do rastreio no provedor (todas as páginas) e devolve só a edição
+        Refaz a busca do rastreio no provedor (todas as páginas de cada query) e devolve só a edição
         rastreada, com o `downloadStatus` de cada release. Edição que sumiu da busca volta sem
         releases.
       responses:
@@ -2213,7 +2241,7 @@ components:
       name: q
       in: query
       required: true
-      description: Texto de busca, repassado ao upstream (AniList, TMDB ou provedor de torrent)
+      description: Texto de busca, repassado ao upstream (AniList ou TMDB)
       schema:
         $ref: '#/components/schemas/SearchQuery'
     ForceRefreshParam:
@@ -2481,6 +2509,18 @@ components:
       description: Provedor de torrent onde buscar
       schema:
         $ref: '#/components/schemas/TorrentProviderType'
+    TorrentQueriesParam:
+      name: q
+      in: query
+      required: true
+      style: form
+      explode: true
+      description: Uma ou mais queries de busca no provedor (`?q=…&q=…`), repassadas como vieram
+      schema:
+        type: array
+        minItems: 1
+        items:
+          $ref: '#/components/schemas/SearchQuery'
     TrackedIdPathParam:
       name: trackedId
       in: path
@@ -2669,8 +2709,15 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/TorrentDownloadRequest'
+    TrackedAnimeQueriesRequestBody:
+      description: As novas queries de busca do rastreio
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/TrackedAnimeQueriesRequest'
     TrackedAnimeRequestBody:
-      description: Anime, provedor, query e edição a rastrear
+      description: Anime, provedor, queries e edição a rastrear
       required: true
       content:
         application/json:
@@ -3150,6 +3197,12 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/TrackedAnimeList'
+    TrackedAnimeOk:
+      description: Rastreio atualizado
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/TrackedAnimeResponse'
     TrackedAnimeCreated:
       description: Rastreio criado
       content:
@@ -6750,20 +6803,35 @@ components:
     TrackedAnimeRequest:
       type: object
       description: Payload de `POST /v1/torrent/tracked`
-      required: [anilistId, provider, query, editionKey]
+      required: [anilistId, provider, queries, editionKey]
       properties:
         anilistId:
           $ref: '#/components/schemas/AnilistId'
         provider:
           $ref: '#/components/schemas/TorrentProviderType'
-        query:
-          type: string
-          minLength: 1
-          description: 'Texto de busca no provedor (ex.: o título romaji do anime)'
+        queries:
+          $ref: '#/components/schemas/TrackedAnimeQueries'
         editionKey:
           type: string
           minLength: 1
           description: '`key` da `TorrentEdition` escolhida na busca dessa query'
+
+    TrackedAnimeQueriesRequest:
+      type: object
+      description: Payload de `PUT /v1/torrent/tracked/{trackedId}/queries`
+      required: [queries]
+      properties:
+        queries:
+          $ref: '#/components/schemas/TrackedAnimeQueries'
+
+    TrackedAnimeQueries:
+      type: array
+      minItems: 1
+      description: |
+        Queries de busca no provedor (ex.: o título romaji do anime e `Tokyo Revengers S04`); as
+        releases de todas são juntadas
+      items:
+        $ref: '#/components/schemas/SearchQuery'
 
     TrackedAnimeList:
       type: array
@@ -6774,7 +6842,7 @@ components:
     TrackedAnimeResponse:
       type: object
       description: Um anime rastreado num provedor de torrent
-      required: [id, anilistId, title, provider, query, editionKey, editionLabel, createdAt]
+      required: [id, anilistId, title, provider, queries, editionKey, editionLabel, createdAt]
       properties:
         id:
           type: integer
@@ -6791,9 +6859,11 @@ components:
           description: URL da capa do anime na AniList
         provider:
           $ref: '#/components/schemas/TorrentProviderType'
-        query:
-          type: string
-          description: Texto de busca no provedor
+        queries:
+          type: array
+          description: Queries de busca no provedor
+          items:
+            type: string
         editionKey:
           type: string
           description: '`key` da edição rastreada'

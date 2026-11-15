@@ -9,6 +9,8 @@ import io.github.leonardopinheirolacerda.akari.exceptions.RateLimitedException;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
+import java.util.List;
+
 /**
  * Implementa {@link TorrentSearchApi} — busca de releases nos provedores de torrent, em
  * {@code /v1/torrent/search}.
@@ -26,7 +28,7 @@ public class TorrentSearchResource implements TorrentSearchApi {
      * {@code GET /v1/torrent/search} — busca releases num provedor, agrupadas por edição.
      *
      * @param provider provedor onde buscar
-     * @param q texto de busca
+     * @param q textos de busca; as releases de todos são juntadas
      * @return as edições encontradas e se o provedor cortou a busca, com {@code 200 OK}; busca
      *         sem resultado devolve nenhuma edição
      * @throws RateLimitedException (traduzida em 429) se o provedor recusar por excesso de
@@ -35,7 +37,7 @@ public class TorrentSearchResource implements TorrentSearchApi {
      *         responder
      */
     @Override
-    public TorrentSearchResult searchTorrentReleases(TorrentProviderType provider, String q) {
+    public TorrentSearchResult searchTorrentReleases(TorrentProviderType provider, List<String> q) {
         return torrentSearchService.search(provider, q);
     }
 }
