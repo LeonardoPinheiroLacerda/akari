@@ -6539,11 +6539,55 @@ components:
           description: |
             Descritores técnicos na ordem natural (ex.: `S01 1080p CR WEB-DL MULTi AAC2.0 H.264`),
             ou `(sem specs)` quando o título não traz nenhum
+        resolution:
+          type: string
+          nullable: true
+          description: 'Resolução (ex.: `1080p`); `null` se o título não traz'
+        source:
+          type: string
+          nullable: true
+          description: 'Serviço de origem do vídeo (ex.: `CR`, `NF`, `AMZN`); `null` se o título não traz'
+        medium:
+          type: string
+          nullable: true
+          description: 'Mídia de origem (ex.: `WEB-DL`, `BluRay`); `null` se o título não traz'
+        audioType:
+          allOf: [{ $ref: '#/components/schemas/TorrentTrackType' }]
+          nullable: true
+          description: Áudio em mais de um idioma; `null` quando o título não indica (um idioma só)
+        audioCodec:
+          type: string
+          nullable: true
+          description: 'Codec de áudio como aparece no título (ex.: `AAC2.0`, `Opus`, `FLAC`); `null` se não traz'
+        videoCodec:
+          type: string
+          nullable: true
+          description: 'Codec de vídeo normalizado: `H.264`, `H.265` ou `AV1`; `null` se o título não traz'
+        bitDepth:
+          type: string
+          nullable: true
+          description: 'Profundidade de cor ou HDR como aparece no título (ex.: `10bit`, `HDR10`); `null` se não traz'
+        subtitleType:
+          allOf: [{ $ref: '#/components/schemas/TorrentTrackType' }]
+          nullable: true
+          description: |
+            Legendas em mais de um idioma, quando alguma release da edição indica no título
+            (`Multi-Subs`, `Dual-Subs`); `null` se nenhuma indica. Não faz parte da chave da edição.
         releases:
           type: array
           description: Uma release por episódio, em ordem de episódio; as sem episódio por último
           items:
             $ref: '#/components/schemas/TorrentReleaseResponse'
+
+    TorrentTrackType:
+      type: string
+      description: |
+        Faixas (áudio ou legenda) em mais de um idioma, como o título da release indica.
+        - `MULTI`: vários idiomas (`MULTi`, `Multi-Audio`, `Multi-Subs`).
+        - `DUAL`: dois idiomas (`DUAL`, `Dual-Audio`, `Dual-Subs`).
+      enum:
+        - MULTI
+        - DUAL
 
     TorrentReleaseResponse:
       type: object

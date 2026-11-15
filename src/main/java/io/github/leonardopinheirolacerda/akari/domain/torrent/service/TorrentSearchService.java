@@ -5,9 +5,11 @@ import io.github.leonardopinheirolacerda.akari.api.dto.TorrentEdition;
 import io.github.leonardopinheirolacerda.akari.api.dto.TorrentProviderType;
 import io.github.leonardopinheirolacerda.akari.api.dto.TorrentReleaseResponse;
 import io.github.leonardopinheirolacerda.akari.api.dto.TorrentSearchResult;
+import io.github.leonardopinheirolacerda.akari.api.dto.TorrentTrackType;
 import io.github.leonardopinheirolacerda.akari.domain.ingestion.extractor.EpisodeNumberExtractor;
 import io.github.leonardopinheirolacerda.akari.domain.torrent.extractor.ReleaseTitleExtractor;
 import io.github.leonardopinheirolacerda.akari.domain.torrent.mapper.TorrentMapper;
+import io.github.leonardopinheirolacerda.akari.domain.torrent.model.EditionTraits;
 import io.github.leonardopinheirolacerda.akari.domain.torrent.model.ParsedRelease;
 import io.github.leonardopinheirolacerda.akari.domain.torrent.model.TorrentRelease;
 import io.github.leonardopinheirolacerda.akari.domain.torrent.provider.TorrentProviderClientFactory;
@@ -201,10 +203,28 @@ public class TorrentSearchService {
                         .downloadStatus(downloadStatuses.get(release.scrapedRelease().infoHash())))
                 .toList();
 
+        // Os descritores técnicos formam a chave, então são os mesmos em toda a edição.
+        final EditionTraits traits = ReleaseTitleExtractor.extractTraits(first.scrapedRelease().title());
+
+        final TorrentTrackType subtitleType = bestReleases
+                .stream()
+                .map(release -> ReleaseTitleExtractor.extractSubtitleType(release.scrapedRelease().title()))
+                .flatMap(Optional::stream)
+                .findFirst()
+                .orElse(null);
+
         return new TorrentEdition()
                 .key(first.editionKey())
                 .group(first.group())
                 .label(first.editionLabel())
+                .resolution(traits.resolution())
+                .source(traits.source())
+                .medium(traits.medium())
+                .audioType(traits.audioType())
+                .audioCodec(traits.audioCodec())
+                .videoCodec(traits.videoCodec())
+                .bitDepth(traits.bitDepth())
+                .subtitleType(subtitleType)
                 .releases(releases);
     }
 
