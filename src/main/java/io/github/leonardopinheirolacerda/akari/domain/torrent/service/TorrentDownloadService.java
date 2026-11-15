@@ -203,6 +203,26 @@ public class TorrentDownloadService {
     }
 
     /**
+     * Confere, sem criar nada, se um anime pode receber downloads: a biblioteca está configurada
+     * e é {@code LOCAL}, e o anime, se já tem pasta, tem a pasta na biblioteca.
+     *
+     * @param anilistId id do anime na AniList
+     * @throws IntegrationNotConfiguredException se a preferência {@code torrent.library-provider-id}
+     *         estiver vazia
+     * @throws BusinessRuleException se o provider da biblioteca não for {@code LOCAL}
+     * @throws ConflictException se o anime estiver vinculado a uma pasta de outro provider
+     * @throws ResourceNotFoundException se o provider da biblioteca não existir
+     */
+    public void checkDownloadable(Integer anilistId) {
+        final StorageProvider library = findLibraryProvider();
+        final Optional<Anime> anime = animeService.find(anilistId);
+
+        if (anime.isPresent()) {
+            checkInLibrary(anime.get().folder, library);
+        }
+    }
+
+    /**
      * Pagina os downloads em andamento e concluídos, do mais recente para o mais antigo.
      *
      * @param page página desejada, 0-based
@@ -308,14 +328,7 @@ public class TorrentDownloadService {
         final Optional<Anime> anime = animeService.find(anilistId);
 
         if (anime.isPresent()) {
-            final MediaFolder folder = anime.get().folder;
-
-            if (!folder.storageProvider.id.equals(library.id)) {
-                throw new ConflictException(
-                        "Esse anime já está vinculado à pasta \"%s\" de outro storage provider (%s). Desvincule a pasta antes de baixar por torrent."
-                                .formatted(folder.path, folder.storageProvider.type));
-            }
-
+            checkInLibrary(anime.get().folder, library);
             return;
         }
 
@@ -325,6 +338,14 @@ public class TorrentDownloadService {
         animeService.bindAnime(anilistId, new AnimeBindingRequest().folderId(folder.id));
 
         Log.infof("Pasta %d (%s) criada na biblioteca e vinculada ao anime %d", folder.id, folderName, anilistId);
+    }
+
+    private void checkInLibrary(MediaFolder folder, StorageProvider library) {
+        if (!folder.storageProvider.id.equals(library.id)) {
+            throw new ConflictException(
+                    "Esse anime já está vinculado à pasta \"%s\" de outro storage provider (%s). Desvincule a pasta antes de baixar por torrent."
+                            .formatted(folder.path, folder.storageProvider.type));
+        }
     }
 
     private String folderNameOf(AnilistMediaResponse anilistMedia) {

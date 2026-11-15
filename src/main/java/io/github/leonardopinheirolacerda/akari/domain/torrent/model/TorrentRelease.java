@@ -21,7 +21,9 @@ import org.hibernate.annotations.CreationTimestamp;
 
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 /**
  * Release de torrent enviada ao qBittorrent, com o andamento do download.
@@ -77,6 +79,24 @@ public class TorrentRelease extends PanacheEntityBase {
         return TorrentRelease
                 .find("infoHash", infoHash)
                 .firstResultOptional();
+    }
+
+    /**
+     * Busca o estado de download de várias releases de uma vez.
+     *
+     * @param infoHashes info-hashes das releases, em minúsculas
+     * @return o status de cada release já enviada ao qBittorrent, pelo info-hash; as que nunca
+     *         foram baixadas ficam de fora
+     */
+    public static Map<String, TorrentDownloadStatus> findStatusesByInfoHash(List<String> infoHashes) {
+        if (infoHashes.isEmpty()) {
+            return Map.of();
+        }
+
+        return TorrentRelease
+                .<TorrentRelease>list("infoHash in ?1", infoHashes)
+                .stream()
+                .collect(Collectors.toMap(release -> release.infoHash, release -> release.status));
     }
 
     /**

@@ -83,6 +83,21 @@ public abstract class ScrapingTorrentProviderClient implements TorrentProviderCl
     }
 
     /**
+     * Busca só a primeira página de resultado do provedor.
+     *
+     * @param query texto de busca
+     * @return as releases da primeira página, na ordem do provedor
+     * @throws RateLimitedException se o provedor responder {@code 429}
+     * @throws IntegrationException se a página não puder ser lida
+     */
+    @Override
+    public synchronized List<ScrapedRelease> searchLatest(String query) {
+        Log.infof("Buscando as releases mais recentes de \"%s\" no provedor de torrent %s", query, type());
+
+        return parsePage(fetch(pageUri(query, 1)));
+    }
+
+    /**
      * Monta a URL de uma página de resultados da busca no provedor.
      *
      * @param query texto de busca, ainda sem codificação

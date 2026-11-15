@@ -1,9 +1,12 @@
 package io.github.leonardopinheirolacerda.akari.domain.torrent.provider.client;
 
 import io.github.leonardopinheirolacerda.akari.api.dto.TorrentProviderType;
+import io.github.leonardopinheirolacerda.akari.domain.torrent.provider.model.ScrapedRelease;
 import io.github.leonardopinheirolacerda.akari.domain.torrent.provider.model.ScrapedSearch;
 import io.github.leonardopinheirolacerda.akari.exceptions.IntegrationException;
 import io.github.leonardopinheirolacerda.akari.exceptions.RateLimitedException;
+
+import java.util.List;
 
 /**
  * Operações que um provedor de torrent precisa suportar, comuns a todos os provedores.
@@ -31,4 +34,15 @@ public interface TorrentProviderClient {
      *         com erro
      */
     ScrapedSearch search(String query);
+
+    /**
+     * Busca só as releases mais recentes: a primeira página de resultado do provedor.
+     *
+     * @param query texto de busca, repassado ao provedor
+     * @return as releases da primeira página, da mais nova para a mais antiga
+     * @throws RateLimitedException se o provedor recusar por excesso de requisições
+     * @throws IntegrationException se o provedor (ou o proxy da VPN) não responder ou responder
+     *         com erro
+     */
+    List<ScrapedRelease> searchLatest(String query);
 }

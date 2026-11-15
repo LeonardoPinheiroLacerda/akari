@@ -1,5 +1,6 @@
 package io.github.leonardopinheirolacerda.akari.domain.torrent.service;
 
+import io.github.leonardopinheirolacerda.akari.api.dto.TorrentDownloadStatus;
 import io.github.leonardopinheirolacerda.akari.api.dto.TorrentEdition;
 import io.github.leonardopinheirolacerda.akari.api.dto.TorrentProviderType;
 import io.github.leonardopinheirolacerda.akari.api.dto.TorrentReleaseResponse;
@@ -8,6 +9,7 @@ import io.github.leonardopinheirolacerda.akari.domain.ingestion.extractor.Episod
 import io.github.leonardopinheirolacerda.akari.domain.torrent.extractor.ReleaseTitleExtractor;
 import io.github.leonardopinheirolacerda.akari.domain.torrent.mapper.TorrentMapper;
 import io.github.leonardopinheirolacerda.akari.domain.torrent.model.ParsedRelease;
+import io.github.leonardopinheirolacerda.akari.domain.torrent.model.TorrentRelease;
 import io.github.leonardopinheirolacerda.akari.domain.torrent.provider.TorrentProviderClientFactory;
 import io.github.leonardopinheirolacerda.akari.domain.torrent.provider.model.ScrapedRelease;
 import io.github.leonardopinheirolacerda.akari.domain.torrent.provider.model.ScrapedSearch;
@@ -22,13 +24,18 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.TreeMap;
 import java.util.function.BinaryOperator;
 import java.util.stream.Collectors;
 
 /**
- * Busca releases nos provedores de torrent e as agrupa por edição.
+ * Busca releases nos provedores de torrent e as agrupa por edição, com o estado de download de
+ * cada release.
+ *
+ * <p>Também serve o rastreio ({@code TorrentTrackingService}), que acha a edição rastreada na
+ * busca e pega os episódios mais recentes dela.
  */
 @ApplicationScoped
 public class TorrentSearchService {
@@ -63,22 +70,105 @@ public class TorrentSearchService {
                 .getClient(provider)
                 .search(query);
 
-        final Map<String, List<ParsedRelease>> releasesByEdition = scrapedSearch
-                .releases()
+        return new TorrentSearchResult()
+                .editions(toEditions(scrapedSearch.releases()))
+                .truncated(scrapedSearch.truncated());
+    }
+
+    /**
+     * Busca releases num provedor (todas as páginas) e devolve só uma edição, com uma release
+     * por episódio e o estado de download de cada uma.
+     *
+     * @param provider provedor onde buscar
+     * @param query texto de busca
+     * @param editionKey chave da edição desejada
+     * @return a edição, se ela aparece na busca
+     * @throws RateLimitedException se o provedor recusar por excesso de requisições
+     * @throws IntegrationException se o provedor (ou o proxy da VPN) não responder
+     */
+    public Optional<TorrentEdition> findEdition(TorrentProviderType provider, String query, String editionKey) {
+        final List<ParsedRelease> releases = findAllReleases(provider, query, editionKey);
+
+        if (releases.isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of(toEdition(releases, downloadStatusesOf(releases)));
+    }
+
+    /**
+     * Busca todas as releases de uma edição (todas as páginas do provedor), uma por episódio.
+     *
+     * @param provider provedor onde buscar
+     * @param query texto de busca
+     * @param editionKey chave da edição desejada
+     * @return as releases numeradas da edição, em ordem de episódio, seguidas das sem número
+     * @throws RateLimitedException se o provedor recusar por excesso de requisições
+     * @throws IntegrationException se o provedor (ou o proxy da VPN) não responder
+     */
+    public List<ParsedRelease> findAllReleases(TorrentProviderType provider, String query, String editionKey) {
+        final ScrapedSearch scrapedSearch = torrentProviderClientFactory
+                .getClient(provider)
+                .search(query);
+
+        return editionReleasesOf(scrapedSearch.releases(), editionKey);
+    }
+
+    /**
+     * Busca as releases mais recentes de uma edição: só a primeira página do provedor, uma
+     * release por episódio.
+     *
+     * @param provider provedor onde buscar
+     * @param query texto de busca
+     * @param editionKey chave da edição desejada
+     * @return as releases numeradas da edição, em ordem de episódio, seguidas das sem número
+     * @throws RateLimitedException se o provedor recusar por excesso de requisições
+     * @throws IntegrationException se o provedor (ou o proxy da VPN) não responder
+     */
+    public List<ParsedRelease> findLatestReleases(TorrentProviderType provider, String query, String editionKey) {
+        final List<ScrapedRelease> scrapedReleases = torrentProviderClientFactory
+                .getClient(provider)
+                .searchLatest(query);
+
+        return editionReleasesOf(scrapedReleases, editionKey);
+    }
+
+    private List<ParsedRelease> editionReleasesOf(List<ScrapedRelease> scrapedReleases, String editionKey) {
+        final List<ParsedRelease> editionReleases = scrapedReleases
                 .stream()
                 .map(this::parse)
-                .collect(Collectors.groupingBy(ParsedRelease::editionKey, LinkedHashMap::new, Collectors.toList()));
-
-        final List<TorrentEdition> editions = releasesByEdition
-                .values()
-                .stream()
-                .map(this::toEdition)
-                .sorted(EDITION_ORDER)
+                .filter(release -> release.editionKey().equals(editionKey))
                 .toList();
 
-        return new TorrentSearchResult()
-                .editions(editions)
-                .truncated(scrapedSearch.truncated());
+        return bestPerEpisode(editionReleases);
+    }
+
+    private List<TorrentEdition> toEditions(List<ScrapedRelease> scrapedReleases) {
+        final List<ParsedRelease> releases = scrapedReleases
+                .stream()
+                .map(this::parse)
+                .toList();
+
+        final Map<String, TorrentDownloadStatus> downloadStatuses = downloadStatusesOf(releases);
+
+        final Map<String, List<ParsedRelease>> releasesByEdition = releases
+                .stream()
+                .collect(Collectors.groupingBy(ParsedRelease::editionKey, LinkedHashMap::new, Collectors.toList()));
+
+        return releasesByEdition
+                .values()
+                .stream()
+                .map(editionReleases -> toEdition(bestPerEpisode(editionReleases), downloadStatuses))
+                .sorted(EDITION_ORDER)
+                .toList();
+    }
+
+    private Map<String, TorrentDownloadStatus> downloadStatusesOf(List<ParsedRelease> releases) {
+        final List<String> infoHashes = releases
+                .stream()
+                .map(release -> release.scrapedRelease().infoHash())
+                .toList();
+
+        return TorrentRelease.findStatusesByInfoHash(infoHashes);
     }
 
     private ParsedRelease parse(ScrapedRelease scrapedRelease) {
@@ -101,12 +191,14 @@ public class TorrentSearchService {
         );
     }
 
-    private TorrentEdition toEdition(List<ParsedRelease> editionReleases) {
-        final ParsedRelease first = editionReleases.getFirst();
+    private TorrentEdition toEdition(List<ParsedRelease> bestReleases, Map<String, TorrentDownloadStatus> downloadStatuses) {
+        final ParsedRelease first = bestReleases.getFirst();
 
-        final List<TorrentReleaseResponse> releases = bestPerEpisode(editionReleases)
+        final List<TorrentReleaseResponse> releases = bestReleases
                 .stream()
-                .map(torrentMapper::toResponse)
+                .map(release -> torrentMapper
+                        .toResponse(release)
+                        .downloadStatus(downloadStatuses.get(release.scrapedRelease().infoHash())))
                 .toList();
 
         return new TorrentEdition()
