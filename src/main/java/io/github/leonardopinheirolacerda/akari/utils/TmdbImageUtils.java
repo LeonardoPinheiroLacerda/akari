@@ -46,6 +46,15 @@ public final class TmdbImageUtils {
         return build("w300", filePath);
     }
 
+    /**
+     * Still de episódio em {@code original} — cards grandes (ex.: as Novidades na TV), maiores que
+     * os {@code w300} da thumbnail; o TMDB só tem {@code w92}, {@code w185}, {@code w300} e
+     * {@code original} para stills.
+     */
+    public static String stillLarge(String filePath) {
+        return build("original", filePath);
+    }
+
     private static String build(String size, String filePath) {
         if (filePath == null || filePath.isBlank()) {
             return null;

@@ -30,11 +30,14 @@ public class TorrentDownloadResource implements TorrentDownloadApi {
      *
      * @param page página desejada, 0-based
      * @param size tamanho da página
+     * @param userId usuário cujo progresso marca os episódios; {@code null} não marca
      * @return a página de downloads, com {@code 200 OK}; vazia se nada foi baixado
+     * @throws ResourceNotFoundException (traduzida em 404) se o {@code userId} informado não
+     *         existir
      */
     @Override
-    public TorrentDownloadPage listTorrentDownloads(Integer page, Integer size) {
-        return torrentDownloadService.listDownloads(page, size);
+    public TorrentDownloadPage listTorrentDownloads(Integer page, Integer size, Integer userId) {
+        return torrentDownloadService.listDownloads(page, size, userId);
     }
 
     /**

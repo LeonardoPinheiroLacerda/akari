@@ -27,13 +27,15 @@ public interface TorrentMapper {
     TorrentReleaseResponse toResponse(ParsedRelease parsedRelease);
 
     /**
-     * Converte uma release baixada no DTO de download, sem o anime — o card do anime é montado
-     * pelo domínio {@code anime}, com os overrides de título e capa.
+     * Converte uma release baixada no DTO de download, sem o anime nem a imagem e o título do
+     * episódio — montados pelo service com os domínios {@code anime} e {@code videofile}.
      *
      * @param torrentRelease release enviada ao qBittorrent
-     * @return o DTO do download, com {@code anime} vazio
+     * @return o DTO do download, com {@code anime}, {@code thumbnail} e {@code episodeTitle} vazios
      */
     @Mapping(target = "anime", ignore = true)
+    @Mapping(target = "thumbnail", ignore = true)
+    @Mapping(target = "episodeTitle", ignore = true)
     TorrentDownloadResponse toDownloadResponse(TorrentRelease torrentRelease);
 
     /**

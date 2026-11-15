@@ -2067,16 +2067,20 @@ paths:
       operationId: listTorrentDownloads
       summary: Lista paginada dos downloads, do mais recente para o mais antigo
       description: |
-        Traz os downloads em andamento (com o progresso) e os já concluídos. Página vazia é
-        resposta válida.
+        Traz os downloads em andamento (com o progresso) e os já concluídos. Com `userId`, cada
+        download já na pasta do anime vem com o progresso desse usuário no episódio
+        (`watchProgress`). Página vazia é resposta válida.
       parameters:
         - $ref: '#/components/parameters/PageParam'
         - $ref: '#/components/parameters/SizeParam'
+        - $ref: '#/components/parameters/UserIdQueryParam'
       responses:
         '200':
           $ref: '#/components/responses/TorrentDownloadPageOk'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalServerError'
     post:
@@ -2466,8 +2470,8 @@ components:
       required: false
       description: |
         Id do usuário. Quando informado, a resposta traz o estado desse usuário: o
-        `watchProgress` de cada episódio na listagem de episódios, ou o `inWatchlist` na
-        franquia.
+        `watchProgress` de cada episódio na listagem de episódios e na de downloads de torrent,
+        ou o `inWatchlist` na franquia.
       schema:
         $ref: '#/components/schemas/UserId'
     TorrentProviderParam:
@@ -6672,7 +6676,10 @@ components:
 
     TorrentDownloadResponse:
       type: object
-      description: Uma release baixada (ou baixando) pelo qBittorrent
+      description: |
+        Uma release baixada (ou baixando) pelo qBittorrent. O arquivo do episódio na pasta do anime
+        é o de nome igual ao título da release ou, se nenhum tiver, o primeiro com o mesmo número
+        de episódio.
       required: [id, provider, infoHash, title, status, progress, anime, createdAt]
       properties:
         id:
@@ -6700,6 +6707,24 @@ components:
           description: Fração já baixada, de `0` a `1`
         anime:
           $ref: '#/components/schemas/AnimeBindingSummary'
+        thumbnail:
+          type: string
+          nullable: true
+          description: |
+            Imagem 16:9 para o card do download: a imagem do episódio no TMDB, em tamanho original
+            (para cards grandes, como as Novidades na TV), quando o arquivo
+            do episódio já está na pasta do anime e pareado; senão, o banner do anime. `null` sem
+            nenhuma das duas.
+        episodeTitle:
+          type: string
+          nullable: true
+          description: Título do episódio no TMDB, quando o arquivo dele já está na pasta do anime e pareado
+        watchProgress:
+          allOf: [{ $ref: '#/components/schemas/WatchProgress' }]
+          nullable: true
+          description: >-
+            Progresso do usuário no episódio. Preenchido só na listagem com `userId`; `null` sem
+            `userId`, com o episódio ainda fora da pasta do anime ou que o usuário nunca abriu.
         createdAt:
           type: string
           format: date-time

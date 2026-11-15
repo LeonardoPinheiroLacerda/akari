@@ -9,11 +9,14 @@ import io.github.leonardopinheirolacerda.akari.api.dto.TorrentDownloadPage;
 import io.github.leonardopinheirolacerda.akari.api.dto.TorrentDownloadRequest;
 import io.github.leonardopinheirolacerda.akari.api.dto.TorrentDownloadResponse;
 import io.github.leonardopinheirolacerda.akari.api.dto.TorrentDownloadStatus;
+import io.github.leonardopinheirolacerda.akari.api.dto.TmdbFilePairingResponse;
+import io.github.leonardopinheirolacerda.akari.api.dto.WatchProgress;
 import io.github.leonardopinheirolacerda.akari.domain.anilist.client.dtos.AnilistMediaResponse;
 import io.github.leonardopinheirolacerda.akari.domain.anilist.service.AnilistSearchService;
 import io.github.leonardopinheirolacerda.akari.domain.anime.model.Anime;
 import io.github.leonardopinheirolacerda.akari.domain.anime.service.AnimeOverrideService;
 import io.github.leonardopinheirolacerda.akari.domain.anime.service.AnimeService;
+import io.github.leonardopinheirolacerda.akari.domain.anime.service.AnimeTmdbFilePairingService;
 import io.github.leonardopinheirolacerda.akari.domain.ingestion.extractor.EpisodeNumberExtractor;
 import io.github.leonardopinheirolacerda.akari.domain.ingestion.service.IngestionService;
 import io.github.leonardopinheirolacerda.akari.domain.mediafolder.model.MediaFolder;
@@ -28,12 +31,16 @@ import io.github.leonardopinheirolacerda.akari.domain.torrent.client.dtos.Qbitto
 import io.github.leonardopinheirolacerda.akari.domain.torrent.client.dtos.QbittorrentTorrentResponse;
 import io.github.leonardopinheirolacerda.akari.domain.torrent.mapper.TorrentMapper;
 import io.github.leonardopinheirolacerda.akari.domain.torrent.model.TorrentRelease;
+import io.github.leonardopinheirolacerda.akari.domain.user.service.UserService;
+import io.github.leonardopinheirolacerda.akari.domain.videofile.model.VideoFile;
+import io.github.leonardopinheirolacerda.akari.domain.videofile.service.VideoFileService;
 import io.github.leonardopinheirolacerda.akari.exceptions.BusinessRuleException;
 import io.github.leonardopinheirolacerda.akari.exceptions.ConflictException;
 import io.github.leonardopinheirolacerda.akari.exceptions.IntegrationException;
 import io.github.leonardopinheirolacerda.akari.exceptions.IntegrationNotConfiguredException;
 import io.github.leonardopinheirolacerda.akari.exceptions.ResourceNotFoundException;
 import io.github.leonardopinheirolacerda.akari.model.PageResult;
+import io.github.leonardopinheirolacerda.akari.utils.TmdbImageUtils;
 import io.quarkus.logging.Log;
 import io.quarkus.narayana.jta.QuarkusTransaction;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -51,6 +58,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.OffsetDateTime;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -123,6 +132,15 @@ public class TorrentDownloadService {
 
     @Inject
     AnimeOverrideService animeOverrideService;
+
+    @Inject
+    AnimeTmdbFilePairingService animeTmdbFilePairingService;
+
+    @Inject
+    VideoFileService videoFileService;
+
+    @Inject
+    UserService userService;
 
     @Inject
     AnilistSearchService anilistSearchService;
@@ -228,19 +246,35 @@ public class TorrentDownloadService {
     }
 
     /**
-     * Pagina os downloads em andamento e concluídos, do mais recente para o mais antigo.
+     * Pagina os downloads em andamento e concluídos, do mais recente para o mais antigo, cada um
+     * com a miniatura e o título do episódio e, com {@code userId}, o progresso desse usuário nele
+     * (ver {@link #episodeFileIdsOf}).
      *
      * @param page página desejada, 0-based
      * @param size tamanho da página
+     * @param userId usuário cujo progresso marca os episódios; {@code null} não marca
      * @return a página de downloads; vazia se nada foi baixado
+     * @throws ResourceNotFoundException se o {@code userId} informado não existir
      */
-    public TorrentDownloadPage listDownloads(Integer page, Integer size) {
+    public TorrentDownloadPage listDownloads(Integer page, Integer size, Integer userId) {
         final PageResult<TorrentRelease> pageResult = TorrentRelease.findDownloadsPage(page, size);
+
+        final Map<Integer, Integer> fileIdByRelease = episodeFileIdsOf(pageResult.data());
+        final List<Integer> fileIds = List.copyOf(new HashSet<>(fileIdByRelease.values()));
+
+        final Map<Integer, TmdbFilePairingResponse> pairingByFile = pairingsByFile(fileIds);
+        final Map<Integer, WatchProgress> progressByFile = userId == null
+                ? new HashMap<>()
+                : userService.findWatchProgressByFiles(userId, fileIds);
 
         final List<TorrentDownloadResponse> downloads = pageResult
                 .data()
                 .stream()
-                .map(this::toDownloadResponse)
+                .map(release -> {
+                    final Integer fileId = fileIdByRelease.get(release.id);
+
+                    return toDownloadResponse(release, pairingByFile.get(fileId), progressByFile.get(fileId));
+                })
                 .toList();
 
         return new TorrentDownloadPage()
@@ -294,9 +328,92 @@ public class TorrentDownloadService {
     }
 
     private TorrentDownloadResponse toDownloadResponse(TorrentRelease release) {
+        final Integer fileId = episodeFileIdsOf(List.of(release)).get(release.id);
+
+        if (fileId == null) {
+            return toDownloadResponse(release, null, null);
+        }
+        return toDownloadResponse(release, pairingsByFile(List.of(fileId)).get(fileId), null);
+    }
+
+    // Sem o episódio pareado (baixando, pacote, arquivo sem pareamento), o card usa o banner do anime.
+    private TorrentDownloadResponse toDownloadResponse(TorrentRelease release,
+                                                       TmdbFilePairingResponse pairing,
+                                                       WatchProgress watchProgress) {
+
+        final Optional<TmdbFilePairingResponse> episodePairing = Optional.ofNullable(pairing);
+
+        // Still grande: o card das Novidades na TV tem a altura de um pôster (32rem de largura).
+        final String thumbnail = episodePairing
+                .map(TmdbFilePairingResponse::getThumbnailPath)
+                .map(TmdbImageUtils::stillLarge)
+                .orElseGet(() -> animeOverrideService.resolveBanner(release.anime));
+
+        final String episodeTitle = episodePairing
+                .map(TmdbFilePairingResponse::getEpisodeName)
+                .orElse(null);
+
         return torrentMapper
                 .toDownloadResponse(release)
-                .anime(animeOverrideService.toBindingSummary(release.anime));
+                .anime(animeOverrideService.toBindingSummary(release.anime))
+                .thumbnail(thumbnail)
+                .episodeTitle(episodeTitle)
+                .watchProgress(watchProgress);
+    }
+
+    /**
+     * Acha o arquivo do episódio de cada download na pasta do anime: o de nome igual ao título da
+     * release ou, sem nenhum, o primeiro com o mesmo número de episódio. Lista a pasta uma vez por
+     * anime; download sem número de episódio (pacote) ou ainda fora da pasta fica de fora.
+     */
+    private Map<Integer, Integer> episodeFileIdsOf(List<TorrentRelease> releases) {
+        final Map<Integer, List<VideoFile>> filesByFolder = new HashMap<>();
+        final Map<Integer, Integer> fileIdByRelease = new HashMap<>();
+
+        for (TorrentRelease release : releases) {
+            if (release.episode == null) {
+                continue;
+            }
+
+            final List<VideoFile> folderFiles = filesByFolder.computeIfAbsent(release.anime.folder.id, videoFileService::listByFolder);
+
+            episodeFileOf(release, folderFiles).ifPresent(file -> fileIdByRelease.put(release.id, file.id));
+        }
+
+        return fileIdByRelease;
+    }
+
+    // Pareamento TMDB de cada arquivo, numa consulta só.
+    private Map<Integer, TmdbFilePairingResponse> pairingsByFile(List<Integer> fileIds) {
+        if (fileIds.isEmpty()) {
+            return new HashMap<>();
+        }
+
+        return animeTmdbFilePairingService
+                .getTmdbFilePairings(fileIds)
+                .stream()
+                .collect(Collectors.toMap(TmdbFilePairingResponse::getFileId, Function.identity()));
+    }
+
+    private Optional<VideoFile> episodeFileOf(TorrentRelease release, List<VideoFile> folderFiles) {
+        final Optional<VideoFile> sameName = folderFiles
+                .stream()
+                .filter(file -> file.name.equals(release.title))
+                .findFirst();
+
+        if (sameName.isPresent()) {
+            return sameName;
+        }
+        return folderFiles
+                .stream()
+                .filter(file -> hasEpisode(file, release.episode))
+                .findFirst();
+    }
+
+    private boolean hasEpisode(VideoFile file, Integer episode) {
+        final OptionalInt fileEpisode = EpisodeNumberExtractor.extract(file.name);
+
+        return fileEpisode.isPresent() && fileEpisode.getAsInt() == episode;
     }
 
     private String infoHashOf(String magnetUri) {
