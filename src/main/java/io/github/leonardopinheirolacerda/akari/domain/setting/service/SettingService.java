@@ -254,6 +254,22 @@ public class SettingService {
     }
 
     /**
+     * Lê a preferência {@code torrent.library-provider-id}.
+     *
+     * @return o id do storage provider {@code LOCAL} onde os torrents são baixados; {@code null}
+     *         se ainda não configurado
+     * @throws ResourceNotFoundException se a preferência não existir
+     */
+    public Integer getTorrentLibraryProviderId() {
+        final String value = findOrThrow("torrent.library-provider-id").value;
+
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return Integer.valueOf(value.strip());
+    }
+
+    /**
      * Lê a preferência {@code playback.transcode.hardware-acceleration}.
      *
      * @return o método de aceleração de hardware a usar no transcode de playback

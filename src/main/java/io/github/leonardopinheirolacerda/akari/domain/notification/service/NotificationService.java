@@ -92,8 +92,7 @@ public class NotificationService {
     }
 
     /**
-     * Cria uma notificação e publica no stream SSE de {@code /v1/notifications/events}. Nenhum
-     * domínio chama este método hoje.
+     * Cria uma notificação e publica no stream SSE de {@code /v1/notifications/events}.
      *
      * @param level severidade
      * @param title título, ou {@code null}

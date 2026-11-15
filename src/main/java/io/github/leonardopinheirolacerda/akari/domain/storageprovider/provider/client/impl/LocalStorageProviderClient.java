@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -138,6 +139,38 @@ public class LocalStorageProviderClient implements StorageProviderClient {
     public Long downloadFile(String remoteFilePath, String localDestinationDir, String localFileName) {
         Log.warnf("Download de %s pedido num provider local (%s) — não suportado", remoteFilePath, root);
         throw new UnsupportedOperationException("Provider local não usa cache; download não se aplica");
+    }
+
+    /**
+     * Move os arquivos de {@code sourceDir} pra {@code root/relativeDir}, preservando as subpastas.
+     *
+     * @param sourceDir diretório local de origem; se não existir, não há o que mover
+     * @param relativeDir diretório de destino, relativo a {@code root}; criado se não existir
+     * @throws UncheckedIOException se a listagem ou a movimentação de algum arquivo falhar por I/O
+     */
+    @Override
+    public void importFiles(Path sourceDir, String relativeDir) {
+        if (!Files.exists(sourceDir)) {
+            return;
+        }
+
+        final Path targetDir = root.resolve(relativeDir);
+
+        try (Stream<Path> paths = Files.walk(sourceDir)) {
+            final List<Path> files = paths
+                    .filter(Files::isRegularFile)
+                    .toList();
+
+            for (Path file : files) {
+                final Path destination = targetDir.resolve(sourceDir.relativize(file));
+
+                Files.createDirectories(destination.getParent());
+                Files.move(file, destination, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } catch (IOException e) {
+            Log.errorf(e, "Falha ao mover os arquivos de %s para %s", sourceDir, targetDir);
+            throw new UncheckedIOException("Falha ao mover os arquivos de %s para %s".formatted(sourceDir, targetDir), e);
+        }
     }
 
     /**

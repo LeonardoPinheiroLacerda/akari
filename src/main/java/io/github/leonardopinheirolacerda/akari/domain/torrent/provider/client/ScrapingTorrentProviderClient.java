@@ -6,6 +6,7 @@ import io.github.leonardopinheirolacerda.akari.exceptions.IntegrationException;
 import io.github.leonardopinheirolacerda.akari.exceptions.RateLimitedException;
 import io.quarkus.logging.Log;
 import jakarta.ws.rs.core.HttpHeaders;
+import jakarta.ws.rs.core.Response;
 import lombok.RequiredArgsConstructor;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
@@ -46,8 +47,6 @@ import java.util.stream.IntStream;
 public abstract class ScrapingTorrentProviderClient implements TorrentProviderClient {
 
     private static final int MAX_CONCURRENT_REQUESTS = 4;
-
-    private static final int TOO_MANY_REQUESTS = 429;
 
     private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(30);
 
@@ -133,18 +132,25 @@ public abstract class ScrapingTorrentProviderClient implements TorrentProviderCl
                     .mapToObj(page -> executor.submit(() -> parsePage(fetch(pageUri(query, page)))))
                     .toList();
 
-            for (Future<List<ScrapedRelease>> page : pages) {
-                releases.addAll(page.get());
-            }
-        } catch (ExecutionException e) {
-            if (e.getCause() instanceof RuntimeException cause) {
-                throw cause;
-            }
-            throw new IntegrationException("Falha ao buscar no provedor de torrent %s".formatted(type()), e.getCause());
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
+            // Uma página falhou: as que faltam são canceladas, não adianta pedir (num 429, ainda
+            // prolongaria o bloqueio).
+            try {
+                for (Future<List<ScrapedRelease>> page : pages) {
+                    releases.addAll(page.get());
+                }
+            } catch (ExecutionException e) {
+                executor.shutdownNow();
 
-            throw new IntegrationException("Busca no provedor de torrent %s interrompida".formatted(type()), e);
+                if (e.getCause() instanceof RuntimeException cause) {
+                    throw cause;
+                }
+                throw new IntegrationException("Falha ao buscar no provedor de torrent %s".formatted(type()), e.getCause());
+            } catch (InterruptedException e) {
+                executor.shutdownNow();
+                Thread.currentThread().interrupt();
+
+                throw new IntegrationException("Busca no provedor de torrent %s interrompida".formatted(type()), e);
+            }
         }
 
         return releases;
@@ -160,7 +166,7 @@ public abstract class ScrapingTorrentProviderClient implements TorrentProviderCl
 
         final HttpResponse<String> response = send(request);
 
-        if (response.statusCode() == TOO_MANY_REQUESTS) {
+        if (response.statusCode() == Response.Status.TOO_MANY_REQUESTS.getStatusCode()) {
             throw new RateLimitedException(rateLimitMessage(response));
         }
 

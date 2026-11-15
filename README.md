@@ -24,9 +24,7 @@ Quarkus, visite <https://quarkus.io/>.
 ## Dependências externas para rodar localmente
 
 - **`docker-compose.yml`** — sobe o banco e a stack de torrent. Antes, copie `.env.example` para
-  `.env` e `gluetun/config.toml.example` para `gluetun/config.toml` e preencha os valores;
-  `LIBRARY_DIR` é obrigatório: sem ele nenhum comando do compose roda, nem para subir só o banco
-  (`docker compose up -d postgres`).
+  `.env` e `gluetun/config.toml.example` para `gluetun/config.toml` e preencha os valores.
 - **PostgreSQL** — porta `5432`, credenciais padrão `akari`/`akari`, sobrescrevíveis com
   `DB_USERNAME`/`DB_PASSWORD`. Migrations Flyway em `src/main/resources/db/` aplicam no boot da
   aplicação.
@@ -35,14 +33,14 @@ Quarkus, visite <https://quarkus.io/>.
   fica em `127.0.0.1:8090` e o proxy HTTP do gluetun, por onde sai o scrape dos provedores de
   torrent, em `127.0.0.1:8888`. A chave WireGuard é gerada no painel do ProtonVPN com apenas o
   NAT-PMP habilitado (Moderate NAT é incompatível com port forwarding).
-  - Na primeira subida (`docker compose up -d --build`), o qBittorrent gera uma senha temporária
-    para o usuário `admin`, visível em `docker logs akari-qbittorrent`; defina a senha definitiva
-    na WebUI.
-  - `LIBRARY_DIR` é montado no container no mesmo caminho absoluto do host, então o caminho que o
-    akari enxerga é o mesmo que o qBittorrent usa. Cadastre um storage provider `LOCAL` com
-    `rootPath` igual a `LIBRARY_DIR`.
-  - Arquivos ainda incompletos ganham a extensão `.!qB`, que a ingestão ignora por não ser de
-    vídeo.
+  - O login da WebUI é `admin`/`admin`, definido na config inicial da imagem
+    (`qbittorrent/qBittorrent.conf`); o akari usa o mesmo login (`QBITTORRENT_USERNAME`/
+    `QBITTORRENT_PASSWORD`).
+  - `TORRENT_DOWNLOAD_DIR` é a pasta de trabalho dos downloads, montada no container no mesmo
+    caminho absoluto do host; o akari lê a mesma variável (`akari.torrent.download-dir`) e não sobe
+    sem ela. Quando um download termina, o akari move os arquivos para a pasta do anime no storage
+    provider `LOCAL` da preferência `torrent.library-provider-id` e remove o torrent do
+    qBittorrent. Trocar essa preferência não exige mexer no compose.
 - **rclone rcd** — necessário só para usar um storage provider `MEGA` (obscurecimento de
   credenciais e acesso remoto). Suba com `./rclone-rcd.sh`: ele roda **fora** de container, de
   propósito, para enxergar o mesmo filesystem do host que a aplicação (relevante para `cache.dir`).

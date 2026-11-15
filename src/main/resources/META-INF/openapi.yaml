@@ -230,6 +230,21 @@ tags:
       conexão direta. As releases voltam agrupadas por edição — o grupo de fansub mais os
       descritores técnicos do título (temporada, resolução, fonte, mídia, áudio, codec,
       profundidade de cor) —, um item por episódio dentro de cada edição.
+  - name: TorrentDownload
+    description: |
+      Downloads de releases de torrent pelo qBittorrent, com ingestão automática no catálogo.
+
+      O qBittorrent baixa numa pasta de trabalho fixa (`TORRENT_DOWNLOAD_DIR`). Quando o torrent
+      termina, os arquivos são movidos para a biblioteca — o storage provider `LOCAL` da
+      preferência `torrent.library-provider-id`, numa pasta por anime —, o torrent é removido do
+      qBittorrent e a pasta do anime é ingerida. Um anime ainda sem pasta ganha uma
+      (`<título romaji>`), já vinculada a ele; um anime vinculado a uma pasta de outro provider
+      não pode receber download (`409`).
+
+      O andamento é acompanhado a cada poucos segundos. Os arquivos só saem da pasta de trabalho
+      com o torrent inteiro pronto, então um batch fica assistível de uma vez, ao terminar. Um
+      torrent removido do qBittorrent antes de terminar volta para `NEW` e pode ser baixado de
+      novo.
 
 paths:
 
@@ -2034,6 +2049,54 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /v1/torrent/downloads:
+    get:
+      tags: [TorrentDownload]
+      operationId: listTorrentDownloads
+      summary: Lista paginada dos downloads, do mais recente para o mais antigo
+      description: |
+        Traz os downloads em andamento (com o progresso) e os já concluídos. Página vazia é
+        resposta válida.
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/SizeParam'
+      responses:
+        '200':
+          $ref: '#/components/responses/TorrentDownloadPageOk'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      tags: [TorrentDownload]
+      operationId: startTorrentDownload
+      summary: Baixa uma release de torrent para a pasta do anime na biblioteca
+      description: |
+        Envia o magnet ao qBittorrent, que baixa na pasta de trabalho. O destino, para onde os
+        arquivos são movidos quando o download termina, é a pasta do anime na biblioteca: a já
+        vinculada a ele ou, se ele ainda não tem nenhuma, uma pasta nova `<título romaji>` no
+        provider da biblioteca, vinculada a ele na hora.
+
+        Idempotente pelo info-hash do magnet: uma release que já está baixando ou já foi baixada
+        é devolvida como está, sem enviar de novo.
+      requestBody:
+        $ref: '#/components/requestBodies/TorrentDownloadRequestBody'
+      responses:
+        '201':
+          $ref: '#/components/responses/TorrentDownloadCreated'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '502':
+          $ref: '#/components/responses/BadGateway'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
 components:
 
   parameters:
@@ -2496,6 +2559,14 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/PlaybackHeartbeatRequest'
+    # ---------- torrent ----------
+    TorrentDownloadRequestBody:
+      description: Release a baixar e o anime a que ela pertence
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/TorrentDownloadRequest'
 
   responses:
     # ---------- comuns ----------
@@ -2946,6 +3017,18 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/TorrentSearchResult'
+    TorrentDownloadPageOk:
+      description: Página (possivelmente vazia) de downloads
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/TorrentDownloadPage'
+    TorrentDownloadCreated:
+      description: Download enviado ao qBittorrent (ou já existente, pelo mesmo info-hash)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/TorrentDownloadResponse'
 
   schemas:
     # ---------- comuns ----------
@@ -6380,3 +6463,90 @@ components:
           type: string
           nullable: true
           description: Página da release no provedor
+
+    TorrentDownloadRequest:
+      type: object
+      description: |
+        Payload de `POST /v1/torrent/downloads` — uma release vinda da busca. O info-hash, que
+        identifica a release, sai do próprio `magnetUri`.
+      required: [provider, magnetUri, title, anilistId]
+      properties:
+        provider:
+          $ref: '#/components/schemas/TorrentProviderType'
+        magnetUri:
+          type: string
+          pattern: '^magnet:\?.+$'
+          description: |
+            Link magnet da release, como devolvido pela busca; precisa trazer o info-hash
+            (`xt=urn:btih:<40 caracteres hexadecimais>`)
+        title:
+          type: string
+          minLength: 1
+          description: Título da release, como devolvido pela busca
+        anilistId:
+          $ref: '#/components/schemas/AnilistId'
+
+    TorrentDownloadStatus:
+      type: string
+      description: |
+        Estado de uma release no download.
+        - `NEW`: fora do qBittorrent (removida de lá) — pode ser baixada de novo.
+        - `DOWNLOADING`: no qBittorrent, baixando na pasta de trabalho.
+        - `READY`: download concluído, arquivos movidos para a biblioteca e pasta ingerida; o
+          torrent já foi removido do qBittorrent.
+      enum:
+        - NEW
+        - DOWNLOADING
+        - READY
+
+    TorrentDownloadResponse:
+      type: object
+      description: Uma release baixada (ou baixando) pelo qBittorrent
+      required: [id, provider, infoHash, title, status, progress, anime, createdAt]
+      properties:
+        id:
+          type: integer
+          format: int32
+          description: Id do download
+        provider:
+          $ref: '#/components/schemas/TorrentProviderType'
+        infoHash:
+          type: string
+          description: Info-hash BitTorrent da release
+        title:
+          type: string
+          description: Título da release
+        episode:
+          type: integer
+          format: int32
+          nullable: true
+          description: Número do episódio extraído do título; `null` em batches e extras
+        status:
+          $ref: '#/components/schemas/TorrentDownloadStatus'
+        progress:
+          type: number
+          format: double
+          description: Fração já baixada, de `0` a `1`
+        anime:
+          $ref: '#/components/schemas/AnimeBindingSummary'
+        createdAt:
+          type: string
+          format: date-time
+          description: Quando o download foi pedido
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Quando o download terminou; `null` enquanto não termina
+
+    TorrentDownloadPage:
+      description: Envelope paginado de downloads
+      allOf:
+        - $ref: '#/components/schemas/Page'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/TorrentDownloadResponse'

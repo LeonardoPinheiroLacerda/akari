@@ -1,7 +1,9 @@
 package io.github.leonardopinheirolacerda.akari.domain.torrent.mapper;
 
+import io.github.leonardopinheirolacerda.akari.api.dto.TorrentDownloadResponse;
 import io.github.leonardopinheirolacerda.akari.api.dto.TorrentReleaseResponse;
 import io.github.leonardopinheirolacerda.akari.domain.torrent.model.ParsedRelease;
+import io.github.leonardopinheirolacerda.akari.domain.torrent.model.TorrentRelease;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
 
@@ -12,17 +14,21 @@ import org.mapstruct.Mapping;
 public interface TorrentMapper {
 
     /**
-     * Converte uma release interpretada no DTO de resposta.
+     * Converte uma release interpretada no DTO de resposta da busca.
      *
      * @param parsedRelease release lida do provedor, com o título interpretado
      * @return o DTO da release
      */
-    @Mapping(target = "infoHash", source = "scrapedRelease.infoHash")
-    @Mapping(target = "magnetUri", source = "scrapedRelease.magnetUri")
-    @Mapping(target = "title", source = "scrapedRelease.title")
-    @Mapping(target = "size", source = "scrapedRelease.size")
-    @Mapping(target = "seeders", source = "scrapedRelease.seeders")
-    @Mapping(target = "publishedAt", source = "scrapedRelease.publishedAt")
-    @Mapping(target = "pageUrl", source = "scrapedRelease.pageUrl")
+    @Mapping(target = ".", source = "scrapedRelease")
     TorrentReleaseResponse toResponse(ParsedRelease parsedRelease);
+
+    /**
+     * Converte uma release baixada no DTO de download, sem o anime — o card do anime é montado
+     * pelo domínio {@code anime}, com os overrides de título e capa.
+     *
+     * @param torrentRelease release enviada ao qBittorrent
+     * @return o DTO do download, com {@code anime} vazio
+     */
+    @Mapping(target = "anime", ignore = true)
+    TorrentDownloadResponse toDownloadResponse(TorrentRelease torrentRelease);
 }

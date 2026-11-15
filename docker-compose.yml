@@ -50,7 +50,6 @@ services:
 
       - CONTROL_SERVER_ADDRESS=127.0.0.1:8000
 
-      # Proxy HTTP pelo qual o akari faz o scrape dos provedores de torrent pela VPN.
       - HTTPPROXY=on
 
       - TZ=${TZ}
@@ -88,9 +87,7 @@ services:
     volumes:
       - ./data/qbittorrent-config:/config
       - ./data/qbittorrent-downloads:/downloads
-      # Mesmo caminho absoluto no host e no container: o akari passa ao qBittorrent o caminho
-      # que ele mesmo enxerga, sem tradução.
-      - ${LIBRARY_DIR:?defina LIBRARY_DIR no .env}:${LIBRARY_DIR}
+      - ${TORRENT_DOWNLOAD_DIR}:${TORRENT_DOWNLOAD_DIR}
 
     ulimits:
       nofile:
