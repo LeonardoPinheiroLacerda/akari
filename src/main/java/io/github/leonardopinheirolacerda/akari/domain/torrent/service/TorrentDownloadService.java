@@ -206,6 +206,10 @@ public class TorrentDownloadService {
      * Confere, sem criar nada, se um anime pode receber downloads: a biblioteca está configurada
      * e é {@code LOCAL}, e o anime, se já tem pasta, tem a pasta na biblioteca.
      *
+     * <p>Só lê, mas roda numa transação para o anime continuar na sessão: chamado de fora de uma
+     * transação (o rastreio, que busca no provedor sem segurar conexão), o anime voltaria
+     * desanexado e a leitura do provider da pasta, que é lazy, falharia.
+     *
      * @param anilistId id do anime na AniList
      * @throws IntegrationNotConfiguredException se a preferência {@code torrent.library-provider-id}
      *         estiver vazia
@@ -213,6 +217,7 @@ public class TorrentDownloadService {
      * @throws ConflictException se o anime estiver vinculado a uma pasta de outro provider
      * @throws ResourceNotFoundException se o provider da biblioteca não existir
      */
+    @Transactional
     public void checkDownloadable(Integer anilistId) {
         final StorageProvider library = findLibraryProvider();
         final Optional<Anime> anime = animeService.find(anilistId);
