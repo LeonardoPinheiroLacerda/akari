@@ -22,6 +22,7 @@ import io.github.leonardopinheirolacerda.akari.domain.ingestion.service.Ingestio
 import io.github.leonardopinheirolacerda.akari.domain.mediafolder.model.MediaFolder;
 import io.github.leonardopinheirolacerda.akari.domain.mediafolder.service.MediaFolderService;
 import io.github.leonardopinheirolacerda.akari.domain.notification.service.NotificationService;
+import io.github.leonardopinheirolacerda.akari.domain.playback.service.PlaybackWorkspaceService;
 import io.github.leonardopinheirolacerda.akari.domain.setting.service.SettingService;
 import io.github.leonardopinheirolacerda.akari.domain.storageprovider.model.StorageProvider;
 import io.github.leonardopinheirolacerda.akari.domain.storageprovider.provider.StorageProviderClientFactory;
@@ -52,12 +53,9 @@ import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.eclipse.microprofile.rest.client.inject.RestClient;
 
-import java.io.IOException;
 import java.net.HttpURLConnection;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.OffsetDateTime;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -70,7 +68,6 @@ import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 /**
  * Baixa releases de torrent pelo qBittorrent e, quando cada download termina, move os arquivos
@@ -152,6 +149,9 @@ public class TorrentDownloadService {
     NotificationService notificationService;
 
     @Inject
+    PlaybackWorkspaceService playbackWorkspaceService;
+
+    @Inject
     TorrentMapper torrentMapper;
 
     private String qbittorrentCookie;
@@ -189,7 +189,7 @@ public class TorrentDownloadService {
             return toDownloadResponse(existing.get());
         }
 
-        prepareAnimeFolder(torrentDownloadRequest.getAnilistId(), findLibraryProvider());
+        final Anime anime = prepareAnimeFolder(torrentDownloadRequest.getAnilistId(), findLibraryProvider());
 
         final String savePath = Path
                 .of(downloadDir, infoHash)
@@ -210,7 +210,7 @@ public class TorrentDownloadService {
         release.magnetUri = torrentDownloadRequest.getMagnetUri();
         release.title = torrentDownloadRequest.getTitle();
         release.episode = episode.isPresent() ? episode.getAsInt() : null;
-        release.anime = animeService.findOrThrow(torrentDownloadRequest.getAnilistId());
+        release.anime = anime;
         release.status = TorrentDownloadStatus.DOWNLOADING;
         release.progress = 0.0;
         release.persist();
@@ -446,20 +446,22 @@ public class TorrentDownloadService {
         return library;
     }
 
-    private void prepareAnimeFolder(Integer anilistId, StorageProvider library) {
+    private Anime prepareAnimeFolder(Integer anilistId, StorageProvider library) {
         final Optional<Anime> anime = animeService.find(anilistId);
 
         if (anime.isPresent()) {
             checkInLibrary(anime.get().folder, library);
-            return;
+            return anime.get();
         }
 
         final String folderName = folderNameOf(anilistSearchService.findById(anilistId, false));
         final MediaFolder folder = mediaFolderService.findOrCreate(library.id, folderName, folderName, MediaType.ANIME);
 
-        animeService.bindAnime(anilistId, new AnimeBindingRequest().folderId(folder.id));
+        final Anime boundAnime = animeService.bindAnime(anilistId, new AnimeBindingRequest().folderId(folder.id));
 
         Log.infof("Pasta %d (%s) criada na biblioteca e vinculada ao anime %d", folder.id, folderName, anilistId);
+
+        return boundAnime;
     }
 
     private void checkInLibrary(MediaFolder folder, StorageProvider library) {
@@ -518,6 +520,10 @@ public class TorrentDownloadService {
             return;
         }
 
+        if (torrent.progress() < COMPLETE && torrent.progress().equals(release.progress)) {
+            return;
+        }
+
         if (torrent.progress() < COMPLETE) {
             QuarkusTransaction
                     .requiringNew()
@@ -538,7 +544,7 @@ public class TorrentDownloadService {
 
         callQbittorrent(cookie -> qbittorrentClient.deleteTorrents(cookie, release.infoHash, true));
 
-        deleteWorkDir(workDir);
+        playbackWorkspaceService.delete(workDir);
 
         Log.infof("Download %d (%s) movido para a pasta %d e removido do qBittorrent", release.id, release.title, folder.id);
 
@@ -549,24 +555,6 @@ public class TorrentDownloadService {
                 .run(() -> markReady(release.id));
 
         notifyCompleted(release);
-    }
-
-    private void deleteWorkDir(Path workDir) {
-        if (!Files.exists(workDir)) {
-            return;
-        }
-
-        try (Stream<Path> paths = Files.walk(workDir)) {
-            final List<Path> deepestFirst = paths
-                    .sorted(Comparator.reverseOrder())
-                    .toList();
-
-            for (Path path : deepestFirst) {
-                Files.delete(path);
-            }
-        } catch (IOException e) {
-            Log.warnf(e, "Não foi possível apagar a pasta de trabalho %s", workDir);
-        }
     }
 
     private void ingestFolder(TorrentRelease release) {
