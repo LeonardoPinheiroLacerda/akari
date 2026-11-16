@@ -15,7 +15,9 @@ akari é um backend de **catálogo e reprodução de vídeo (foco em anime)** qu
 3. enriquece esse catálogo com metadata de anime vinda de fontes externas (AniList e TMDB),
    vinculando cada pasta ingerida a uma ficha de anime;
 4. serve esse conteúdo para reprodução via transcode HLS sob demanda, com cache local de arquivos
-   remotos.
+   remotos;
+5. baixa animes de provedores de torrent pelo qBittorrent, atrás de VPN, e os ingere no catálogo,
+   inclusive os episódios novos dos animes rastreados.
 
 É um sistema de **uso pessoal/self-hosted** (um único backend, sem multi-tenant, sem autenticação
 de usuário final visível no contrato) voltado a quem mantém sua própria biblioteca de anime e quer
@@ -42,6 +44,9 @@ anibridge, franquias/relações entre animes).
 - **Custo de chamadas repetidas a APIs externas (AniList/TMDB).** Os domínios de busca mantêm cache
   local (`IntegrationCache`, PostgreSQL) para evitar round-trips redundantes ao upstream, com
   escape hatch (`forceRefresh=true`) quando o cliente precisa de dados atualizados.
+- **Acompanhar lançamentos em torrent à mão.** Os episódios novos saem em horários e grupos
+  diferentes; o domínio `torrent` rastreia uma edição (grupo e qualidade) por anime, baixa cada
+  episódio novo e já o entrega no catálogo, pronto para tocar.
 - **Vazamento de credenciais de storage providers.** Campos sensíveis de configuração (ex.: senha
   do MEGA) são obscurecidos via rclone antes de persistir, e nunca são devolvidos pela API de
   leitura.
@@ -83,9 +88,10 @@ anibridge, franquias/relações entre animes).
    delas responderem `503` (`INTEGRATION_NOT_CONFIGURED`).
 9. **Observabilidade** (`Notification`) → eventos relevantes do sistema ficam disponíveis como
    lista paginada (0-based, pensada para um botão "ver mais" no cliente) e contador de não lidas.
-   Hoje nenhum domínio emite notificação. O push em tempo real via SSE em
-   `/v1/notifications/events` emite um evento a cada notificação nova, no mesmo molde do SSE de
-   `cache` (`/v1/cache/events`): endpoint code-first, payload (`NotificationEvent`) no contrato.
+   Hoje só o `torrent` emite notificação (download concluído, falha ao ingerir). O push em tempo
+   real via SSE em `/v1/notifications/events` emite um evento a cada notificação nova, no mesmo
+   molde do SSE de `cache` (`/v1/cache/events`): endpoint code-first, payload
+   (`NotificationEvent`) no contrato.
 10. **Listas por critério** (`SmartList`) → o admin cadastra listas para o front (ex.: "comédia
     com ecchi a partir de 2015, por nota média"), cada uma um filtro fixo + ordenação, com a
     ordem das listas definida por `position`. Os itens são raízes de franquia, recalculados a
@@ -96,6 +102,13 @@ anibridge, franquias/relações entre animes).
     que vira o progresso do arquivo no histórico do perfil (onde parou e se já assistiu — a
     partir de 90% da duração). A listagem de episódios com `userId` já vem com esse progresso em
     cada episódio. Cada perfil também mantém uma lista de títulos (animes).
+12. **Anime por torrent** (`TorrentSearch`, `TorrentDownload`, `TorrentTracking`) → o admin busca
+    um anime num provedor (várias queries somadas) e vê as releases agrupadas por edição. Pode
+    rastrear uma edição: a cada 15 minutos o backend baixa os episódios novos dela. Cada download
+    vai pelo qBittorrent para uma pasta de trabalho e, ao terminar, é movido para a pasta do anime
+    na biblioteca (provider `LOCAL` da preferência `torrent.library-provider-id`), ingerido e
+    notificado. O app de TV lista os downloads na fileira Novidades. Só toca o arquivo já
+    ingerido, pelo fluxo de reprodução normal.
 
 ## Atores envolvidos
 
@@ -116,9 +129,12 @@ anibridge, franquias/relações entre animes).
   modela esse ator como uma entidade de domínio, apenas como consumidor HTTP.
 - **Sistemas externos integrados**: AniList (GraphQL, metadata de anime), TMDB (REST, metadata de
   filme/série), MEGA via rclone (storage remoto), GitHub (dataset de mapeamento de episódios do
-  `anibridge`), ffprobe/ffmpeg (binários externos para probe e transcode).
+  `anibridge`), ffprobe/ffmpeg (binários externos para probe e transcode), provedores de
+  torrent (nyaa.si, por webscrap), qBittorrent e gluetun (VPN por onde saem o scrape e os
+  downloads).
 - **Processos automáticos internos do próprio backend** (schedulers): processam a fila de cache,
-  encerram sessões de playback ociosas, sincronizam o dataset do `anibridge`, entre outros —
+  encerram sessões de playback ociosas, sincronizam o dataset do `anibridge`, acompanham os
+  downloads do qBittorrent, checam os animes rastreados em torrent, entre outros —
   atuam como "atores" não-humanos que mantêm o sistema consistente sem intervenção do admin.
 
 ## Funcionalidades centrais
@@ -138,6 +154,8 @@ anibridge, franquias/relações entre animes).
 - Listas por critério para o front, com itens (raízes de franquia) recalculados a cada consulta.
 - Perfis de usuário sem senha, com histórico de visualização (onde parou, assistido) alimentado
   pelo heartbeat do playback e lista de títulos por perfil.
+- Busca de releases em provedores de torrent, agrupadas por edição; download pelo qBittorrent com
+  ingestão automática na biblioteca; rastreio de animes em lançamento.
 
 ## Visão de produto
 
@@ -162,6 +180,9 @@ lista por pessoa, sem autenticação) — o auth futuro é *single-tenant* (prot
 - Integra três APIs externas sobre a rede: AniList (GraphQL público, sem autenticação), TMDB
   (REST, autenticado por token vindo de uma preferência administrativa) e a API do GitHub (só para
   descobrir a release mais recente do dataset de mapeamento do `anibridge`).
+- Sobe junto, pelo `docker-compose.yml`, a stack de torrent: gluetun (VPN) e qBittorrent no netns
+  dele. O scrape dos provedores sai pelo proxy HTTP do gluetun; os downloads caem em
+  `TORRENT_DOWNLOAD_DIR` (`.env`), montada no mesmo caminho do host.
 - Ambiente de desenvolvimento usa H2 em memória (modo de compatibilidade PostgreSQL) para testes;
   Postgres real via `docker-compose.yml` para desenvolvimento/produção.
 - Documentação de API é servida via Swagger UI (`quarkus-smallrye-openapi`), com `mp.openapi.

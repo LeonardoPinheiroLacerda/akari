@@ -71,6 +71,8 @@ conjunto inteiro de arquivos de uma pasta, usada pra saber quais arquivos já es
   resoluções de pairing da proposta do portal (anibridge e continuidade) listam os arquivos da
   pasta via `listByFolderOrderedByNaturalSortKey`, sem paginação e na mesma ordem natural da
   listagem de episódios.
+- `torrent` (`TorrentDownloadService`) — `listByFolder` pra achar o arquivo do episódio de cada
+  download.
 - `utils.VideoFileLocationUtils` — resolve a localização em disco (direto se `LOCAL`, via
   `VideoFileCache` se remoto) a partir do `VideoFile` e do seu `StorageProvider`.
 

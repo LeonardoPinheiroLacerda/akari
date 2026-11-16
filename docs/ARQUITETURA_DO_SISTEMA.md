@@ -31,9 +31,9 @@ Fluxo padrão de uma requisição:
         → model (Panache active record) e/ou client (REST externo) e/ou service de outro domínio
 ```
 
-O sistema tem 15 domínios de negócio hoje: `storageprovider`, `ingestion`, `mediafolder`,
+O sistema tem 16 domínios de negócio hoje: `storageprovider`, `ingestion`, `mediafolder`,
 `videofile`, `cache`, `mediaprobe`, `playback`, `anilist`, `tmdb`, `anime`, `anibridge`,
-`setting`, `notification`, `smartlist`, `user`.
+`setting`, `notification`, `smartlist`, `user`, `torrent`.
 
 ## Padrões utilizados
 
@@ -125,9 +125,9 @@ SKILL.md`), que permanece a fonte normativa para estilo de código Java do proje
 
 Comunicação é sempre **service → service** (injeção direta, chamada síncrona em processo — não há
 mensageria/fila entre domínios) ou **service → client** (REST/processo externo). Não existe
-barramento de eventos interno; o único mecanismo "assíncrono" real é a fila serial do `cache`
-(processada por um scheduler) e os processos `ffmpeg`/`ffprobe` executados como subprocessos do
-JVM.
+barramento de eventos interno; os mecanismos "assíncronos" reais são a fila serial do `cache`
+(processada por um scheduler), os processos `ffmpeg`/`ffprobe` executados como subprocessos do
+JVM e os downloads do qBittorrent, acompanhados por scheduler no `torrent`.
 
 Grafo de dependências entre domínios, confirmado por grep bidirecional (`import
 akari.domain.<x>`) feito por domínio:
@@ -152,11 +152,15 @@ playback        → videofile, mediaprobe, storageprovider, setting, cache (dire
 ingestion       → storageprovider, mediafolder, videofile, anime, anilist, anibridge, setting
 smartlist       → anime
 user            → anime, videofile
+torrent         → anime, anilist, mediafolder, videofile, storageprovider, ingestion
+                  (service e extractor.EpisodeNumberExtractor), setting, notification, user,
+                  playback (PlaybackWorkspaceService)
 ```
 
-Nenhum domínio depende de `playback`, `mediaprobe`, `cache`, `notification` ou `smartlist` — são
-"topo" do grafo, consumidos só pela camada HTTP (ou, no caso de `notification`, sem nenhum produtor
-hoje e nunca lido de volta por outro domínio).
+Nenhum domínio depende de `mediaprobe`, `cache`, `smartlist` ou `torrent` — são "topo" do grafo,
+consumidos só pela camada HTTP. `playback` e `notification` têm um consumidor só, o `torrent`:
+ele apaga a pasta de trabalho do torrent com `PlaybackWorkspaceService` e é o único produtor de
+notificação (nenhum domínio lê notificação de volta).
 
 **Ciclos deliberados `videofile` ↔ `ingestion` e `anime` ↔ `ingestion`:** `ingestion` depende
 de `videofile` (lista e cria os arquivos de vídeo das pastas) e de `anime` (o step
@@ -210,6 +214,13 @@ raio de impacto em 2 domínios além do seu próprio resource.
 - **GitHub (REST, só para `anibridge`)** — descobre a release mais recente do dataset de mapeamento
   de episódios; o download do asset em si usa `HttpClient` puro (não o REST client padrão do
   projeto), por precisar seguir redirecionamento para CDN.
+- **Stack de torrent (`docker-compose.yml`)** — gluetun (VPN ProtonVPN via WireGuard) e
+  qBittorrent no netns dele. O `torrent` faz o scrape dos provedores pelo proxy HTTP do gluetun
+  (`akari.torrent.proxy.*`, sem fallback direto) e fala com a Web API do qBittorrent
+  (`quarkus.rest-client.qbittorrent`). Os downloads caem em `TORRENT_DOWNLOAD_DIR`, montada no
+  container no mesmo caminho do host; sem ela a aplicação não sobe.
+- **Provedores de torrent (webscrap)** — nyaa.si, lido como HTML com Jsoup. Uma mudança no layout
+  da página quebra a busca e os rastreios desse provedor.
 - **`setting` é o domínio mais amplamente consumido do sistema**: zero dependências de saída, mas
   consumido por `tmdb`, `anilist` (confirmado: `AnilistSearchService` injeta `SettingService` e usa
   `getAnilistCacheTtl()` para o TTL de cache), `cache`, `playback`, `mediaprobe`, `ingestion` e
@@ -273,6 +284,10 @@ itens abaixo são backlog real (a corrigir aos poucos), exceto onde indicado "Ac
     3 domínios diretamente (`cache`, `storageprovider`, `videofile`), diferente dos demais arquivos
     do pacote, que são puros. Documentado no próprio Javadoc como lógica compartilhada entre
     `mediaprobe` e `playback` — intencional, não acidental.
+
+12. **`torrent`**: a chave de edição sai de regex sobre o título (`ReleaseTitleExtractor`);
+    mudar a regex muda o agrupamento e faz os rastreios gravados deixarem de achar a edição. A
+    biblioteca só pode ser `LOCAL` (`importFiles` de provider remoto não existe).
 
 ## Diretrizes para futuras implementações
 

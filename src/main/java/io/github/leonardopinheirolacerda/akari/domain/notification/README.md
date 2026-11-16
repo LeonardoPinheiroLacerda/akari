@@ -38,8 +38,8 @@ criação (`notify()`), usado internamente — não há endpoint de criação na
 
 ## Módulos relacionados
 
-- Nenhum domínio produz notificação hoje: `notificationService.notify()` não tem chamador. O
-  domínio `notification` não lê nada de outros domínios — é escrito por fora e lido só pela
+- `torrent` (`TorrentDownloadService`) é o único produtor: avisa download concluído (`INFO`) e
+  falha ao ingerir a pasta baixada (`ERROR`). O domínio `notification` não lê nada de outros domínios — é escrito por fora e lido só pela
   própria API (e pelo stream SSE, que todo cliente inscrito recebe).
 - `coverImageUrl` é repassado como chega: `notification` não resolve nem valida a URL recebida,
   só a persiste e repassa.
@@ -52,7 +52,7 @@ criação (`notify()`), usado internamente — não há endpoint de criação na
 - `resource/NotificationEventResource` — code-first, expõe `/v1/notifications/events` (SSE), sem
   interface gerada, no mesmo molde de `CacheEventResource`.
 - `service/NotificationService.notify()` — ponto de criação interno, fora da camada HTTP; único
-  produtor possível de `Notification` no código, sem chamador hoje.
+  produtor possível de `Notification` no código, chamado pelo `torrent`.
 - `scheduler/NotificationScheduler` — dispara `NotificationService.pruneClosedSseConnections()` a
   cada 60s; nada externo chama esse método diretamente.
 

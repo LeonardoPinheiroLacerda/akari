@@ -28,6 +28,10 @@ precisa saber desses detalhes.
   check).
 - **Client remoto genérico via rclone** — `RemoteStorageProviderClient` (base abstrata;
   `MegaStorageProviderClient` é a única subclasse hoje).
+- **Importação de arquivos** — `importFiles(sourceDir, relativeDir)` move os arquivos de um
+  diretório local para dentro do provider, preservando subpastas e substituindo o que já existe.
+  Só `LOCAL` implementa; remoto lança `UnsupportedOperationException`. Usado pelo `torrent` ao fim
+  de cada download.
 - **Client local puro Java NIO** — `LocalStorageProviderClient.impl` (sem rclone, sem rede).
 - **Schemas de config tipados** — `config/LocalConfig` (`rootPath`), `config/MegaConfig`
   (`email`, `password` com `@Obscure`); resolvidos por `StorageProviderConfigs`.

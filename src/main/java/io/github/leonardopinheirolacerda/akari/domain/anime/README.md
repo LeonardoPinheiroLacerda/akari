@@ -139,6 +139,7 @@ O acoplamento alto do domínio como um todo (8 domínios externos: `anilist`, `t
 - **`anibridge`**: `AnimeTmdbProposalService` usa `AnibridgeResolutionService.resolveBestCandidate` pra propor o binding TMDB, passando o formato do anime na AniList pro desempate entre filme e série.
 - **`setting`**: `AnimeTmdbOverridesFillService` injeta o `SettingService` pra ler os idiomas do preenchimento dos overrides.
 - **`user`**: `UserService` usa `AnimeService.findOrThrow` pra validar o anime adicionado à lista do usuário e `AnimeOverrideService.toBindingSummary` pro card dos itens; `WatchlistItem.anime` referencia `Anime`. No sentido contrário, `AnimeEpisodeService` usa `UserService.findWatchProgressByFiles` e `AnimeRelationsService` usa `UserService.isInWatchlist` — ciclo `anime ↔ user`, service a service (ver `docs/ARQUITETURA_DO_SISTEMA.md`).
+- **`torrent`**: `TorrentDownloadService` usa `AnimeService.find`/`bindAnime` pra vincular a pasta nova da biblioteca, `AnimeOverrideService` pro título, banner e capa e `AnimeTmdbFilePairingService.getTmdbFilePairings` pra miniatura e título do episódio baixado.
 - **`smartlist`**: `SmartListService` lê `Anime.listAll()`, resolve as raízes com `FranchiseResolver.resolve()` e monta os itens com `AnimeOverrideService.toBindingSummary`/`resolveTitle` — mudanças na resolução de franquias ou no título exibido mudam os itens das listas.
 
 ## Pontos de entrada

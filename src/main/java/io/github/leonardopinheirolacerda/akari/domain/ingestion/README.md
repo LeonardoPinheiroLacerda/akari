@@ -110,11 +110,12 @@ pasta); `ingestion_task.anime_id` com `ON DELETE SET NULL` (remover o anime só 
 
 ## Módulos relacionados
 
-`domain/videofile` (`VideoFileService`, pra calcular `naturalSortKey`) e `domain/anime`
-(`FolderEpisodeNumbering`, na resolução do pairing) importam
-`extractor/EpisodeNumberExtractor` — as únicas classes fora de `domain/ingestion` que importam
-algo daqui. Fora essa exceção, o módulo é um orquestrador de ponta: consome vários domínios, não
-é consumido por nenhum outro.
+`domain/videofile` (`VideoFileService`, pra calcular `naturalSortKey`), `domain/anime`
+(`FolderEpisodeNumbering`, na resolução do pairing) e `domain/torrent` (episódio das releases e
+dos arquivos baixados) importam `extractor/EpisodeNumberExtractor`. `domain/torrent` também chama
+`IngestionService.createIngestionTasks` para ingerir a pasta do anime ao fim de cada download.
+Fora isso, o módulo é um orquestrador de ponta: consome vários domínios e não é consumido por
+nenhum outro.
 
 ## Pontos de entrada
 

@@ -55,6 +55,8 @@ Consumido por (dependência de `storageprovider` neles, não o inverso):
   arquivo físico para o `ffprobe`.
 - `domain/mediafolder` (`MediaFolder`, `MediaFolderService`) — cada pasta de mídia pertence a um
   storage provider.
+- `domain/torrent` (`TorrentDownloadService`) — resolve o provider da biblioteca (`findOrThrow`)
+  e move os arquivos baixados para a pasta do anime com `importFiles`.
 - `utils/VideoFileLocationUtils` — helper compartilhado que decide onde um `VideoFile` está
   acessível em disco (direto, se `LOCAL`; via cache, se remoto), usando
   `StorageProviderClientFactory`.

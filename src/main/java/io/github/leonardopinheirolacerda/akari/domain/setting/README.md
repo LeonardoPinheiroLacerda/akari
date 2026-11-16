@@ -45,6 +45,8 @@ AniList, cache, playback).
 - `ingestion` (`IngestionService`) — lê `isTmdbConfigured()` como precheck antes de etapas que
   dependem do TMDB.
 - `anime` (`AnimeTmdbOverridesFillService`) — idiomas do preenchimento dos overrides TMDB.
+- `torrent` (`TorrentDownloadService`) — `getTorrentLibraryProviderId()`, o provider `LOCAL` da
+  biblioteca de torrents.
 
 ## Pontos de entrada
 

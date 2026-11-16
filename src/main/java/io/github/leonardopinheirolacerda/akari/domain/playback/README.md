@@ -40,7 +40,7 @@ Dependência externa: binário `ffmpeg` resolvido via `PATH` (config `akari.play
 
 ## Módulos relacionados
 
-Nenhum outro domínio depende de `playback` — confirmado por busca textual (`grep -rl "akari.domain.playback"` fora do próprio pacote não retorna nada). É um domínio "folha" na árvore de dependências, consumido apenas pela camada HTTP (via `PlaybackResource`/contrato OpenAPI).
+`torrent` usa só `PlaybackWorkspaceService.delete`, pra apagar a pasta de trabalho de um torrent já movido para a biblioteca. Fora isso, `playback` é consumido apenas pela camada HTTP (via `PlaybackResource`/contrato OpenAPI).
 
 ## Pontos de entrada
 
