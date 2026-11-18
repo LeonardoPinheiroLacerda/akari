@@ -23,9 +23,24 @@ Quarkus, visite <https://quarkus.io/>.
 
 ## Dependências externas para rodar localmente
 
-- **PostgreSQL** — `docker-compose up -d` sobe só o banco (porta `5432`, credenciais padrão
-  `akari`/`akari`, sobrescrevíveis com `DB_USERNAME`/`DB_PASSWORD`). Migrations Flyway em
-  `src/main/resources/db/` aplicam no boot da aplicação.
+- **`docker-compose.yml`** — sobe o banco e a stack de torrent. Antes, copie `.env.example` para
+  `.env` e `gluetun/config.toml.example` para `gluetun/config.toml` e preencha os valores.
+- **PostgreSQL** — porta `5432`, credenciais padrão `akari`/`akari`, sobrescrevíveis com
+  `DB_USERNAME`/`DB_PASSWORD`. Migrations Flyway em `src/main/resources/db/` aplicam no boot da
+  aplicação.
+- **gluetun + qBittorrent** — o qBittorrent roda no netns do gluetun (ProtonVPN via WireGuard,
+  com port forwarding): todo o tráfego dele sai pela VPN e, se ela cair, fica sem rede. A WebUI/API
+  fica em `127.0.0.1:8090` e o proxy HTTP do gluetun, por onde sai o scrape dos provedores de
+  torrent, em `127.0.0.1:8888`. A chave WireGuard é gerada no painel do ProtonVPN com apenas o
+  NAT-PMP habilitado (Moderate NAT é incompatível com port forwarding).
+  - O login da WebUI é `admin`/`admin`, definido na config inicial da imagem
+    (`qbittorrent/qBittorrent.conf`); o akari usa o mesmo login (`QBITTORRENT_USERNAME`/
+    `QBITTORRENT_PASSWORD`).
+  - `TORRENT_DOWNLOAD_DIR` é a pasta de trabalho dos downloads, montada no container no mesmo
+    caminho absoluto do host; o akari lê a mesma variável (`akari.torrent.download-dir`) e não sobe
+    sem ela. Quando um download termina, o akari move os arquivos para a pasta do anime no storage
+    provider `LOCAL` da preferência `torrent.library-provider-id` e remove o torrent do
+    qBittorrent. Trocar essa preferência não exige mexer no compose.
 - **rclone rcd** — necessário só para usar um storage provider `MEGA` (obscurecimento de
   credenciais e acesso remoto). Suba com `./rclone-rcd.sh`: ele roda **fora** de container, de
   propósito, para enxergar o mesmo filesystem do host que a aplicação (relevante para `cache.dir`).

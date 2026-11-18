@@ -62,6 +62,8 @@ Traduzir a GraphQL da AniList (query `Page(page, perPage).media(search, type: AN
   o binding TMDB pelo anibridge.
 - **`domain.ingestion`** (`AnilistSyncStepService`) — usa `AnilistSearchService.search` pra achar
   o título da AniList com nome igual ao da pasta no step `ANILIST_SYNC`.
+- **`domain.torrent`** (`TorrentDownloadService`, `TorrentTrackingService`) — usa `findById` pro
+  título romaji (nome da pasta nova na biblioteca) e pro título e capa do rastreio.
 - **`domain.cache`** — infraestrutura de cache consumida pelo service (não o contrário).
 - **`domain.setting`** — fonte do TTL de cache.
 

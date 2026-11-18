@@ -105,6 +105,19 @@ public abstract class RemoteStorageProviderClient implements StorageProviderClie
     }
 
     /**
+     * Não importa arquivos: só um provider {@code LOCAL} recebe arquivos movidos do disco.
+     *
+     * @param sourceDir diretório local de origem; ignorado
+     * @param relativeDir diretório de destino; ignorado
+     * @throws UnsupportedOperationException sempre
+     */
+    @Override
+    public void importFiles(Path sourceDir, String relativeDir) {
+        Log.warnf("Importação de %s pedida no storage provider remoto %d — não suportado", sourceDir, this.storageProvider.id);
+        throw new UnsupportedOperationException("Provider remoto não recebe arquivos importados; use um provider LOCAL");
+    }
+
+    /**
      * Testa a conexão listando a raiz do provider.
      *
      * <p>Limitação conhecida: o backend mega do rclone cacheia a sessão autenticada por e-mail

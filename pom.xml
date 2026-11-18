@@ -17,6 +17,7 @@
         <openapi-generator-plugin.version>7.25.0</openapi-generator-plugin.version>
         <mapstruct.version>1.6.3</mapstruct.version>
         <lombok.version>1.18.48</lombok.version>
+        <jsoup.version>1.24.1</jsoup.version>
         <assertj.version>3.27.7</assertj.version>
         <skipITs>true</skipITs>
         <surefire-plugin.version>3.5.6</surefire-plugin.version>
@@ -89,6 +90,11 @@
             <groupId>org.mapstruct</groupId>
             <artifactId>mapstruct</artifactId>
             <version>${mapstruct.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.jsoup</groupId>
+            <artifactId>jsoup</artifactId>
+            <version>${jsoup.version}</version>
         </dependency>
         <dependency>
             <groupId>org.projectlombok</groupId>

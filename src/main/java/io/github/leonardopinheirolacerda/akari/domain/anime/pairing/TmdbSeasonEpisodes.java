@@ -30,6 +30,8 @@ public final class TmdbSeasonEpisodes {
 
     private final String folderName;
 
+    private final Boolean forceRefresh;
+
     private final Map<Integer, List<TmdbEpisodeResponse>> episodesBySeason = new HashMap<>();
 
     /**
@@ -37,16 +39,20 @@ public final class TmdbSeasonEpisodes {
      * @param tmdbId série do TMDB vinculada ao anime
      * @param folderId pasta resolvida, só pra log
      * @param folderName nome da pasta, só pra log
+     * @param forceRefresh se {@code true}, busca a série e as temporadas no TMDB sem passar pelo
+     *                     cache
      */
     public TmdbSeasonEpisodes(TmdbService tmdbService,
                               Integer tmdbId,
                               Integer folderId,
-                              String folderName) {
+                              String folderName,
+                              Boolean forceRefresh) {
 
         this.tmdbService = tmdbService;
         this.tmdbId = tmdbId;
         this.folderId = folderId;
         this.folderName = folderName;
+        this.forceRefresh = forceRefresh;
     }
 
     /**
@@ -56,7 +62,7 @@ public final class TmdbSeasonEpisodes {
      */
     public List<Integer> regularSeasonNumbers() {
         try {
-            return RetryUtils.withRateLimitRetry(() -> tmdbService.getTvDetails(tmdbId, false))
+            return RetryUtils.withRateLimitRetry(() -> tmdbService.getTvDetails(tmdbId, forceRefresh))
                     .seasons()
                     .stream()
                     .map(TmdbSeasonSummaryResponse::seasonNumber)
@@ -89,7 +95,7 @@ public final class TmdbSeasonEpisodes {
     private List<TmdbEpisodeResponse> fetch(Integer seasonNumber) {
         try {
             return RetryUtils.withRateLimitRetry(
-                    () -> tmdbService.getSeasonEpisodes(tmdbId, seasonNumber)
+                    () -> tmdbService.getSeasonEpisodes(tmdbId, seasonNumber, forceRefresh)
             );
         } catch (IntegrationException e) {
             Log.warnf(

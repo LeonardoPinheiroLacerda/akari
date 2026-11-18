@@ -110,11 +110,12 @@ pasta); `ingestion_task.anime_id` com `ON DELETE SET NULL` (remover o anime só 
 
 ## Módulos relacionados
 
-`domain/videofile` (`VideoFileService`, pra calcular `naturalSortKey`) e `domain/anime`
-(`FolderEpisodeNumbering`, na resolução do pairing) importam
-`extractor/EpisodeNumberExtractor` — as únicas classes fora de `domain/ingestion` que importam
-algo daqui. Fora essa exceção, o módulo é um orquestrador de ponta: consome vários domínios, não
-é consumido por nenhum outro.
+`domain/videofile` (`VideoFileService`, pra calcular `naturalSortKey`), `domain/anime`
+(`FolderEpisodeNumbering`, na resolução do pairing) e `domain/torrent` (episódio das releases e
+dos arquivos baixados) importam `extractor/EpisodeNumberExtractor`. `domain/torrent` também chama
+`IngestionService.createIngestionTasks` para ingerir a pasta do anime ao fim de cada download.
+Fora isso, o módulo é um orquestrador de ponta: consome vários domínios e não é consumido por
+nenhum outro.
 
 ## Pontos de entrada
 
@@ -278,17 +279,17 @@ inválido) vira `ERROR` com a mensagem → `FAILED`.
    que resolve cada arquivo pelo anibridge (`EpisodePairingResolutionService`, a mesma
    resolução da proposta de pairing do portal) e grava só o que não precisa de decisão:
    - arquivo que já tem pairing gravado mantém a temporada/episódio, mesmo que a resolução
-     aponte outro episódio — uma nova ingestão não desfaz o pairing curado à mão. Só o nome e a
-     sinopse do episódio são regravados com o texto atual do mesmo episódio no TMDB
-     (`TmdbService.getSeasonEpisodes`, mesma cadeia de idiomas de `tmdb.episode.*` do pairing
-     novo), em toda ingestão, e só quando diferem do salvo; os demais campos (thumbnail, data,
-     duração, nota, tipo) ficam como estão;
+     aponte outro episódio — uma nova ingestão não desfaz o pairing curado à mão. Só os dados do
+     episódio (thumbnail, nome, sinopse, data, duração, nota, tipo) são regravados com os atuais
+     do mesmo episódio no TMDB (`TmdbService.getSeasonEpisodes`, cache-first, mesma cadeia de
+     idiomas de `tmdb.episode.*` do pairing novo), em toda ingestão, e só quando diferem do
+     salvo;
    - episódio resolvido pra mais de um arquivo, ou já gravado em outro arquivo da pasta, não é
      gravado em nenhum dos envolvidos (`EPISODE_CONFLICT`).
 
    A resolução roda fora de transação; só a gravação roda numa transação curta.
-3. `RESULTS_FOUND` com pareados agora, já pareados, textos de episódio atualizados
-   (`textsUpdated`) e sem par → um `WARNING` por arquivo sem
+3. `RESULTS_FOUND` com pareados agora, já pareados, episódios atualizados
+   (`episodesUpdated`) e sem par → um `WARNING` por arquivo sem
    par, com o motivo (status da resolução ou `EPISODE_CONFLICT`) explicado na mensagem e o
    código nos `details`; em `OUT_OF_AIR_WINDOW`, os `details` trazem também o período do anime
    (`animeStartDate`/`animeEndDate`).

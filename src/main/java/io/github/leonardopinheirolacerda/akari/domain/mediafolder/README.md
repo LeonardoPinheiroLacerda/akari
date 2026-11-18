@@ -52,6 +52,8 @@ provider e remoção em lote por raízes de um conjunto de pastas.
 - `videofile` — todo `VideoFile` referencia uma `MediaFolder` (FK obrigatória).
 - `anime` — bindings de anime por pasta, usados no enriquecimento da listagem.
 - `storageprovider` — owner de cada pasta.
+- `torrent` (`TorrentDownloadService`) — `findOrCreate()` cria a pasta do anime na biblioteca no
+  primeiro download.
 
 ## Pontos de entrada
 

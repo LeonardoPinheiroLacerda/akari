@@ -224,6 +224,17 @@ public class SettingService {
     }
 
     /**
+     * Lê a preferência {@code tmdb.episode.refresh-window}.
+     *
+     * @return por quanto tempo o pairing TMDB de um episódio recente continua sendo refeito:
+     *         desde a data de exibição, se pareado, ou desde a chegada do arquivo, se sem par
+     * @throws ResourceNotFoundException se a preferência não existir
+     */
+    public Duration getTmdbEpisodeRefreshWindow() {
+        return Duration.parse(findOrThrow("tmdb.episode.refresh-window").value);
+    }
+
+    /**
      * Lê a preferência {@code tmdb.include-adult}.
      *
      * @return {@code true} se buscas no TMDB devem incluir conteúdo adulto
@@ -251,6 +262,22 @@ public class SettingService {
      */
     public String getCacheDir() {
         return findOrThrow("cache.dir").value;
+    }
+
+    /**
+     * Lê a preferência {@code torrent.library-provider-id}.
+     *
+     * @return o id do storage provider {@code LOCAL} onde os torrents são baixados; {@code null}
+     *         se ainda não configurado
+     * @throws ResourceNotFoundException se a preferência não existir
+     */
+    public Integer getTorrentLibraryProviderId() {
+        final String value = findOrThrow("torrent.library-provider-id").value;
+
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return Integer.valueOf(value.strip());
     }
 
     /**

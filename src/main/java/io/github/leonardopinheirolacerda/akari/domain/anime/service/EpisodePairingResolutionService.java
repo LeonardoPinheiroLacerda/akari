@@ -68,9 +68,11 @@ public class EpisodePairingResolutionService {
      * @param folderId pasta do anime — passada à parte pra não depender do lazy load de
      *                 {@code anime.folder}
      * @param folderName nome da pasta, só pra log
+     * @param forceRefresh se {@code true}, busca a série e as temporadas no TMDB sem passar pelo
+     *                     cache
      * @return um resultado por arquivo da pasta, na ordem natural dos nomes
      */
-    public List<FilePairingResolution> resolve(Anime anime, Integer folderId, String folderName) {
+    public List<FilePairingResolution> resolve(Anime anime, Integer folderId, String folderName, Boolean forceRefresh) {
         final List<VideoFile> videoFiles = videoFileService.listByFolderOrderedByNaturalSortKey(
                 folderId
         );
@@ -94,7 +96,8 @@ public class EpisodePairingResolutionService {
                 tmdbService,
                 anime.tmdbId,
                 folderId,
-                folderName
+                folderName,
+                forceRefresh
         );
 
         AirDateFolderMapping airDateMapping = null;

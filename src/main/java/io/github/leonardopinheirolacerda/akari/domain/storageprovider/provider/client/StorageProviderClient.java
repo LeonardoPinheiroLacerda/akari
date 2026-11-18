@@ -61,6 +61,17 @@ public interface StorageProviderClient {
     Long downloadFile(String remoteFilePath, String localDestinationDir, String localFileName);
 
     /**
+     * Move pra dentro do provider todos os arquivos de um diretório local, preservando as
+     * subpastas — arquivo já existente no destino é substituído.
+     *
+     * @param sourceDir diretório local de origem; se não existir, não há o que mover
+     * @param relativeDir diretório de destino, relativo à raiz do provider; criado se não existir
+     * @throws UnsupportedOperationException se o provider for remoto — só um provider
+     *         {@code LOCAL} recebe arquivos
+     */
+    void importFiles(Path sourceDir, String relativeDir);
+
+    /**
      * Confirma se o provider está acessível no momento.
      *
      * @return {@code true} se uma operação de teste (listagem da raiz, ou checagem do diretório

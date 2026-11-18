@@ -221,6 +221,43 @@ tags:
       A lista de títulos aceita adicionar e remover animes, os dois idempotentes. Se um anime
       está na lista do perfil aparece em `inWatchlist` de
       `GET /v1/metadata/animes/{anilistId}/franchise?userId=`.
+  - name: TorrentSearch
+    description: |
+      Busca de releases de anime em provedores de torrent (`TorrentProviderType`).
+
+      Cada provedor é lido por webscrap das páginas de busca do site, sempre pelo proxy HTTP do
+      gluetun: o tráfego sai pela VPN e, sem ela, a busca falha (`502`) em vez de sair pela
+      conexão direta. As releases voltam agrupadas por edição — o grupo de fansub mais os
+      descritores técnicos do título (temporada, resolução, fonte, mídia, áudio, codec,
+      profundidade de cor) —, um item por episódio dentro de cada edição.
+  - name: TorrentDownload
+    description: |
+      Downloads de releases de torrent pelo qBittorrent, com ingestão automática no catálogo.
+
+      O qBittorrent baixa numa pasta de trabalho fixa (`TORRENT_DOWNLOAD_DIR`). Quando o torrent
+      termina, os arquivos são movidos para a biblioteca — o storage provider `LOCAL` da
+      preferência `torrent.library-provider-id`, numa pasta por anime —, o torrent é removido do
+      qBittorrent e a pasta do anime é ingerida. Um anime ainda sem pasta ganha uma
+      (`<título romaji>`), já vinculada a ele; um anime vinculado a uma pasta de outro provider
+      não pode receber download (`409`).
+
+      O andamento é acompanhado a cada poucos segundos. Os arquivos só saem da pasta de trabalho
+      com o torrent inteiro pronto, então um batch fica assistível de uma vez, ao terminar. Um
+      torrent removido do qBittorrent antes de terminar volta para `NEW` e pode ser baixado de
+      novo.
+  - name: TorrentTracking
+    description: |
+      Rastreio de animes em lançamento nos provedores de torrent.
+
+      Cada rastreio fixa um anime da AniList, um provedor, as queries de busca e a edição
+      escolhida (grupo + descritores técnicos, a `key` de `TorrentEdition`). As queries podem ser
+      editadas depois. A cada poucos minutos o akari lê a primeira página de cada query de cada
+      rastreio e baixa todo episódio da edição acima do
+      último encontrado (`latestEpisode`), pelo mesmo fluxo de `POST /v1/torrent/downloads`. Ao
+      criar o rastreio, o último episódio encontrado é o maior que a edição já tem, então só os
+      episódios que saírem depois são baixados sozinhos; os anteriores são baixados à mão pela
+      lista de releases do rastreio. Uma falha na checagem fica em `lastError` até a próxima
+      checagem bem-sucedida.
 
 paths:
 
@@ -1993,6 +2030,195 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  # ---------- torrent ----------
+  /v1/torrent/search:
+    get:
+      tags: [TorrentSearch]
+      operationId: searchTorrentReleases
+      summary: Busca releases num provedor de torrent, agrupadas por edição
+      description: |
+        Lê todas as páginas de resultado que o provedor oferece, ordenadas da release mais nova
+        para a mais antiga: a primeira sozinha, para saber o total, e as demais em paralelo.
+        Nada é persistido. Quando o próprio provedor corta a busca (o nyaa entrega no máximo
+        1000 resultados), as releases mais antigas ficam de fora e `truncated` vem `true` —
+        refinar a query (grupo, resolução, temporada) traz o que faltou.
+
+        Dentro de cada edição fica uma release por episódio: entre versões do mesmo episódio
+        vence a de maior versão (`v2` sobre a original) e, empatando, a de mais seeders.
+        Releases sem número de episódio (batches, extras) ficam todas, depois dos episódios.
+        Nenhuma edição é resposta válida.
+
+        Aceita várias queries (`?q=…&q=…`): cada uma é buscada no provedor e as releases são
+        juntadas, sem repetir a mesma release, antes de agrupar as edições. Serve para os grupos
+        que escrevem o nome do anime de jeitos diferentes (ex.: com o subtítulo do arco ou só
+        com a temporada, `S04`). `truncated` vem `true` se o provedor cortou alguma delas.
+      parameters:
+        - $ref: '#/components/parameters/TorrentProviderParam'
+        - $ref: '#/components/parameters/TorrentQueriesParam'
+      responses:
+        '200':
+          $ref: '#/components/responses/TorrentSearchResultOk'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '502':
+          $ref: '#/components/responses/BadGateway'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/torrent/downloads:
+    get:
+      tags: [TorrentDownload]
+      operationId: listTorrentDownloads
+      summary: Lista paginada dos downloads, do mais recente para o mais antigo
+      description: |
+        Traz os downloads em andamento (com o progresso) e os já concluídos. Com `userId`, cada
+        download já na pasta do anime vem com o progresso desse usuário no episódio
+        (`watchProgress`). Página vazia é resposta válida.
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/SizeParam'
+        - $ref: '#/components/parameters/UserIdQueryParam'
+      responses:
+        '200':
+          $ref: '#/components/responses/TorrentDownloadPageOk'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      tags: [TorrentDownload]
+      operationId: startTorrentDownload
+      summary: Baixa uma release de torrent para a pasta do anime na biblioteca
+      description: |
+        Envia o magnet ao qBittorrent, que baixa na pasta de trabalho. O destino, para onde os
+        arquivos são movidos quando o download termina, é a pasta do anime na biblioteca: a já
+        vinculada a ele ou, se ele ainda não tem nenhuma, uma pasta nova `<título romaji>` no
+        provider da biblioteca, vinculada a ele na hora.
+
+        Idempotente pelo info-hash do magnet: uma release que já está baixando ou já foi baixada
+        é devolvida como está, sem enviar de novo.
+      requestBody:
+        $ref: '#/components/requestBodies/TorrentDownloadRequestBody'
+      responses:
+        '201':
+          $ref: '#/components/responses/TorrentDownloadCreated'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '502':
+          $ref: '#/components/responses/BadGateway'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/torrent/tracked:
+    get:
+      tags: [TorrentTracking]
+      operationId: listTrackedAnimes
+      summary: Lista os animes rastreados, do mais recente para o mais antigo
+      responses:
+        '200':
+          $ref: '#/components/responses/TrackedAnimeListOk'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      tags: [TorrentTracking]
+      operationId: trackAnime
+      summary: Começa a rastrear um anime numa edição de um provedor de torrent
+      description: |
+        Busca as queries no provedor (todas as páginas) e confere que a edição existe nelas; o maior
+        episódio da edição vira o último encontrado. Um anime só tem um rastreio. Anime vinculado
+        a uma pasta de outro storage provider que não o da biblioteca responde `409`, como no
+        download.
+      requestBody:
+        $ref: '#/components/requestBodies/TrackedAnimeRequestBody'
+      responses:
+        '201':
+          $ref: '#/components/responses/TrackedAnimeCreated'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '502':
+          $ref: '#/components/responses/BadGateway'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/torrent/tracked/{trackedId}:
+    parameters:
+      - $ref: '#/components/parameters/TrackedIdPathParam'
+    delete:
+      tags: [TorrentTracking]
+      operationId: untrackAnime
+      summary: Para de rastrear um anime
+      description: |
+        Idempotente: um rastreio inexistente responde `204` sem fazer nada. Os downloads já
+        feitos continuam.
+      responses:
+        '204':
+          description: Rastreio removido
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/torrent/tracked/{trackedId}/queries:
+    parameters:
+      - $ref: '#/components/parameters/TrackedIdPathParam'
+    put:
+      tags: [TorrentTracking]
+      operationId: updateTrackedAnimeQueries
+      summary: Troca as queries de busca de um rastreio
+      description: |
+        Substitui a lista de queries; a edição e o último episódio encontrado continuam. A
+        próxima checagem já busca com as queries novas.
+      requestBody:
+        $ref: '#/components/requestBodies/TrackedAnimeQueriesRequestBody'
+      responses:
+        '200':
+          $ref: '#/components/responses/TrackedAnimeOk'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v1/torrent/tracked/{trackedId}/releases:
+    parameters:
+      - $ref: '#/components/parameters/TrackedIdPathParam'
+    get:
+      tags: [TorrentTracking]
+      operationId: listTrackedAnimeReleases
+      summary: Releases da edição rastreada, um por episódio
+      description: |
+        Refaz a busca do rastreio no provedor (todas as páginas de cada query) e devolve só a edição
+        rastreada, com o `downloadStatus` de cada release. Edição que sumiu da busca volta sem
+        releases.
+      responses:
+        '200':
+          $ref: '#/components/responses/TorrentEditionOk'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '502':
+          $ref: '#/components/responses/BadGateway'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
 components:
 
   parameters:
@@ -2272,10 +2498,37 @@ components:
       required: false
       description: |
         Id do usuário. Quando informado, a resposta traz o estado desse usuário: o
-        `watchProgress` de cada episódio na listagem de episódios, ou o `inWatchlist` na
-        franquia.
+        `watchProgress` de cada episódio na listagem de episódios e na de downloads de torrent,
+        ou o `inWatchlist` na franquia.
       schema:
         $ref: '#/components/schemas/UserId'
+    TorrentProviderParam:
+      name: provider
+      in: query
+      required: true
+      description: Provedor de torrent onde buscar
+      schema:
+        $ref: '#/components/schemas/TorrentProviderType'
+    TorrentQueriesParam:
+      name: q
+      in: query
+      required: true
+      style: form
+      explode: true
+      description: Uma ou mais queries de busca no provedor (`?q=…&q=…`), repassadas como vieram
+      schema:
+        type: array
+        minItems: 1
+        items:
+          $ref: '#/components/schemas/SearchQuery'
+    TrackedIdPathParam:
+      name: trackedId
+      in: path
+      required: true
+      description: Id do rastreio
+      schema:
+        type: integer
+        format: int32
 
   requestBodies:
     # ---------- storageprovider ----------
@@ -2448,6 +2701,28 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/PlaybackHeartbeatRequest'
+    # ---------- torrent ----------
+    TorrentDownloadRequestBody:
+      description: Release a baixar e o anime a que ela pertence
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/TorrentDownloadRequest'
+    TrackedAnimeQueriesRequestBody:
+      description: As novas queries de busca do rastreio
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/TrackedAnimeQueriesRequest'
+    TrackedAnimeRequestBody:
+      description: Anime, provedor, queries e edição a rastrear
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/TrackedAnimeRequest'
 
   responses:
     # ---------- comuns ----------
@@ -2474,6 +2749,14 @@ components:
     BadGateway:
       description: >-
         Falha num sistema externo — AniList, TMDB, rclone ou ffprobe (`INTEGRATION_ERROR`)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    TooManyRequests:
+      description: >-
+        Um sistema externo recusou por excesso de requisições (`RATE_LIMITED`) — tente de novo
+        mais tarde
       content:
         application/json:
           schema:
@@ -2883,6 +3166,49 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/UserResponse'
+    # ---------- torrent ----------
+    TorrentSearchResultOk:
+      description: Edições encontradas (possivelmente nenhuma)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/TorrentSearchResult'
+    TorrentDownloadPageOk:
+      description: Página (possivelmente vazia) de downloads
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/TorrentDownloadPage'
+    TorrentDownloadCreated:
+      description: Download enviado ao qBittorrent (ou já existente, pelo mesmo info-hash)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/TorrentDownloadResponse'
+    TorrentEditionOk:
+      description: Edição rastreada, com as releases encontradas (possivelmente nenhuma)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/TorrentEdition'
+    TrackedAnimeListOk:
+      description: Lista (possivelmente vazia) dos animes rastreados
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/TrackedAnimeList'
+    TrackedAnimeOk:
+      description: Rastreio atualizado
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/TrackedAnimeResponse'
+    TrackedAnimeCreated:
+      description: Rastreio criado
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/TrackedAnimeResponse'
 
   schemas:
     # ---------- comuns ----------
@@ -3004,6 +3330,8 @@ components:
           método, `Content-Type` ou `Accept` não suportados.
         - `INTEGRATION_ERROR` (502): um sistema externo (AniList, TMDB, rclone, ffprobe)
           falhou ou está indisponível.
+        - `RATE_LIMITED` (429): um sistema externo (ex.: um provedor de torrent) recusou a
+          chamada por excesso de requisições; o `message` diz quando tentar de novo.
         - `INTEGRATION_NOT_CONFIGURED` (503): uma preferência obrigatória está sem valor —
           o admin precisa configurá-la em
           `PUT /v1/settings/{key}`.
@@ -3018,6 +3346,7 @@ components:
         - CONFLICT
         - REQUEST_ERROR
         - INTEGRATION_ERROR
+        - RATE_LIMITED
         - INTEGRATION_NOT_CONFIGURED
         - TRANSCODE_FAILED
         - INTERNAL_ERROR
@@ -6220,3 +6549,348 @@ components:
           type: string
           format: date-time
           description: Quando a última posição foi recebida
+
+    # ---------- torrent ----------
+    TorrentProviderType:
+      type: string
+      description: Provedor de torrent. Cada valor é lido por uma implementação de webscrap própria.
+      enum:
+        - NYAA
+
+    TorrentSearchResult:
+      type: object
+      description: Resultado de `GET /v1/torrent/search`
+      required: [editions, truncated]
+      properties:
+        editions:
+          type: array
+          description: Edições encontradas, ordenadas pelo grupo e depois pelo rótulo
+          items:
+            $ref: '#/components/schemas/TorrentEdition'
+        truncated:
+          type: boolean
+          description: |
+            `true` quando o provedor cortou a busca no limite dele (o nyaa entrega no máximo
+            1000 resultados): as releases mais antigas ficaram de fora e vale refinar a query
+
+
+    TorrentEdition:
+      type: object
+      description: |
+        Edição de um anime: as releases de um mesmo grupo com os mesmos descritores técnicos no
+        título. Nome e número do episódio não entram no agrupamento, então todos os episódios da
+        mesma release caem na mesma edição.
+      required: [key, label, releases]
+      properties:
+        key:
+          type: string
+          description: |
+            Chave estável da edição (grupo + descritores normalizados), usada para fixar a
+            edição escolhida
+        group:
+          type: string
+          nullable: true
+          description: Grupo de fansub, tirado dos colchetes no início do título; `null` sem colchetes
+        label:
+          type: string
+          description: |
+            Descritores técnicos na ordem natural (ex.: `S01 1080p CR WEB-DL MULTi AAC2.0 H.264`),
+            ou `(sem specs)` quando o título não traz nenhum
+        resolution:
+          type: string
+          nullable: true
+          description: 'Resolução (ex.: `1080p`); `null` se o título não traz'
+        source:
+          type: string
+          nullable: true
+          description: 'Serviço de origem do vídeo (ex.: `CR`, `NF`, `AMZN`); `null` se o título não traz'
+        medium:
+          type: string
+          nullable: true
+          description: 'Mídia de origem (ex.: `WEB-DL`, `BluRay`); `null` se o título não traz'
+        audioType:
+          allOf: [{ $ref: '#/components/schemas/TorrentTrackType' }]
+          nullable: true
+          description: Áudio em mais de um idioma; `null` quando o título não indica (um idioma só)
+        audioCodec:
+          type: string
+          nullable: true
+          description: 'Codec de áudio como aparece no título (ex.: `AAC2.0`, `Opus`, `FLAC`); `null` se não traz'
+        videoCodec:
+          type: string
+          nullable: true
+          description: 'Codec de vídeo normalizado: `H.264`, `H.265` ou `AV1`; `null` se o título não traz'
+        bitDepth:
+          type: string
+          nullable: true
+          description: 'Profundidade de cor ou HDR como aparece no título (ex.: `10bit`, `HDR10`); `null` se não traz'
+        subtitleType:
+          allOf: [{ $ref: '#/components/schemas/TorrentTrackType' }]
+          nullable: true
+          description: |
+            Legendas em mais de um idioma, quando alguma release da edição indica no título
+            (`Multi-Subs`, `Dual-Subs`); `null` se nenhuma indica. Não faz parte da chave da edição.
+        releases:
+          type: array
+          description: Uma release por episódio, em ordem de episódio; as sem episódio por último
+          items:
+            $ref: '#/components/schemas/TorrentReleaseResponse'
+
+    TorrentTrackType:
+      type: string
+      description: |
+        Faixas (áudio ou legenda) em mais de um idioma, como o título da release indica.
+        - `MULTI`: vários idiomas (`MULTi`, `Multi-Audio`, `Multi-Subs`).
+        - `DUAL`: dois idiomas (`DUAL`, `Dual-Audio`, `Dual-Subs`).
+      enum:
+        - MULTI
+        - DUAL
+
+    TorrentReleaseResponse:
+      type: object
+      description: Release encontrada no provedor
+      required: [infoHash, magnetUri, title]
+      properties:
+        infoHash:
+          type: string
+          description: Info-hash BitTorrent (40 caracteres hexadecimais, minúsculos)
+        magnetUri:
+          type: string
+          description: Link magnet como o provedor publica (hash, nome e trackers do próprio site)
+        title:
+          type: string
+          description: Título da release como publicado no provedor
+        episode:
+          type: integer
+          format: int32
+          nullable: true
+          description: Número do episódio extraído do título; `null` em batches e extras
+        resolution:
+          type: string
+          nullable: true
+          description: 'Resolução extraída do título (ex.: `1080p`)'
+        size:
+          type: string
+          nullable: true
+          description: 'Tamanho como o provedor exibe (ex.: `1.4 GiB`)'
+        seeders:
+          type: integer
+          format: int32
+          nullable: true
+          description: Seeders no momento da busca
+        publishedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Quando a release foi publicada no provedor
+        pageUrl:
+          type: string
+          nullable: true
+          description: Página da release no provedor
+        downloadStatus:
+          allOf: [{ $ref: '#/components/schemas/TorrentDownloadStatus' }]
+          nullable: true
+          description: Estado da release nos downloads do akari; `null` se nunca foi baixada
+
+    TorrentDownloadRequest:
+      type: object
+      description: |
+        Payload de `POST /v1/torrent/downloads` — uma release vinda da busca. O info-hash, que
+        identifica a release, sai do próprio `magnetUri`.
+      required: [provider, magnetUri, title, anilistId]
+      properties:
+        provider:
+          $ref: '#/components/schemas/TorrentProviderType'
+        magnetUri:
+          type: string
+          pattern: '^magnet:\?.+$'
+          description: |
+            Link magnet da release, como devolvido pela busca; precisa trazer o info-hash
+            (`xt=urn:btih:<40 caracteres hexadecimais>`)
+        title:
+          type: string
+          minLength: 1
+          description: Título da release, como devolvido pela busca
+        anilistId:
+          $ref: '#/components/schemas/AnilistId'
+
+    TorrentDownloadStatus:
+      type: string
+      description: |
+        Estado de uma release no download.
+        - `NEW`: fora do qBittorrent (removida de lá) — pode ser baixada de novo.
+        - `DOWNLOADING`: no qBittorrent, baixando na pasta de trabalho.
+        - `READY`: download concluído, arquivos movidos para a biblioteca e pasta ingerida; o
+          torrent já foi removido do qBittorrent.
+      enum:
+        - NEW
+        - DOWNLOADING
+        - READY
+
+    TorrentDownloadResponse:
+      type: object
+      description: |
+        Uma release baixada (ou baixando) pelo qBittorrent. O arquivo do episódio na pasta do anime
+        é o de nome igual ao título da release ou, se nenhum tiver, o primeiro com o mesmo número
+        de episódio.
+      required: [id, provider, infoHash, title, status, progress, anime, createdAt]
+      properties:
+        id:
+          type: integer
+          format: int32
+          description: Id do download
+        provider:
+          $ref: '#/components/schemas/TorrentProviderType'
+        infoHash:
+          type: string
+          description: Info-hash BitTorrent da release
+        title:
+          type: string
+          description: Título da release
+        episode:
+          type: integer
+          format: int32
+          nullable: true
+          description: Número do episódio extraído do título; `null` em batches e extras
+        status:
+          $ref: '#/components/schemas/TorrentDownloadStatus'
+        progress:
+          type: number
+          format: double
+          description: Fração já baixada, de `0` a `1`
+        anime:
+          $ref: '#/components/schemas/AnimeBindingSummary'
+        thumbnail:
+          type: string
+          nullable: true
+          description: |
+            Imagem 16:9 para o card do download: a imagem do episódio no TMDB, em tamanho original
+            (para cards grandes, como as Novidades na TV), quando o arquivo
+            do episódio já está na pasta do anime e pareado; senão, o banner do anime. `null` sem
+            nenhuma das duas.
+        episodeTitle:
+          type: string
+          nullable: true
+          description: Título do episódio no TMDB, quando o arquivo dele já está na pasta do anime e pareado
+        watchProgress:
+          allOf: [{ $ref: '#/components/schemas/WatchProgress' }]
+          nullable: true
+          description: >-
+            Progresso do usuário no episódio. Preenchido só na listagem com `userId`; `null` sem
+            `userId`, com o episódio ainda fora da pasta do anime ou que o usuário nunca abriu.
+        createdAt:
+          type: string
+          format: date-time
+          description: Quando o download foi pedido
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Quando o download terminou; `null` enquanto não termina
+
+    TorrentDownloadPage:
+      description: Envelope paginado de downloads
+      allOf:
+        - $ref: '#/components/schemas/Page'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/TorrentDownloadResponse'
+
+    TrackedAnimeRequest:
+      type: object
+      description: Payload de `POST /v1/torrent/tracked`
+      required: [anilistId, provider, queries, editionKey]
+      properties:
+        anilistId:
+          $ref: '#/components/schemas/AnilistId'
+        provider:
+          $ref: '#/components/schemas/TorrentProviderType'
+        queries:
+          $ref: '#/components/schemas/TrackedAnimeQueries'
+        editionKey:
+          type: string
+          minLength: 1
+          description: '`key` da `TorrentEdition` escolhida na busca dessa query'
+
+    TrackedAnimeQueriesRequest:
+      type: object
+      description: Payload de `PUT /v1/torrent/tracked/{trackedId}/queries`
+      required: [queries]
+      properties:
+        queries:
+          $ref: '#/components/schemas/TrackedAnimeQueries'
+
+    TrackedAnimeQueries:
+      type: array
+      minItems: 1
+      description: |
+        Queries de busca no provedor (ex.: o título romaji do anime e `Tokyo Revengers S04`); as
+        releases de todas são juntadas
+      items:
+        $ref: '#/components/schemas/SearchQuery'
+
+    TrackedAnimeList:
+      type: array
+      description: Animes rastreados, do mais recente para o mais antigo
+      items:
+        $ref: '#/components/schemas/TrackedAnimeResponse'
+
+    TrackedAnimeResponse:
+      type: object
+      description: Um anime rastreado num provedor de torrent
+      required: [id, anilistId, title, provider, queries, editionKey, editionLabel, createdAt]
+      properties:
+        id:
+          type: integer
+          format: int32
+          description: Id do rastreio
+        anilistId:
+          $ref: '#/components/schemas/AnilistId'
+        title:
+          type: string
+          description: Título do anime na AniList (romaji)
+        coverImage:
+          type: string
+          nullable: true
+          description: URL da capa do anime na AniList
+        provider:
+          $ref: '#/components/schemas/TorrentProviderType'
+        queries:
+          type: array
+          description: Queries de busca no provedor
+          items:
+            type: string
+        editionKey:
+          type: string
+          description: '`key` da edição rastreada'
+        editionGroup:
+          type: string
+          nullable: true
+          description: Grupo de fansub da edição rastreada; `null` sem grupo
+        editionLabel:
+          type: string
+          description: Descritores técnicos da edição rastreada (o `label` de `TorrentEdition`)
+        latestEpisode:
+          type: integer
+          format: int32
+          nullable: true
+          description: |
+            Maior episódio da edição já encontrado no provedor; episódios acima dele são baixados
+            na próxima checagem. `null` se a edição ainda não tinha episódio numerado.
+        lastCheckedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Quando a última checagem bem-sucedida terminou; `null` antes da primeira
+        lastError:
+          type: string
+          nullable: true
+          description: Erro da última checagem; `null` se ela deu certo
+        createdAt:
+          type: string
+          format: date-time
+          description: Quando o rastreio foi criado

@@ -25,7 +25,7 @@ Oferecer funções estáticas, sem injeção CDI (todas as classes são `final` 
 - Dependências entre os próprios utils: `RetryUtils` usa `ThreadUtils.sleepUninterruptibly` para a espera entre tentativas.
 
 ## Módulos relacionados
-Consumido por quase todo `domain/`: `anibridge`, `anilist`, `anime`, `cache`, `ingestion`, `mediafolder`, `mediaprobe`, `playback`, `storageprovider`, `tmdb`, `videofile` (o domínio `notification` não usa nenhum utilitário deste pacote hoje). Hoje `PaginationUtils.toSort` só é efetivamente chamado por `mediafolder`, apesar de ser desenhado como reutilizável por qualquer entidade paginada. `domain/cache/model/IntegrationCache` importa `utils/model/CacheEntry` diretamente (não só via `CacheUtils`) — relação normal, já que domínio pode depender de `utils/` livremente.
+Consumido por quase todo `domain/`: `anibridge`, `anilist`, `anime`, `cache`, `ingestion`, `mediafolder`, `mediaprobe`, `playback`, `storageprovider`, `tmdb`, `torrent` (`TmdbImageUtils`), `videofile` (o domínio `notification` não usa nenhum utilitário deste pacote hoje). Hoje `PaginationUtils.toSort` só é efetivamente chamado por `mediafolder`, apesar de ser desenhado como reutilizável por qualquer entidade paginada. `domain/cache/model/IntegrationCache` importa `utils/model/CacheEntry` diretamente (não só via `CacheUtils`) — relação normal, já que domínio pode depender de `utils/` livremente.
 
 ## Pontos de entrada
 Todos os métodos são estáticos e chamados diretamente pelo código de domínio; não há scheduler, resource ou listener neste pacote.

@@ -8,14 +8,14 @@ import java.util.List;
  *
  * @param paired arquivos pareados agora
  * @param kept arquivos que já tinham par gravado, com temporada e episódio mantidos como estão
- * @param textsUpdated arquivos que já tinham par e tiveram o nome/sinopse do episódio regravados
- *                     com o texto atual do TMDB
+ * @param episodesUpdated arquivos que já tinham par e tiveram os dados do episódio regravados
+ *                        com os atuais do TMDB
  * @param unpaired arquivos que ficaram sem par, com o motivo
  */
 public record TmdbFilePairingFill(
         Integer paired,
         Integer kept,
-        Integer textsUpdated,
+        Integer episodesUpdated,
         List<UnpairedVideoFile> unpaired
 ) {
 }

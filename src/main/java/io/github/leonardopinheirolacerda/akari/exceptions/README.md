@@ -12,6 +12,7 @@ Padronizar como falhas da aplicação se tornam respostas HTTP no formato `ApiEr
 - `ConflictException` — `409` / `CONFLICT`: o recurso que se quer criar já existe ou o estado atual impede a operação (ex.: criar franquia manual com um anime que já é raiz).
 - `IntegrationException` — `502` / `INTEGRATION_ERROR`: sistema externo (AniList, TMDB, rclone, ffprobe) falhou; duas construtoras (com e sem `cause`).
 - `IntegrationNotConfiguredException` — `503` / `INTEGRATION_NOT_CONFIGURED`: preferência obrigatória sem valor configurado.
+- `RateLimitedException` — `429` / `RATE_LIMITED`: sistema externo recusou por excesso de requisições (ex.: provedor de torrent respondendo `429`); a mensagem diz quando tentar de novo.
 - `RequestValidationException` — `400` / `VALIDATION_ERROR`: parâmetro de request mal formado ou fora do permitido (não é violação de contrato em si).
 - `ResourceNotFoundException` — `404` / `RESOURCE_NOT_FOUND`: recurso buscado não existe.
 
@@ -29,7 +30,7 @@ Padronizar como falhas da aplicação se tornam respostas HTTP no formato `ApiEr
 - **`exceptions/` (raiz) não importa nada de `exceptions/mapper/`** — confirmado: nenhum `import` de `akari.exceptions.mapper` em nenhum arquivo da raiz. O Javadoc das exceções cita os mappers (ex.: `AkariExceptionMapper`) sempre com `{@code}`, nunca `{@link}`, exatamente para não criar esse import e evitar a dependência circular. Essa é a regra de design do projeto e está corretamente seguida no código atual.
 
 ## Módulos relacionados
-Consumido por praticamente todo `domain/` — resources e services de `anibridge`, `anilist`, `anime`, `cache`, `ingestion`, `mediafolder`, `mediaprobe`, `playback`, `setting`, `storageprovider`, `tmdb` e `videofile` lançam subclasses de `AkariException` (o domínio `notification` não lança nenhuma exceção deste pacote hoje). Também é usado por `utils/` — `PaginationUtils` e `VideoFileLocationUtils` lançam `RequestValidationException`/`ResourceNotFoundException`/`IntegrationNotConfiguredException` diretamente, e `RetryUtils` captura `IntegrationException` para decidir se retenta.
+Consumido por praticamente todo `domain/` — resources e services de `anibridge`, `anilist`, `anime`, `cache`, `ingestion`, `mediafolder`, `mediaprobe`, `playback`, `setting`, `storageprovider`, `tmdb`, `torrent` e `videofile` lançam subclasses de `AkariException` (o domínio `notification` não lança nenhuma exceção deste pacote hoje). Também é usado por `utils/` — `PaginationUtils` e `VideoFileLocationUtils` lançam `RequestValidationException`/`ResourceNotFoundException`/`IntegrationNotConfiguredException` diretamente, e `RetryUtils` captura `IntegrationException` para decidir se retenta.
 
 ## Pontos de entrada
 Os mappers (`@ServerExceptionMapper`) são os pontos de entrada, acionados pelo runtime JAX-RS quando uma exceção escapa de um resource: `AkariExceptionMapper.map(AkariException)`, `ConstraintViolationExceptionMapper.map(ConstraintViolationException)`, `JsonExceptionMapper.map(JsonProcessingException)`, `UnexpectedExceptionMapper.map(Throwable)`, `WebApplicationExceptionMapper.map(WebApplicationException)`.

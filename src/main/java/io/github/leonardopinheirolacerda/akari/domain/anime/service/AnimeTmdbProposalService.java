@@ -134,7 +134,7 @@ public class AnimeTmdbProposalService {
         final Map<Integer, ResolvedEpisode> currentEpisodes = episodePairingComparisonService.findCurrentEpisodes(anime.folder.id);
 
         final List<FilePairingResolution> resolutions = switch (strategy) {
-            case ANIBRIDGE -> episodePairingResolutionService.resolve(anime, anime.folder.id, anime.folder.name);
+            case ANIBRIDGE -> episodePairingResolutionService.resolve(anime, anime.folder.id, anime.folder.name, false);
             case CONTINUITY -> episodeContinuityResolutionService.resolve(anime, currentEpisodes);
         };
 

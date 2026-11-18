@@ -44,7 +44,11 @@ AniList, cache, playback).
 - `mediaprobe` (`MediaProbeService`) — lê `getCacheDir()` para resolver o cache local de vídeo.
 - `ingestion` (`IngestionService`) — lê `isTmdbConfigured()` como precheck antes de etapas que
   dependem do TMDB.
-- `anime` (`AnimeTmdbOverridesFillService`) — idiomas do preenchimento dos overrides TMDB.
+- `anime` (`AnimeTmdbOverridesFillService`) — idiomas do preenchimento dos overrides TMDB;
+  (`AnimeTmdbFilePairingFillService`) — `tmdb.episode.refresh-window`, a janela em que o pairing
+  dos episódios recentes é refeito.
+- `torrent` (`TorrentDownloadService`) — `getTorrentLibraryProviderId()`, o provider `LOCAL` da
+  biblioteca de torrents.
 
 ## Pontos de entrada
 

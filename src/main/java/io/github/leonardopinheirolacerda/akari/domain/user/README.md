@@ -67,6 +67,7 @@ contrato, API `/v1/users`.
   `UserService.isInWatchlist` na franquia com `userId`.
   Com a dependência de `user` em `anime` (lista de títulos), forma o ciclo `anime ↔ user`,
   service a service (ver `docs/ARQUITETURA_DO_SISTEMA.md`).
+- **`torrent`** usa `UserService.findWatchProgressByFiles` na listagem de downloads com `userId`.
 
 ## Pontos de entrada
 
