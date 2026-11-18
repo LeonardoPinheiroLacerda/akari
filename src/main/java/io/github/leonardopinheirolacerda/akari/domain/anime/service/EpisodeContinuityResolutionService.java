@@ -222,7 +222,7 @@ public class EpisodeContinuityResolutionService {
 
         return episodesBySeason.computeIfAbsent(
                 seasonNumber,
-                number -> RetryUtils.withRateLimitRetry(() -> tmdbService.getSeasonEpisodes(tmdbId, number))
+                number -> RetryUtils.withRateLimitRetry(() -> tmdbService.getSeasonEpisodes(tmdbId, number, false))
         );
     }
 

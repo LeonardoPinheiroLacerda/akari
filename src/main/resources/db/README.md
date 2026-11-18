@@ -41,6 +41,8 @@ não há tabela compartilhada entre domínios além das FKs explícitas abaixo.
 | `app_user` | V23 | `user` | Perfil de usuário (só nome). Chama `app_user` porque `user` é palavra reservada no Postgres. |
 | `user_watch_history` | V23 | `user` (`WatchHistory`) | Progresso por usuário e arquivo, `UNIQUE (user_id, file_id)`; FKs em `app_user` e `video_file`, ambas `ON DELETE CASCADE`. |
 | `user_watchlist_item` | V23 | `user` (`WatchlistItem`) | Título na lista do usuário, `UNIQUE (user_id, anilist_id)`; FKs em `app_user` e `anime(anilist_id)`, ambas `ON DELETE CASCADE`. |
+| `torrent_release` | V25 | `torrent` (`TorrentRelease`) | Release enviada ao qBittorrent, `info_hash` `UNIQUE`; `status` (`NEW`/`DOWNLOADING`/`READY`) indexado; FK em `anime(anilist_id)`, `ON DELETE CASCADE`. |
+| `tracked_anime` | V26, V27 | `torrent` (`TrackedAnime`) | Rastreio de um anime numa edição, `anilist_id` `UNIQUE` e sem FK: a linha em `anime` só nasce no primeiro download. V27 troca `query` por `queries` (`JSONB`, lista). |
 
 ## Migrations de alteração (não criam tabela nova)
 
@@ -66,8 +68,13 @@ não há tabela compartilhada entre domínios além das FKs explícitas abaixo.
   `tmdb.image.backdrop-language`.
 - **V24** — insere `tmdb.episode.name-language` e `tmdb.episode.synopsis-language` (ambas `NULL`)
   em `setting`.
+- **V25** — além de criar `torrent_release`, insere `torrent.library-provider-id` (`NULL`) em
+  `setting`.
+- **V27** — troca `tracked_anime.query` por `queries` (`JSONB`): cada rastreio existente vira uma
+  lista com a query que já tinha.
+- **V28** — insere `tmdb.episode.refresh-window` (`P30D`) em `setting`.
 
-## Seed de `setting` (V3 + V10 + V17 + V21 + V24)
+## Seed de `setting` (V3 + V10 + V17 + V21 + V24 + V25 + V28)
 
 A tabela `setting` nasce com um conjunto fixo de chaves já inseridas (não é só DDL vazio):
 `cache.max-size-bytes`, `anilist.cache.ttl`, `tmdb.cache.ttl`, `tmdb.api-key` (secret, vazio),
@@ -77,7 +84,8 @@ A tabela `setting` nasce com um conjunto fixo de chaves já inseridas (não é s
 `playback.default.audio-language`, `playback.default.subtitle-language`,
 `playback.default.subtitle-forced`, (V21) `tmdb.override.title-language`,
 `tmdb.override.synopsis-language`, `tmdb.override.fallback-language` e (V24)
-`tmdb.episode.name-language`, `tmdb.episode.synopsis-language`. **Nova preferência que o código passa a
+`tmdb.episode.name-language`, `tmdb.episode.synopsis-language`, (V25)
+`torrent.library-provider-id` e (V28) `tmdb.episode.refresh-window`. **Nova preferência que o código passa a
 ler via um getter tipado de `SettingService` precisa de uma migration de seed correspondente** —
 sem isso, o valor não existe na tabela e o getter falha em runtime no primeiro uso (não no boot;
 ver observação equivalente no `README.md` de `domain/setting/`).

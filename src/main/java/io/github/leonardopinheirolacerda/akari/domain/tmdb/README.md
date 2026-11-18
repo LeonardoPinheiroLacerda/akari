@@ -37,8 +37,8 @@ internamente por outros domínios (chamada direta ao service, sem passar por `Tm
   inexistente no TMDB ou sem episódios vira lista vazia. Usado pelas estratégias de pairing de
   episódios, que andam pela série inteira.
 
-Todas essas operações são cache-first (TTL via preferência `tmdb.cache.ttl`); todas menos
-`getSeasonEpisodes` aceitam `forceRefresh` para ignorar o cache.
+Todas essas operações são cache-first (TTL via preferência `tmdb.cache.ttl`) e aceitam
+`forceRefresh` para ignorar o cache.
 
 ## Dependências internas e externas
 

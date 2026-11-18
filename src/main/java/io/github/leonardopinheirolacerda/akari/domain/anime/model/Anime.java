@@ -204,6 +204,33 @@ public class Anime extends PanacheEntityBase {
     }
 
     /**
+     * Busca os animes vinculados a uma série do TMDB com episódio recente na pasta: um arquivo
+     * pareado a um episódio que foi ao ar a partir de {@code since}, ou um arquivo sem pairing
+     * que chegou a partir dele. Já traz a pasta de cada um.
+     *
+     * @param since início da janela; a data de exibição é comparada pelo dia
+     *              ({@code yyyy-MM-dd}, o formato gravado do TMDB)
+     * @return os animes com episódio recente
+     */
+    public static List<Anime> findWithRecentEpisodes(OffsetDateTime since) {
+        return Anime
+                .find("select anime from Anime anime"
+                                + " join fetch anime.folder folder"
+                                + " where anime.tmdbMediaType = ?1"
+                                + " and folder.id in ("
+                                + "   select videoFile.folder.id from VideoFile videoFile"
+                                + "   left join TmdbFilePairing pairing on pairing.fileId = videoFile.id"
+                                + "   where pairing.episodeAirDate >= ?2"
+                                + "   or (pairing.fileId is null and videoFile.createdAt >= ?3))",
+                        TmdbMediaType.TV,
+                        since
+                                .toLocalDate()
+                                .toString(),
+                        since)
+                .list();
+    }
+
+    /**
      * Dados de franquia de todos os animes da coleção, numa consulta só — base da resolução de
      * franquias ({@code FranchiseResolver}).
      *

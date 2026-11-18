@@ -336,15 +336,16 @@ public class TmdbService {
      *
      * @param seriesId id da série no TMDB
      * @param seasonNumber número da temporada
+     * @param forceRefresh se {@code true}, ignora o cache e busca de novo no TMDB
      * @return os episódios da temporada; vazio se a temporada não existir ou não tiver episódios
      * @throws IntegrationException se a chamada ao TMDB falhar por outro motivo
      */
     @Transactional
-    public List<TmdbEpisodeResponse> getSeasonEpisodes(Integer seriesId, Integer seasonNumber) {
+    public List<TmdbEpisodeResponse> getSeasonEpisodes(Integer seriesId, Integer seasonNumber, Boolean forceRefresh) {
         final TmdbSeasonResponse season;
 
         try {
-            season = getSeason(seriesId, seasonNumber, false);
+            season = getSeason(seriesId, seasonNumber, forceRefresh);
         } catch (ResourceNotFoundException e) {
             Log.warnf("Temporada %d não existe no TMDB %d, tratada como vazia", seasonNumber, seriesId);
             return List.of();

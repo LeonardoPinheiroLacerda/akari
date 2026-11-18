@@ -289,6 +289,13 @@ itens abaixo são backlog real (a corrigir aos poucos), exceto onde indicado "Ac
     mudar a regex muda o agrupamento e faz os rastreios gravados deixarem de achar a edição. A
     biblioteca só pode ser `LOCAL` (`importFiles` de provider remoto não existe).
 
+13. **`anime`, pairing dos episódios recentes**: o `AnimeTmdbEpisodeRefreshScheduler` (6 h) refaz o
+    pairing inteiro de cada anime com episódio recente, com o TMDB sem cache — todas as
+    temporadas que a resolução toca são buscadas de novo (uma vez por ciclo; a regravação dos
+    dados lê o cache que a resolução acabou de atualizar), não só a do episódio novo. Em série longa
+    em exibição, são várias chamadas ao TMDB por ciclo enquanto durar a janela
+    `tmdb.episode.refresh-window`.
+
 ## Diretrizes para futuras implementações
 
 - Ao criar um domínio novo, seguir a estrutura `domain/<nome>/{model,resource,service,mapper,

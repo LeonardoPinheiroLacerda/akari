@@ -153,7 +153,8 @@ public class TmdbFilePairStepService extends IngestionStepService {
                 () -> animeTmdbFilePairingFillService.fillPairings(
                         anime.anilistId,
                         folder.id,
-                        folder.name
+                        folder.name,
+                        false
                 )
         );
 
@@ -162,7 +163,7 @@ public class TmdbFilePairStepService extends IngestionStepService {
                 Map.of(
                         "paired", fill.paired(),
                         "kept", fill.kept(),
-                        "textsUpdated", fill.textsUpdated(),
+                        "episodesUpdated", fill.episodesUpdated(),
                         "unpaired", fill.unpaired().size()
                 )
         );
@@ -203,11 +204,11 @@ public class TmdbFilePairStepService extends IngestionStepService {
             parts.add(plural(fill.kept(), "já tinha par", "já tinham par"));
         }
 
-        if (fill.textsUpdated() > 0) {
+        if (fill.episodesUpdated() > 0) {
             parts.add(plural(
-                    fill.textsUpdated(),
-                    "texto de episódio atualizado",
-                    "textos de episódio atualizados"
+                    fill.episodesUpdated(),
+                    "episódio atualizado",
+                    "episódios atualizados"
             ));
         }
 

@@ -69,6 +69,9 @@ anibridge, franquias/relações entre animes).
 5. **Pairing de arquivo com episódio** (`AnimeTmdbFilePairing`) → cada `VideoFile` de uma pasta
    vinculada é associado a uma temporada/episódio do TMDB (com apoio do `anibridge` para resolver
    numeração absoluta↔temporada, quando aplicável), permitindo gerar thumbnail por episódio.
+   Nos animes com episódio recente (na janela `tmdb.episode.refresh-window`), o pairing é refeito a
+   cada 6 horas com o TMDB sem cache: pareia o arquivo que chegou antes de o episódio existir no
+   TMDB e completa miniatura, nome e sinopse quando o TMDB os publica.
 6. **Listagem de episódios pronta pra tela** (`AnimeEpisodes`) → resolve a pasta vinculada ao
    anime e pagina os arquivos de vídeo dela em ordem natural pelo nome do arquivo (número de
    episódio extraído pela mesma heurística da resolução do pairing), já com o pareamento TMDB
@@ -134,7 +137,8 @@ anibridge, franquias/relações entre animes).
   downloads).
 - **Processos automáticos internos do próprio backend** (schedulers): processam a fila de cache,
   encerram sessões de playback ociosas, sincronizam o dataset do `anibridge`, acompanham os
-  downloads do qBittorrent, checam os animes rastreados em torrent, entre outros —
+  downloads do qBittorrent, checam os animes rastreados em torrent, refazem o pairing TMDB dos
+  episódios recentes, entre outros —
   atuam como "atores" não-humanos que mantêm o sistema consistente sem intervenção do admin.
 
 ## Funcionalidades centrais
@@ -146,7 +150,8 @@ anibridge, franquias/relações entre animes).
 - Transcode sob demanda para HLS com seleção de perfil, seek e heartbeat de sessão.
 - Busca paginada cache-first em AniList e TMDB.
 - Binding, sincronização e curadoria de metadata de anime (AniList + TMDB), incluindo relações
-  entre animes e pairing de arquivo↔episódio.
+  entre animes e pairing de arquivo↔episódio. O pairing dos episódios recentes é refeito a cada
+  6 horas, porque o TMDB cadastra e completa episódios novos dias depois da exibição.
 - Listagem de episódios pronta pra tela, paginada e em ordem natural — o cliente não combina
   chamadas nem reordena.
 - Preferências administrativas chave/valor, com suporte a valores secretos.

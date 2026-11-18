@@ -224,6 +224,17 @@ public class SettingService {
     }
 
     /**
+     * Lê a preferência {@code tmdb.episode.refresh-window}.
+     *
+     * @return por quanto tempo o pairing TMDB de um episódio recente continua sendo refeito:
+     *         desde a data de exibição, se pareado, ou desde a chegada do arquivo, se sem par
+     * @throws ResourceNotFoundException se a preferência não existir
+     */
+    public Duration getTmdbEpisodeRefreshWindow() {
+        return Duration.parse(findOrThrow("tmdb.episode.refresh-window").value);
+    }
+
+    /**
      * Lê a preferência {@code tmdb.include-adult}.
      *
      * @return {@code true} se buscas no TMDB devem incluir conteúdo adulto
